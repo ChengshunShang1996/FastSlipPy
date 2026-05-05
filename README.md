@@ -1,7 +1,7 @@
-# FastSlipPy
+# FastSlipPy: Induced Seismic Fault Slip Modeling
 
 
-<p align=center><img height="90.0%" width="90.0%" src="docs/images/logo.png"></p>
+<p align=center><img height="80.0%" width="80.0%" src="docs/images/logo.png"></p>
 
 ![Release][release-image] 
 ![License][license-image]
@@ -88,8 +88,7 @@ To cite this repository, you can use the metadata from [this file][citation_link
 <sup>1</sup> Utrecht University ([UU][uu_website])
 
 <p float="left">
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-<img src="./docs/images/cimne_logo.png" height="100"/>
+<img src="./docs/images/uu.png" height="100"/>
 </p>
 
 ## License
