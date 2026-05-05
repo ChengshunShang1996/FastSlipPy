@@ -116,6 +116,7 @@ class Grid:
     """
 
     def __init__(self, p: ModelParameters):
+        
         self.p = p
         self.sina = np.sin(np.deg2rad(p.alpha))
         self.cosa = np.cos(np.deg2rad(p.alpha))
@@ -160,7 +161,9 @@ class Grid:
         fig, ax = plt.subplots()
         ax.plot(X, Y, 'k', linewidth=0.4)
         ax.plot(X.T, Y.T, 'k', linewidth=0.4)
-        
+        ax.set_xlim(-500, 2500)
+        ax.set_ylim(1800, 3800)
+
         y_line = self.y + 2000
         x_line = np.zeros_like(self.y)   # fault 在 x = 0
         X_fault = y_line * self.cosa + x_line
@@ -1069,7 +1072,7 @@ class FaultSlipModel:
         ratio = tau / (sigma + 1e-12)
 
         plt.figure(figsize=(6, 4))
-        plt.plot(ratio, grid.y, lw=2)
+        plt.plot(ratio, grid.y+2000, lw=2)
         plt.gca().invert_yaxis()
         plt.xlabel(r"$\tau / \sigma_n$")
         plt.ylabel("Depth [m]")
@@ -1139,10 +1142,10 @@ class FaultSlipModel:
 if __name__ == "__main__":
     # Customise parameters here or leave all defaults
     params = ModelParameters(
-        Nx=21, Ny=21,
+        Nx=51, Ny=51,
         Nt=1000,
         output_interval=10,
-        checkpoint_interval=100,
+        checkpoint_interval=1000,
     )
 
     model = FaultSlipModel(params=params, output_dir="output")
