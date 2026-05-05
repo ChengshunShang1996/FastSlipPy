@@ -1,14 +1,15 @@
-"""
-fault_slip_model.py
-===================
-Python / OOP rewrite of Main_integrate.m
-Seismo-thermomechanical numerical model with:
-  - fluid pressure
-  - reservoir setup + gravity
-  - boundary conditions with total stress continuity
-  - flash heating
-  - adjustable dP/dt
+#/////////////////////////////////////////////////
+__author__      = "Chengshun Shang (Utrecht University)"
+__copyright__   = "Copyright (C) 2026-present by Chengshun Shang"
+__version__     = "0.0.1"
+__maintainer__  = "Chengshun Shang"
+__email__       = "c.shang@uu.nl"
+__status__      = "development"
+__date__        = "May 5, 2026"
+__license__     = "MIT License"
+#/////////////////////////////////////////////////
 
+"""
 Classes
 -------
 ModelParameters   – all physical / numerical input parameters
@@ -26,8 +27,14 @@ Usage
     model.run()
 """
 
+import os
+import json
+import sys
 import time
 import numpy as np
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
+
 from scipy import sparse
 from scipy.sparse.linalg import factorized
 from scipy.optimize import brentq
@@ -35,7 +42,6 @@ import matplotlib.pyplot as plt
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
-
 
 # ─────────────────────────────────────────────────────────────
 # 1.  Model Parameters
@@ -138,16 +144,12 @@ class Grid:
 
         # Rotated coordinate helpers (kept for post-processing / plotting)
         self.Xuy  = self.y[:, None] * self.cosa + self.xp[None, :]
-        #self.Yuy  = self.y[:, None] * self.sina
-        self.Yuy  = np.repeat(self.y[:, None] * self.sina, len(self.xp), axis=1)
+        self.Yuy  = self.y[:, None] * self.sina + 0 * self.xp[None, :]
         self.Xux  = self.yp[:, None] * self.cosa + self.x[None, :]
-        #self.Yux  = self.yp[:, None] * self.sina
         self.Yux  = self.yp[:, None] * self.sina + 0 * self.x[None, :]
         self.Xtau = self.y[:, None] * self.cosa + self.x[None, :]
-        #self.Ytau = self.y[:, None] * self.sina
         self.Ytau = self.y[:, None] * self.sina + 0 * self.x[None, :]
         self.Xsigma = self.yp[1:Ny, None] * self.cosa + self.xp[None, 1:Nx]
-        #self.Ysigma = self.yp[1:Ny, None] * self.sina
         self.Ysigma = self.yp[1:Ny, None] * self.sina + 0 * self.xp[None, 1:Nx]
 
         # Total DOF count
@@ -1142,7 +1144,7 @@ class FaultSlipModel:
 if __name__ == "__main__":
     # Customise parameters here or leave all defaults
     params = ModelParameters(
-        Nx=51, Ny=51,
+        Nx=21, Ny=21,
         Nt=1000,
         output_interval=10,
         checkpoint_interval=1000,
