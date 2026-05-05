@@ -1,0 +1,14 @@
+cff-version: 0.0.1
+message: "If you use this software, please cite it using these metadata."
+title: "FastSlipPy"
+type: software
+authors:
+  - family-names: Shang
+    given-names: Chengshun
+version: 0.0.1
+date-released: "2026-05-05"
+identifiers:
+  - type: doi
+    value: ***
+license: MIT License
+repository-code: "https://github.com/ChengshunShang1996/FastSlipPy"
