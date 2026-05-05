@@ -20,7 +20,7 @@
 
 Dynamic fault slip modeling software in induced seismicity. This code aims to ...
 
-The initial version of this software is based on the open-source code [IndnUC][IndnUC_link].
+The initial version of this software is based on the open-source code [IndNuc][IndNuc_link].
 
 
 ## Table of Contents
@@ -113,4 +113,4 @@ No liability and warranty are provided.
 [examples_link]:        ./example/
 [DEMGen_framework_main]: ./src/DEMGen_framework_main.py
 [src_folder]:           .src/ 
-[IndnUC_link]:          https://github.com/USustSub/IndNuc 
+[IndNuc_link]:          https://github.com/USustSub/IndNuc 
