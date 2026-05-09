@@ -42,6 +42,7 @@ import matplotlib.pyplot as plt
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+from scipy.optimize import root_scalar
 
 # ─────────────────────────────────────────────────────────────
 # 1.  Model Parameters
@@ -84,9 +85,9 @@ class ModelParameters:
     # --- Time stepping ---
     Nt: int = 1000               # Number of time steps
     dt_init: float = 1.0        # Initial time step [s]
-    dt_max: float = 1e6         # Maximum time step [s]
-    tload: Optional[float] = None  # Time to apply pressure rate change [s]
-                                   # None → computed as 1000 yr
+    dt_max: float = 1e5         # Maximum time step [s]
+    yr = 365 * 24 * 3600.0     # Seconds in a year
+    tload: float = 1000.0 * yr  # Time to apply pressure rate change [s]
 
     # --- Pressure rate ---
     dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]
@@ -102,12 +103,12 @@ class ModelParameters:
     eta: float = field(init=False)   # Radiation damping coefficient
 
     def __post_init__(self):
-        yr = 365 * 24 * 3600
+        
         self.G = self.rho * self.cs ** 2
         self.lam = 2 * self.G * (1 + self.nu) / 3 / (1 - 2 * self.nu) - 2 / 3 * self.G
         self.eta = self.G / 2 / self.cs
-        if self.tload is None:
-            self.tload = 1000 * yr
+        #if self.tload is None:
+        #    self.tload = 1000 * yr
         assert self.Nx % 2 == 1, "Nx must be odd (fault at centre column)."
         assert self.Ny % 2 == 1, "Ny must be odd."
 
@@ -247,11 +248,11 @@ class FrictionalZones:
     # These are absolute depths [m from surface].  ysize is subtracted to
     # convert to the model's coordinate system where y=0 is the top.
     LAYERS = {
-        "Rocksalt":   {"top": 2000, "bot": 2730, "a": 0.00447,  "b": -0.00590},
-        "BasalZech":  {"top": 2730, "bot": 2780, "a": 0.06895,  "b":  0.07209},
-        "TenBoer":    {"top": 2780, "bot": 2850, "a": 0.00305,  "b": -0.00093},
-        "Sandstone":  {"top": 2850, "bot": 3050, "a": 0.04065,  "b":  0.03796},
-        "Carbonif":   {"top": 3050, "bot": 4000, "a": 0.02538,  "b":  0.02347},
+        "Rocksalt":   {"top": 2000, "bot": 2730, "a": 0.00447,  "b": -0.00590}, # Zechstein rocksalt (halite)
+        "BasalZech":  {"top": 2730, "bot": 2780, "a": 0.06895,  "b":  0.07209}, # Basal zechstein
+        "TenBoer":    {"top": 2780, "bot": 2850, "a": 0.00305,  "b": -0.00093}, # Ten Boer
+        "Sandstone":  {"top": 2850, "bot": 3050, "a": 0.04065,  "b":  0.03796}, # Slochteren Sandstone
+        "Carbonif":   {"top": 3050, "bot": 4000, "a": 0.02538,  "b":  0.02347}, # Carboniferous member
     }
 
     def __init__(self, p: ModelParameters, y: np.ndarray):
@@ -270,17 +271,34 @@ class FrictionalZones:
         a = np.zeros_like(y)
         b = np.zeros_like(y)
 
-        for name, layer in self.LAYERS.items():
+        layers = list(self.LAYERS.items())
+
+        for i, (name, layer) in enumerate(layers):
+
             # Convert absolute depth [m] to model y-coordinate
             top_y = layer["top"] - p.ysize
             bot_y = layer["bot"] - p.ysize
-            mask = (y > top_y) & (y <= bot_y)
+
+            # First layer
+            if i == 0:
+                mask = y <= bot_y
+
+            # Last layer
+            elif i == len(layers) - 1:
+                mask = y > top_y
+
+            # Middle layers
+            else:
+                mask = (y > top_y) & (y <= bot_y)
+
             a[mask] = layer["a"]
             b[mask] = layer["b"]
 
         # Fill any unassigned nodes with homogeneous defaults
-        a[a == 0] = p.a0
-        b[b == 0] = p.b0
+        # THIS SHOULD NOT HAPPEN IF LAYERS COVER THE ENTIRE DEPTH RANGE
+        #a[a == 0] = p.a0
+        #b[b == 0] = p.b0
+
         return a, b
 
 
@@ -374,7 +392,8 @@ class FaultState:
         p = self.p
         for iy in range(p.Ny):
             rhs = tauqs_col[iy] + stress.tau0[iy]
-            a_i = fric.a[iy];  b_i = fric.b[iy]
+            a_i = fric.a[iy];  
+            b_i = fric.b[iy]
             th  = self.theta[iy]
             sig = self.sigma[iy]
 
@@ -384,11 +403,77 @@ class FaultState:
                 flash    = 1 + p.L / p.Vw / th
                 return friction / flash + p.eta * VV - rhs
 
-            # Guard against sign errors in the bracket
             try:
-                self.V[iy] = brentq(equation, 1e-40, 1e10, xtol=1e-12)
-            except ValueError:
-                pass   # keep previous V if bracketing fails
+
+                # ---------- robust equation ----------
+                def safe_equation(VV):
+
+                    VV = max(VV, 1e-40)
+
+                    arg = (
+                        p.mu0
+                        + b_i * np.log(p.V0 * th / p.L)
+                    ) / a_i
+
+                    # prevent overflow
+                    arg = np.clip(arg, -100, 100)
+
+                    friction = (
+                        sig * a_i *
+                        np.arcsinh(
+                            VV / (2 * p.V0) * np.exp(arg)
+                        )
+                    )
+
+                    flash = 1 + p.L / p.Vw / th
+
+                    return friction / flash + p.eta * VV - rhs
+
+                # ---------- adaptive bracket ----------
+                lower = 1e-40
+
+                upper = max(self.V[iy] * 10.0, 1e-6)
+
+                f_lower = safe_equation(lower)
+                f_upper = safe_equation(upper)
+
+                expand_count = 0
+
+                while f_lower * f_upper > 0 and expand_count < 50:
+
+                    upper *= 10.0
+                    f_upper = safe_equation(upper)
+
+                    expand_count += 1
+
+                if f_lower * f_upper > 0:
+
+                    print(
+                        f"Failed to bracket root at iy={iy}, "
+                        f"f(lower)={f_lower:.3e}, "
+                        f"f(upper)={f_upper:.3e}"
+                    )
+
+                else:
+
+                    # ---------- robust solver ----------
+                    sol = root_scalar(
+                        safe_equation,
+                        bracket=[lower, upper],
+                        method='toms748',
+                        xtol=1e-14,
+                        rtol=1e-12,
+                        maxiter=200
+                    )
+
+                    self.V[iy] = sol.root
+
+                    if not sol.converged:
+                        print(f"Solver did not converge at iy={iy}")
+
+            except Exception as e:
+
+                print(f"Root solve failed at iy={iy}: {e}")
 
         self.V = np.maximum(self.V, 1e-40)
         self.V[0]  = self.V[1]
@@ -401,6 +486,7 @@ class FaultState:
         self.theta = self.theta + dt * (1 - self.V * self.theta / p.L)
         self.tau   = tauqs_col + stress.tau0 - p.eta * self.V
         self.U     = self.U + dt * self.V
+        #print(self.U)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -408,16 +494,20 @@ class FaultState:
 # ─────────────────────────────────────────────────────────────
 
 def build_ksi(p: ModelParameters, fric: FrictionalZones,
-              sigman0: np.ndarray) -> np.ndarray:
+              sigman0: np.ndarray, dy: float) -> np.ndarray:
     """
     Stability factor ksi used for adaptive time stepping:
-        ksi_i = (b - a) * σ / (G/2cs * L)   (simplified form from MATLAB)
-    Returns array of shape (Ny,).
     """
-    a, b = fric.a, fric.b
-    ksi = np.abs((b - a) * sigman0 / (p.G / 2 / p.cs)) / p.L
-    # Clamp to [1e-150, inf] to avoid division by zero
-    ksi = np.where(ksi < 1e-150, 1e-150, ksi)
+    a = fric.a
+    b = fric.b
+
+    k1 = (np.pi / 4.0) * p.G / dy * p.L / a / sigman0
+    k2 = (b - a) / a
+    k3 = (k1 - k2)**2 / 4.0 - k1
+    k4 = np.minimum(1.0 / (k1 - k2), 0.2)
+    k5 = np.minimum(1.0 - k2 / k1, 0.2)
+    ksi = np.where(k3 > 0, k4, k5)
+
     return ksi
 
 
@@ -859,7 +949,7 @@ class FaultSlipModel:
         # Fault state
         self.fault  = FaultState(self.p, self.stress, self.fric)
         # ksi for adaptive dt
-        self.ksi    = build_ksi(self.p, self.fric, self.stress.sigman0)
+        self.ksi    = build_ksi(self.p, self.fric, self.stress.sigman0, self.grid.dy)
 
         # Displacement / velocity fields
         p  = self.p
@@ -929,6 +1019,8 @@ class FaultSlipModel:
             mid = Nx // 2
             self.fault.solve_slip_rate(self.tauqs[:, mid],
                                        self.stress, self.fric)
+            
+            print(self.fault.V)
 
             # ── adaptive time step ──
             V_inner = self.fault.V[1: Ny - 1]
@@ -1073,11 +1165,13 @@ class FaultSlipModel:
         sigma = om.sigmam[:, it]
         ratio = tau / (sigma + 1e-12)
 
-        plt.figure(figsize=(6, 4))
-        plt.plot(ratio, grid.y+2000, lw=2)
-        plt.gca().invert_yaxis()
+        plt.figure(figsize=(8, 5))
+        plt.plot(grid.y+2000, ratio, 'o-', lw=1)
+        #plt.gca().invert_yaxis()
         plt.xlabel(r"$\tau / \sigma_n$")
         plt.ylabel("Depth [m]")
+        #plt.ylim(0.3, 0.35)
+        #plt.xlim(2000, 4000)
         plt.title("Ratio shear / normal stress")
         plt.grid(True)
         plt.tight_layout()
@@ -1097,12 +1191,12 @@ class FaultSlipModel:
         # ─────────────────────────────────────────────
         fig, axes = plt.subplots(2, 2, figsize=(12, 8))
 
-        # --- uy / vy ---
+        # --- ux / vx ---
         im = axes[0, 0].pcolormesh(
-            grid.Xuy, grid.Yuy, uy,
+            grid.Xux, grid.Yux, vx,
             shading='auto'
         )
-        axes[0, 0].set_title("Uy displacement")
+        axes[0, 0].set_title("Ux displacement")
         fig.colorbar(im, ax=axes[0, 0])
 
         # --- tauqs ---
@@ -1113,12 +1207,12 @@ class FaultSlipModel:
         axes[0, 1].set_title("Shear stress τqs")
         fig.colorbar(im, ax=axes[0, 1])
 
-        # --- ux ---
+        # --- uy ---
         im = axes[1, 0].pcolormesh(
-            grid.Xux, grid.Yux, ux,
+            grid.Xuy, grid.Yuy, vy,
             shading='auto'
         )
-        axes[1, 0].set_title("Ux displacement")
+        axes[1, 0].set_title("Uy displacement")
         fig.colorbar(im, ax=axes[1, 0])
 
         # --- sigmaqs ---
