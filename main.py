@@ -85,9 +85,9 @@ class ModelParameters:
     # --- Time stepping ---
     Nt: int = 1000               # Number of time steps
     dt_init: float = 1.0        # Initial time step [s]
-    dt_max: float = 1e5         # Maximum time step [s]
+    dt_max: float = 1e6         # Maximum time step [s]
     yr = 365 * 24 * 3600.0     # Seconds in a year
-    tload: float = 1000.0 * yr  # Time to apply pressure rate change [s]
+    tload: float = 100.0 * yr  # Time to apply pressure rate change [s]
 
     # --- Pressure rate ---
     dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]
@@ -381,99 +381,83 @@ class FaultState:
 
     # ------------------------------------------------------------------
     def solve_slip_rate(self, tauqs_col: np.ndarray, stress: StressState,
-                        fric: FrictionalZones):
+                    fric: FrictionalZones):
         """
         Solve for V at each fault node using the rate-and-state friction law
-        (with flash heating):
+        with flash heating:
 
-            σ · a · asinh[ V/(2V₀) · exp((μ₀ + b·ln(V₀θ/L))/a) ]
+            σ · a · arcsinh[ V/(2V₀) · exp((μ₀ + b·ln(V₀θ/L))/a) ]
                 / (1 + L/(Vw·θ))   +   η·V   =   τ_qs + τ₀
+
+        Exact equivalent of MATLAB:
+            V(iy) = fzero(@(VV) ..., V(iy))
+
+        Strategy
+        --------
+        The equation is STRICTLY MONOTONE INCREASING in V (both the arcsinh
+        friction term and η·V are non-decreasing, with η·V strictly increasing).
+        Therefore there is EXACTLY ONE root, and the bracket
+
+            lo = 1e-40,   hi = 2 · rhs / η
+
+        is GUARANTEED valid for all physically meaningful inputs:
+        • f(lo) ≈ –rhs < 0  (arcsinh(0) = 0,  η·0 = 0)
+        • f(hi) ≥ η·(2·rhs/η) – rhs = rhs > 0  (friction term ≥ 0)
+
+        brentq on this bracket is the closest Python equivalent to MATLAB's
+        fzero, which also uses Brent's method after locating a bracket from x0.
         """
         p = self.p
+
         for iy in range(p.Ny):
             rhs = tauqs_col[iy] + stress.tau0[iy]
-            a_i = fric.a[iy];  
-            b_i = fric.b[iy]
-            th  = self.theta[iy]
-            sig = self.sigma[iy]
+
+            # rhs must be positive for a physical solution to exist.
+            # (Both tauqs and tau0 are positive driving stresses.)
+            if rhs <= 0:
+                # No positive-V root exists; keep previous value.
+                continue
+
+            a_i  = fric.a[iy]
+            b_i  = fric.b[iy]
+            th   = self.theta[iy]
+            sig  = self.sigma[iy]
+
+            # Precompute constants for this node (same for every function eval)
+            arg         = np.clip((p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i,
+                                -500.0, 500.0)
+            flash_denom = 1.0 + p.L / (p.Vw * th)
+
+            print(f"[iy={iy}] tauqs={tauqs_col[iy]:.6e} tau0={stress.tau0[iy]:.6e}  a={a_i:.6e}  b={b_i:.6e}  th={th:.6e}  sig={sig:.6e} mu={p.mu0:.6e}  V0={p.V0:.6e} L={p.L:.6e}  Vw={p.Vw:.6e} eta={p.eta:.6e}")
 
             def equation(VV):
-                arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
-                friction = sig * a_i * np.arcsinh(VV / (2 * p.V0) * np.exp(arg))
-                flash    = 1 + p.L / p.Vw / th
-                return friction / flash + p.eta * VV - rhs
+                friction = sig * a_i * np.arcsinh(VV / (2.0 * p.V0) * np.exp(arg))
+                return friction / flash_denom + p.eta * VV - rhs
 
+            # Analytically guaranteed bracket — no search loop needed.
+            lo = 1e-40
+            hi = 2.0 * rhs / p.eta   # f(hi) >= rhs > 0  always
+
+            print(f"[iy={iy}] V={self.V[iy]:.6e}")
+            
             try:
-
-                # ---------- robust equation ----------
-                def safe_equation(VV):
-
-                    VV = max(VV, 1e-40)
-
-                    arg = (
-                        p.mu0
-                        + b_i * np.log(p.V0 * th / p.L)
-                    ) / a_i
-
-                    # prevent overflow
-                    arg = np.clip(arg, -100, 100)
-
-                    friction = (
-                        sig * a_i *
-                        np.arcsinh(
-                            VV / (2 * p.V0) * np.exp(arg)
+                #sol = brentq(equation, lo, hi, xtol=1e-14, rtol=1e-12, maxiter=200)
+                sol = brentq(
+                            equation,
+                            lo,
+                            hi,
+                            xtol=1e-300,
+                            rtol=1e-15,
+                            maxiter=1000
                         )
-                    )
-
-                    flash = 1 + p.L / p.Vw / th
-
-                    return friction / flash + p.eta * VV - rhs
-
-                # ---------- adaptive bracket ----------
-                lower = 1e-40
-
-                upper = max(self.V[iy] * 10.0, 1e-6)
-
-                f_lower = safe_equation(lower)
-                f_upper = safe_equation(upper)
-
-                expand_count = 0
-
-                while f_lower * f_upper > 0 and expand_count < 50:
-
-                    upper *= 10.0
-                    f_upper = safe_equation(upper)
-
-                    expand_count += 1
-
-                if f_lower * f_upper > 0:
-
-                    print(
-                        f"Failed to bracket root at iy={iy}, "
-                        f"f(lower)={f_lower:.3e}, "
-                        f"f(upper)={f_upper:.3e}"
-                    )
-
-                else:
-
-                    # ---------- robust solver ----------
-                    sol = root_scalar(
-                        safe_equation,
-                        bracket=[lower, upper],
-                        method='toms748',
-                        xtol=1e-14,
-                        rtol=1e-12,
-                        maxiter=200
-                    )
-
-                    self.V[iy] = sol.root
-
-                    if not sol.converged:
-                        print(f"Solver did not converge at iy={iy}")
-
+                self.V[iy] = sol
             except Exception as e:
+                print(f"[iy={iy}] brentq failed: {e}  "
+                    f"f(lo)={equation(lo):.3e}  f(hi)={equation(hi):.3e}")
+                # Keep previous V[iy]
 
-                print(f"Root solve failed at iy={iy}: {e}")
+            print(f"[iy={iy}] V={self.V[iy]:.6e}")
+            print(f"*************")
 
         self.V = np.maximum(self.V, 1e-40)
         self.V[0]  = self.V[1]
@@ -1168,11 +1152,16 @@ class FaultSlipModel:
         plt.figure(figsize=(8, 5))
         plt.plot(grid.y+2000, ratio, 'o-', lw=1)
         #plt.gca().invert_yaxis()
-        plt.xlabel(r"$\tau / \sigma_n$")
-        plt.ylabel("Depth [m]")
+        plt.ylabel(r"$\tau / \sigma_n$")
+        plt.xlabel("Depth [m]")
         #plt.ylim(0.3, 0.35)
         #plt.xlim(2000, 4000)
         plt.title("Ratio shear / normal stress")
+        plt.grid(True)
+        plt.tight_layout()
+
+        plt.figure(figsize=(8, 5))
+        plt.plot(grid.y+2000, om.Vm, 'o-', lw=1)
         plt.grid(True)
         plt.tight_layout()
 
