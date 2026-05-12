@@ -60,8 +60,8 @@ class ModelParameters:
     # --- Grid ---
     xsize: float = 2000.0        # Horizontal model size [m]
     ysize: float = 2000.0        # Vertical model size [m]
-    Nx: int = 101                # Horizontal grid points  (must be odd)
-    Ny: int = 101                # Vertical grid points    (must be odd)
+    Nx: int = 21                # Horizontal grid points  (must be odd)
+    Ny: int = 21                # Vertical grid points    (must be odd)
 
     # --- Material ---
     rho: float = 2400.0          # Rock density [kg/m³]
@@ -83,15 +83,15 @@ class ModelParameters:
     Vi: float = 1e-30            # Initial/background slip rate [m/s]
 
     # --- Time stepping ---
-    Nt: int = 1000               # Number of time steps
+    Nt: int = 20               # Number of time steps
     dt_init: float = 1.0        # Initial time step [s]
     dt_max: float = 1e6         # Maximum time step [s]
     yr = 365 * 24 * 3600.0     # Seconds in a year
-    tload: float = 100.0 * yr  # Time to apply pressure rate change [s]
+    tload: float = 10.0 * yr  # Time to apply pressure rate change [s]
 
     # --- Pressure rate ---
     dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]
-    dPdt_post: float = -0.0127  # Pressure rate after depletion starts [Pa/s]
+    dPdt_post: float = 0.0 #-0.0127  # Pressure rate after depletion starts [Pa/s]
 
     # --- Output intervals ---
     output_interval: int = 10
@@ -320,6 +320,54 @@ class StressState:
         self.Pr = self.Pr0.copy()
         self.P  = np.where(y < 1000, self.Pl, self.Pr)
 
+        #TODO: will be removed after testing        
+        fig, axes = plt.subplots(1, 4, figsize=(14, 5))
+        lw = 2
+        # --------------------------------------------------
+        # Effective normal stress
+        # --------------------------------------------------
+        axes[0].plot(self.sigman0 / 1e6, y, linewidth=lw)
+        axes[0].invert_yaxis()
+        axes[0].set_xlabel(r'$\sigma_n$ (MPa)')
+        axes[0].set_ylabel('Depth (m)')
+        axes[0].set_title('Effective Normal Stress')
+        axes[0].set_xlim(10, 25)
+        axes[0].set_ylim(2000, 0)
+        axes[0].grid(True)
+        # --------------------------------------------------
+        # Shear stress
+        # --------------------------------------------------
+        axes[1].plot(self.tau0 / 1e6, y, linewidth=lw)
+        axes[1].invert_yaxis()
+        axes[1].set_xlabel(r'$\tau$ (MPa)')
+        axes[1].set_title('Shear Stress')
+        axes[1].set_ylim(2000, 0)
+        axes[1].grid(True)
+        # --------------------------------------------------
+        # Left pore pressure
+        # --------------------------------------------------
+        axes[2].plot(self.Pl0 / 1e6, y, linewidth=lw)
+        axes[2].invert_yaxis()
+        axes[2].set_xlabel(r'$P_l$ (MPa)')
+        axes[2].set_title('Left Pore Pressure')
+        axes[2].set_ylim(2000, 0)
+        axes[2].set_xlim(20, 50)
+        axes[2].grid(True)
+        # --------------------------------------------------
+        # Right pore pressure
+        # --------------------------------------------------
+        axes[3].plot(self.Pr0 / 1e6, y, linewidth=lw)
+        axes[3].invert_yaxis()
+        axes[3].set_xlabel(r'$P_r$ (MPa)')
+        axes[3].set_title('Right Pore Pressure')
+        axes[3].set_ylim(2000, 0)
+        axes[3].set_xlim(20, 50)
+        axes[3].grid(True)
+        # --------------------------------------------------
+        plt.suptitle('Initial Stress and Pressure Profiles')
+        plt.tight_layout()
+        plt.show()
+
     # ------------------------------------------------------------------
     def _initial_stress(self):
         p, y = self.p, self.y
@@ -428,7 +476,7 @@ class FaultState:
                                 -500.0, 500.0)
             flash_denom = 1.0 + p.L / (p.Vw * th)
 
-            print(f"[iy={iy}] tauqs={tauqs_col[iy]:.6e} tau0={stress.tau0[iy]:.6e}  a={a_i:.6e}  b={b_i:.6e}  th={th:.6e}  sig={sig:.6e} mu={p.mu0:.6e}  V0={p.V0:.6e} L={p.L:.6e}  Vw={p.Vw:.6e} eta={p.eta:.6e}")
+            #print(f"[iy={iy}] tauqs={tauqs_col[iy]:.6e} tau0={stress.tau0[iy]:.6e}  a={a_i:.6e}  b={b_i:.6e}  th={th:.6e}  sig={sig:.6e} mu={p.mu0:.6e}  V0={p.V0:.6e} L={p.L:.6e}  Vw={p.Vw:.6e} eta={p.eta:.6e}")
 
             def equation(VV):
                 friction = sig * a_i * np.arcsinh(VV / (2.0 * p.V0) * np.exp(arg))
@@ -438,7 +486,7 @@ class FaultState:
             lo = 1e-40
             hi = 2.0 * rhs / p.eta   # f(hi) >= rhs > 0  always
 
-            print(f"[iy={iy}] V={self.V[iy]:.6e}")
+            #print(f"[iy={iy}] V={self.V[iy]:.6e}")
             
             try:
                 #sol = brentq(equation, lo, hi, xtol=1e-14, rtol=1e-12, maxiter=200)
@@ -450,14 +498,14 @@ class FaultState:
                             rtol=1e-15,
                             maxiter=1000
                         )
-                self.V[iy] = sol
+                self.V[iy] = 0
             except Exception as e:
                 print(f"[iy={iy}] brentq failed: {e}  "
                     f"f(lo)={equation(lo):.3e}  f(hi)={equation(hi):.3e}")
                 # Keep previous V[iy]
 
-            print(f"[iy={iy}] V={self.V[iy]:.6e}")
-            print(f"*************")
+            #print(f"[iy={iy}] V={self.V[iy]:.6e}")
+            #print(f"*************")
 
         self.V = np.maximum(self.V, 1e-40)
         self.V[0]  = self.V[1]
@@ -470,7 +518,8 @@ class FaultState:
         self.theta = self.theta + dt * (1 - self.V * self.theta / p.L)
         self.tau   = tauqs_col + stress.tau0 - p.eta * self.V
         self.U     = self.U + dt * self.V
-        #print(self.U)
+        #print(f"self.U=[{', '.join(f'{x:.6e}' for x in self.U)}]")
+        #print('*************')
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1010,6 +1059,7 @@ class FaultSlipModel:
             V_inner = self.fault.V[1: Ny - 1]
             ksi_inner = self.ksi[1: Ny - 1]
             dt_cand = np.min(ksi_inner * p.L / V_inner)
+            #print(p.L)
             dt_cand = max(dt_cand, 1e-150)
             dt      = min(min(1.2 * dt, dt_cand), dt_max)
 
@@ -1080,6 +1130,9 @@ class FaultSlipModel:
             if phase == 2:
                 t2 += dt
 
+            # print(t)
+            # print(t2)
+
         # ── wrap up ──
         self.output.save_all()
         self.output.close()
@@ -1109,7 +1162,7 @@ class FaultSlipModel:
         # Shear stress
         ax = axes[1, 0]
         ax.contourf(tm_yr, self.grid.y, om.taum / 1e6)
-        ax.set_xlabel("Time [yr]");  ax.set_ylabel("Depth [m]")
+        ax.set_xlabel("Time [yr]");ax.set_ylabel("Depth [m]")
         ax.set_title("Shear stress τ [MPa]")
 
         # Normal stress
@@ -1185,7 +1238,7 @@ class FaultSlipModel:
             grid.Xux, grid.Yux, vx,
             shading='auto'
         )
-        axes[0, 0].set_title("Ux displacement")
+        axes[0, 0].set_title("Vx")
         fig.colorbar(im, ax=axes[0, 0])
 
         # --- tauqs ---
@@ -1193,7 +1246,7 @@ class FaultSlipModel:
             grid.Xtau, grid.Ytau, tauqs,
             shading='auto'
         )
-        axes[0, 1].set_title("Shear stress τqs")
+        axes[0, 1].set_title(r"Shear stress $\tau_{qs}$")
         fig.colorbar(im, ax=axes[0, 1])
 
         # --- uy ---
@@ -1201,7 +1254,7 @@ class FaultSlipModel:
             grid.Xuy, grid.Yuy, vy,
             shading='auto'
         )
-        axes[1, 0].set_title("Uy displacement")
+        axes[1, 0].set_title("Vy")
         fig.colorbar(im, ax=axes[1, 0])
 
         # --- sigmaqs ---
@@ -1209,7 +1262,7 @@ class FaultSlipModel:
             grid.Xsigma, grid.Ysigma, sigmaqs,
             shading='auto'
         )
-        axes[1, 1].set_title("Normal stress σqs")
+        axes[1, 1].set_title(r"Normal stress $\sigma_{qs}$")
         fig.colorbar(im, ax=axes[1, 1])
 
         for ax in axes.flat:
@@ -1226,12 +1279,15 @@ class FaultSlipModel:
 
 if __name__ == "__main__":
     # Customise parameters here or leave all defaults
+    '''
     params = ModelParameters(
         Nx=21, Ny=21,
         Nt=1000,
         output_interval=10,
         checkpoint_interval=1000,
-    )
+    )'''
+
+    params = ModelParameters()
 
     model = FaultSlipModel(params=params, output_dir="output")
     model.run()
