@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 from scipy.optimize import root_scalar
+from numba import njit
 
 # ─────────────────────────────────────────────────────────────
 # 1.  Model Parameters
@@ -60,8 +61,8 @@ class ModelParameters:
     # --- Grid ---
     xsize: float = 2000.0        # Horizontal model size [m]
     ysize: float = 2000.0        # Vertical model size [m]
-    Nx: int = 21                # Horizontal grid points  (must be odd)
-    Ny: int = 21                # Vertical grid points    (must be odd)
+    Nx: int = 501                # Horizontal grid points  (must be odd)
+    Ny: int = 501                # Vertical grid points    (must be odd)
 
     # --- Material ---
     rho: float = 2400.0          # Rock density [kg/m³]
@@ -83,7 +84,7 @@ class ModelParameters:
     Vi: float = 1e-30            # Initial/background slip rate [m/s]
 
     # --- Time stepping ---
-    Nt: int = 20               # Number of time steps
+    Nt: int = 1000               # Number of time steps
     dt_init: float = 1.0        # Initial time step [s]
     dt_max: float = 1e6         # Maximum time step [s]
     yr = 365 * 24 * 3600.0     # Seconds in a year
@@ -91,7 +92,7 @@ class ModelParameters:
 
     # --- Pressure rate ---
     dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]
-    dPdt_post: float = 0.0 #-0.0127  # Pressure rate after depletion starts [Pa/s]
+    dPdt_post: float = -0.0127  # Pressure rate after depletion starts [Pa/s]
 
     # --- Output intervals ---
     output_interval: int = 10
@@ -366,7 +367,7 @@ class StressState:
         # --------------------------------------------------
         plt.suptitle('Initial Stress and Pressure Profiles')
         plt.tight_layout()
-        plt.show()
+        #plt.show()
 
     # ------------------------------------------------------------------
     def _initial_stress(self):
@@ -428,7 +429,84 @@ class FaultState:
         self.tau   = stress.tau0 - p.eta * self.V
 
     # ------------------------------------------------------------------
-    def solve_slip_rate(self, tauqs_col: np.ndarray, stress: StressState,
+    def solve_slip_rate(self,
+                    tauqs_col: np.ndarray,
+                    stress: StressState,
+                    fric: FrictionalZones):
+
+        p = self.p
+
+        for iy in range(p.Ny):
+
+            rhs = tauqs_col[iy] + stress.tau0[iy]
+            a_i = fric.a[iy]
+            b_i = fric.b[iy]
+            th  = self.theta[iy]
+            sig = self.sigma[iy]
+
+            # arg = np.clip(
+            #     (p.mu0 + b_i*np.log(p.V0*th/p.L))/a_i,
+            #     -500.0,
+            #     500.0
+            # )
+
+            arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
+
+            flash_denom = 1.0 + p.L/(p.Vw*th)
+
+            exp_arg = np.exp(arg)
+
+            # -----------------------------------------
+            # monotone friction equation
+            # -----------------------------------------
+
+            def equation(VV):
+                friction = (sig * a_i * np.arcsinh(VV/(2.0*p.V0) * exp_arg))
+                return friction/flash_denom + p.eta*VV - rhs
+
+            # guaranteed bracket
+            lo = 1e-40
+
+            #hi = max(2.0 * rhs / p.eta, float(np.max(self.V))) 
+            hi = np.max(self.V) 
+
+            try:
+
+                sol = log_bisection(
+                    equation,
+                    lo,
+                    hi,
+                    tol_log=1e-14,
+                    tol_f=5,
+                    maxiter=200
+                )
+
+                # sol = bisection(
+                #     equation,
+                #     lo,
+                #     hi,
+                #     target=0.0,
+                #     tolX=0.0,
+                #     tolFun=5,
+                #     maxiter=5000)
+
+                if np.isfinite(sol):
+                    self.V[iy] = sol
+
+            except Exception as e:
+
+                print(
+                    f"[iy={iy}] solver failed: {e} "
+                    f"f(lo)={equation(lo):.3e} "
+                    f"f(hi)={equation(hi):.3e}"
+                )
+
+        self.V = np.maximum(self.V, 1e-40)
+
+        self.V[0]  = self.V[1]
+        self.V[-1] = self.V[-2]
+
+    def solve_slip_rate1(self, tauqs_col: np.ndarray, stress: StressState,
                     fric: FrictionalZones):
         """
         Solve for V at each fault node using the rate-and-state friction law
@@ -485,6 +563,7 @@ class FaultState:
             # Analytically guaranteed bracket — no search loop needed.
             lo = 1e-40
             hi = 2.0 * rhs / p.eta   # f(hi) >= rhs > 0  always
+            #hi = max(self.V)
 
             #print(f"[iy={iy}] V={self.V[iy]:.6e}")
             
@@ -498,7 +577,7 @@ class FaultState:
                             rtol=1e-15,
                             maxiter=1000
                         )
-                self.V[iy] = 0
+                self.V[iy] = sol
             except Exception as e:
                 print(f"[iy={iy}] brentq failed: {e}  "
                     f"f(lo)={equation(lo):.3e}  f(hi)={equation(hi):.3e}")
@@ -949,7 +1028,149 @@ def compute_stress_fields(uy, ux, dx, dy, lam, G, cosa, sina, Ny, Nx):
 
     return tauqs, sigmaqs
 
+def log_bisection(func,
+                  lo,
+                  hi,
+                  tol_log=1e-14,
+                  tol_f=1e-12,
+                  maxiter=200):
+    """
+    Robust log-space bisection solver.
 
+    Solves:
+        func(V) = 0
+
+    using:
+        x = log(V)
+
+    Extremely stable for:
+        V ~ 1e-40 ... 1e+10
+    """
+
+    f_lo = func(lo)
+    f_hi = func(hi)
+
+    # root must be bracketed
+    if f_lo * f_hi > 0:
+        return np.nan
+
+    log_lo = np.log(lo)
+    log_hi = np.log(hi)
+
+    for _ in range(maxiter):
+
+        log_mid = 0.5 * (log_lo + log_hi)
+
+        mid = np.exp(log_mid)
+
+        f_mid = func(mid)
+
+        # convergence tests
+        if abs(log_hi - log_lo) < tol_log:
+            return mid
+
+        if abs(f_mid) < tol_f:
+            return mid
+
+        # keep bracket
+        if f_lo * f_mid < 0:
+            log_hi = log_mid
+            f_hi = f_mid
+        else:
+            log_lo = log_mid
+            f_lo = f_mid
+
+    return np.exp(0.5 * (log_lo + log_hi))
+
+def bisection(f,
+              lb,
+              ub,
+              target=0.0,
+              tolX=1e-6,
+              tolFun=0.0,
+              maxiter=1000):
+    """
+    MATLAB-style bisection solver.
+
+    Solves:
+        f(x) = target
+
+    Parameters
+    ----------
+    f : callable
+        Function handle.
+
+    lb, ub : float
+        Lower and upper bounds.
+
+    target : float
+        Desired function value.
+
+    tolX : float
+        Interval tolerance.
+
+    tolFun : float
+        Function tolerance.
+
+    maxiter : int
+        Maximum iterations.
+
+    Returns
+    -------
+    x : float
+        Root estimate.
+
+    fx : float
+        Function value at x.
+
+    exitFlag : int
+
+        1 : interval < tolX
+        2 : |f-target| < tolFun
+        3 : both satisfied
+       -1 : no convergence
+       -2 : root not bracketed
+    """
+
+    # shift function by target
+    def g(x):
+        return f(x) - target
+
+    flb = g(lb)
+    fub = g(ub)
+
+    # root must be bracketed
+    if flb * fub > 0:
+        return np.nan, np.nan, -2
+
+    for _ in range(maxiter):
+
+        x = 0.5 * (lb + ub)
+
+        fx = g(x)
+
+        outsideTolX = abs(ub - x) > tolX
+        outsideTolFun = abs(fx) > tolFun
+
+        # convergence
+        if (not outsideTolX) and (not outsideTolFun):
+            return x, fx + target, 3
+
+        if not outsideTolX:
+            return x, fx + target, 1
+
+        if not outsideTolFun:
+            return x, fx + target, 2
+
+        # keep bracket
+        if np.sign(fx) != np.sign(fub):
+            lb = x
+            flb = fx
+        else:
+            ub = x
+            fub = fx
+
+    return x, fx + target, -1
 # ─────────────────────────────────────────────────────────────
 # 10.  Top-level Model Driver
 # ─────────────────────────────────────────────────────────────
@@ -1053,7 +1274,7 @@ class FaultSlipModel:
             self.fault.solve_slip_rate(self.tauqs[:, mid],
                                        self.stress, self.fric)
             
-            print(self.fault.V)
+            #print(self.fault.V)
 
             # ── adaptive time step ──
             V_inner = self.fault.V[1: Ny - 1]
