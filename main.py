@@ -61,8 +61,8 @@ class ModelParameters:
     # --- Grid ---
     xsize: float = 2000.0        # Horizontal model size [m]
     ysize: float = 2000.0        # Vertical model size [m]
-    Nx: int = 501                # Horizontal grid points  (must be odd)
-    Ny: int = 501                # Vertical grid points    (must be odd)
+    Nx: int = 101                # Horizontal grid points  (must be odd)
+    Ny: int = 101                # Vertical grid points    (must be odd)
 
     # --- Material ---
     rho: float = 2400.0          # Rock density [kg/m³]
@@ -472,26 +472,26 @@ class FaultState:
 
             try:
 
-                sol = log_bisection(
-                    equation,
-                    lo,
-                    hi,
-                    tol_log=1e-14,
-                    tol_f=5,
-                    maxiter=200
-                )
-
-                # sol = bisection(
+                # sol = log_bisection(
                 #     equation,
                 #     lo,
                 #     hi,
-                #     target=0.0,
-                #     tolX=0.0,
-                #     tolFun=5,
-                #     maxiter=5000)
+                #     tol_log=1e-14,
+                #     tol_f=5,
+                #     maxiter=200
+                # )
 
-                if np.isfinite(sol):
-                    self.V[iy] = sol
+                x, fx, flag = bisection(
+                    equation,
+                    lo,
+                    hi,
+                    target=0.0,
+                    tolX=0.0,
+                    tolFun=5,
+                    maxiter=1e10)
+
+                if np.isfinite(x):
+                    self.V[iy] = x
 
             except Exception as e:
 
@@ -1089,48 +1089,6 @@ def bisection(f,
               tolX=1e-6,
               tolFun=0.0,
               maxiter=1000):
-    """
-    MATLAB-style bisection solver.
-
-    Solves:
-        f(x) = target
-
-    Parameters
-    ----------
-    f : callable
-        Function handle.
-
-    lb, ub : float
-        Lower and upper bounds.
-
-    target : float
-        Desired function value.
-
-    tolX : float
-        Interval tolerance.
-
-    tolFun : float
-        Function tolerance.
-
-    maxiter : int
-        Maximum iterations.
-
-    Returns
-    -------
-    x : float
-        Root estimate.
-
-    fx : float
-        Function value at x.
-
-    exitFlag : int
-
-        1 : interval < tolX
-        2 : |f-target| < tolFun
-        3 : both satisfied
-       -1 : no convergence
-       -2 : root not bracketed
-    """
 
     # shift function by target
     def g(x):
@@ -1139,38 +1097,45 @@ def bisection(f,
     flb = g(lb)
     fub = g(ub)
 
+    if flb == 0:
+        return lb, target, 3
+
+    if fub == 0:
+        return ub, target, 3
+
     # root must be bracketed
     if flb * fub > 0:
         return np.nan, np.nan, -2
 
-    for _ in range(maxiter):
+    #for _ in range(maxiter):
 
-        x = 0.5 * (lb + ub)
+    x = 0.5 * (lb + ub)
 
-        fx = g(x)
+    fx = g(x)
 
-        outsideTolX = abs(ub - x) > tolX
-        outsideTolFun = abs(fx) > tolFun
+    outsideTolX = abs(ub - x) > tolX
+    outsideTolFun = abs(fx) > tolFun
 
-        # convergence
-        if (not outsideTolX) and (not outsideTolFun):
-            return x, fx + target, 3
+    # convergence
+    if (not outsideTolX) and (not outsideTolFun):
+        return x, fx + target, 3
 
-        if not outsideTolX:
-            return x, fx + target, 1
+    if not outsideTolX:
+        return x, fx + target, 1
 
-        if not outsideTolFun:
-            return x, fx + target, 2
+    if not outsideTolFun:
+        return x, fx + target, 2
 
-        # keep bracket
-        if np.sign(fx) != np.sign(fub):
-            lb = x
-            flb = fx
-        else:
-            ub = x
-            fub = fx
+    # keep bracket
+    if np.sign(fx) != np.sign(fub):
+        lb = x
+        flb = fx
+    else:
+        ub = x
+        fub = fx
 
     return x, fx + target, -1
+
 # ─────────────────────────────────────────────────────────────
 # 10.  Top-level Model Driver
 # ─────────────────────────────────────────────────────────────
