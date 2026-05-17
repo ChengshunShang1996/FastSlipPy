@@ -85,10 +85,10 @@ class ModelParameters:
 
     # --- Time stepping ---
     Nt: int = 1000               # Number of time steps
-    dt_init: float = 1.0        # Initial time step [s]
-    dt_max: float = 1e6         # Maximum time step [s]
-    yr = 365 * 24 * 3600.0     # Seconds in a year
-    tload: float = 10.0 * yr  # Time to apply pressure rate change [s]  #TODO: CHECK
+    dt_init: float = 1.0         # Initial time step [s]
+    dt_max: float = 1e6          # Maximum time step [s]
+    yr = 365 * 24 * 3600.0       # Seconds in a year
+    tload: float = 10.0 * yr     # Time to apply pressure rate change [s]  #TODO: CHECK
 
     # --- Pressure rate ---
     dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]
@@ -677,7 +677,7 @@ class MatrixBuilder:
 
                 # ── uy equation (iy < Ny) ──────────────────────────────
                 if iy < Ny:
-                    if ix == 0:
+                    if ix == 0: # Neumann BC
                         add(kuy, kuy, 1);  add(kuy, kuy + (Ny+1)*2, -1)
                     elif ix == Nx:
                         add(kuy, kuy, 1);  add(kuy, kuy - (Ny+1)*2, -1)
@@ -696,10 +696,6 @@ class MatrixBuilder:
                         add(kuy, kuy,              -1)
                         add(kuy, kuy + (Ny+1)*2,   1)
                         # Cross-coupling terms with ux
-                        for sign, col_off in [(1, (Ny+1)*2), (1, (Ny+1)*2+2),
-                                              (-2, -(Ny+1)*2), (-2, -(Ny+1)*2+2),
-                                              (1, -3*(Ny+1)*2), (1, -3*(Ny+1)*2+2)]:
-                            pass  # These are in kux space; handled via kux
                         add(kuy, kux + (Ny+1)*2,       cosa/4)
                         add(kuy, kux + (Ny+1)*2 + 2,   cosa/4)
                         add(kuy, kux - (Ny+1)*2,       -cosa/2)
@@ -712,6 +708,8 @@ class MatrixBuilder:
                         add(kuy, kuy + 2,              -cosa/4/dy*dx)
                         add(kuy, kuy - (Ny+1)*2 - 2,  -cosa/4/dy*dx)
                         add(kuy, kuy - (Ny+1)*2 + 2,   cosa/4/dy*dx)
+                        add(kuy, kuy - 2*(Ny+1)*2 - 2,  -cosa/4/dy*dx)
+                        add(kuy, kuy - 2*(Ny+1)*2 + 2,   cosa/4/dy*dx)
                     else:
                         # Interior bulk
                         r2 = dx*dx / dy/dy * (lam + 2*G) / G
@@ -725,30 +723,30 @@ class MatrixBuilder:
                         add(kuy, kuy + (Ny+1)*2 + 2,  -c_val)
                         add(kuy, kuy - (Ny+1)*2 - 2,  -c_val)
                         add(kuy, kuy - (Ny+1)*2 + 2,   c_val)
-                        base_ux, _ = self._dofs(ix, iy, Ny)
+                        #kux, _ = self._dofs(ix, iy, Ny)
                         fac = 1/dy*dx*(lam + G)/G
                         if ix == 1 or ix == Nx - 1:
-                            add(kuy, base_ux - (Ny+1)*2,      fac)
-                            add(kuy, base_ux - (Ny+1)*2 + 2, -fac)
-                            add(kuy, base_ux,                 -fac)
-                            add(kuy, base_ux + 2,              fac)
+                            add(kuy, kux - (Ny+1)*2,      fac)
+                            add(kuy, kux - (Ny+1)*2 + 2, -fac)
+                            add(kuy, kux,                 -fac)
+                            add(kuy, kux + 2,              fac)
                         else:
                             cf = cosa*(lam + G)/G/4
-                            add(kuy, base_ux - (Ny+1)*2,      fac + cf)
-                            add(kuy, base_ux - (Ny+1)*2 + 2, -fac + cf)
-                            add(kuy, base_ux,                 -fac + cf)
-                            add(kuy, base_ux + 2,              fac + cf)
-                            add(kuy, base_ux - 2*(Ny+1)*2,    -cf)
-                            add(kuy, base_ux - 2*(Ny+1)*2+2,  -cf)
-                            add(kuy, base_ux + (Ny+1)*2,      -cf)
-                            add(kuy, base_ux + (Ny+1)*2 + 2,  -cf)
+                            add(kuy, kux - (Ny+1)*2,      fac + cf)
+                            add(kuy, kux - (Ny+1)*2 + 2, -fac + cf)
+                            add(kuy, kux,                 -fac + cf)
+                            add(kuy, kux + 2,              fac + cf)
+                            add(kuy, kux - 2*(Ny+1)*2,    -cf)
+                            add(kuy, kux - 2*(Ny+1)*2+2,  -cf)
+                            add(kuy, kux + (Ny+1)*2,      -cf)
+                            add(kuy, kux + (Ny+1)*2 + 2,  -cf)
                 else:
                     add(kuy, kuy, 1)
 
                 # ── ux equation (ix < Nx) ──────────────────────────────
                 if ix < Nx:
-                    _, kuy_n = self._dofs(ix, iy, Ny)
-                    mid_ix = mid
+                    # _, kuy_n = self._dofs(ix, iy, Ny)
+                    #mid_ix = mid
                     r2 = dx*dx / dy/dy
                     r_lam = (lam + 2*G) / G
                     if iy == 0:
@@ -759,7 +757,7 @@ class MatrixBuilder:
                         add(kux, kux, 1)
                     elif ix == Nx - 1:
                         add(kux, kux, 1)
-                    elif ix == mid_ix:
+                    elif ix == mid:
                         # Fault column – normal stress jump condition
                         add(kux, kux,              -2*r_lam)
                         add(kux, kux + (Ny+1)*2,   r_lam)
@@ -801,6 +799,10 @@ class MatrixBuilder:
                     add(kux, kux, 1)
 
         LH = sparse.csr_matrix((vals, (rows, cols)), shape=(N, N))
+
+        #from scipy.io import loadmat
+        #LH_mat = loadmat('LH.mat')['LH']
+        #print(np.max(np.abs(LH - LH_mat)))
         return LH
 
     # ------------------------------------------------------------------
@@ -1225,6 +1227,7 @@ class FaultSlipModel:
     def _build_and_factor_LH(self, dPdt: float):
         builder = MatrixBuilder(self.p, self.grid)
         LH = builder.build_LH()
+        print(LH)
         self.RH_builder = builder
         self.dPdt = dPdt
         self._solve = factorized(LH.tocsc())   # sparse LU decomposition
@@ -1520,5 +1523,5 @@ if __name__ == "__main__":
     model.run()
     #fig = model.grid.plot_mesh()
     #fig.show()
-    #fig = model.grid.plot_grid()
+    fig = model.grid.plot_grid()
     model.plot_results()
