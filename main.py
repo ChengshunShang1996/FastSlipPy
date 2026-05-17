@@ -500,7 +500,7 @@ class FaultState:
                     f"f(lo)={equation(lo):.3e} "
                     f"f(hi)={equation(hi):.3e}"
                 )
-
+        
         self.V = np.maximum(self.V, 1e-40)
 
         self.V[0]  = self.V[1]
@@ -850,7 +850,6 @@ class MatrixBuilder:
                                 RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
         return RH
 
-
 # ─────────────────────────────────────────────────────────────
 # 8.  Output Manager
 # ─────────────────────────────────────────────────────────────
@@ -945,7 +944,6 @@ class OutputManager:
         fname = self.out / f"data_{checkpointer}.npz"
         return dict(np.load(fname))
 
-
 # ─────────────────────────────────────────────────────────────
 # 9.  Stress computation helpers
 # ─────────────────────────────────────────────────────────────
@@ -957,7 +955,6 @@ def _movmean_discard(arr: np.ndarray, axis: int) -> np.ndarray:
     sl_a[axis] = slice(None, -1)
     sl_b[axis] = slice(1, None)
     return (arr[tuple(sl_a)] + arr[tuple(sl_b)]) / 2
-
 
 def compute_stress_fields(uy, ux, dx, dy, lam, G, cosa, sina, Ny, Nx):
     """
