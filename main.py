@@ -56,13 +56,13 @@ class ModelParameters:
     Edit the defaults here or pass keyword arguments to the constructor.
     """
     # --- Fault geometry ---
-    alpha: float = 70.0          # Fault dip angle [degrees]
+    alpha: float = 90.0          # Fault dip angle [degrees]
 
     # --- Grid ---
     xsize: float = 2000.0        # Horizontal model size [m]
     ysize: float = 2000.0        # Vertical model size [m]
-    Nx: int = 101                # Horizontal grid points  (must be odd)
-    Ny: int = 101                # Vertical grid points    (must be odd)
+    Nx: int = 5                # Horizontal grid points  (must be odd)
+    Ny: int = 5                # Vertical grid points    (must be odd)
 
     # --- Material ---
     rho: float = 2400.0          # Rock density [kg/m³]
@@ -88,7 +88,7 @@ class ModelParameters:
     dt_init: float = 1.0        # Initial time step [s]
     dt_max: float = 1e6         # Maximum time step [s]
     yr = 365 * 24 * 3600.0     # Seconds in a year
-    tload: float = 10.0 * yr  # Time to apply pressure rate change [s]
+    tload: float = 10.0 * yr  # Time to apply pressure rate change [s]  #TODO: CHECK
 
     # --- Pressure rate ---
     dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]
@@ -126,8 +126,8 @@ class Grid:
     def __init__(self, p: ModelParameters):
         
         self.p = p
-        self.sina = np.sin(np.deg2rad(p.alpha))
-        self.cosa = np.cos(np.deg2rad(p.alpha))
+        self.sina = sind(p.alpha)
+        self.cosa = cosd(p.alpha)
 
         Nx, Ny = p.Nx, p.Ny
         dx = p.xsize / (Nx - 1)
@@ -140,9 +140,9 @@ class Grid:
         self.y = np.linspace(0, p.ysize, Ny)                           # (Ny,)
 
         # Pressure / staggered nodes
-        self.xp = np.arange(-p.xsize / 2 - dx / 2,
-                             p.xsize / 2 + dx / 2 + dx / 2, dx)       # (Nx+1,)
-        self.yp = np.arange(-dy / 2, p.ysize + dy, dy)                # (Ny+1,)
+        self.xp = np.linspace(-p.xsize / 2 - dx / 2,
+                             p.xsize / 2 + dx / 2, Nx+1)       # (Nx+1,)
+        self.yp = np.linspace(-dy / 2, p.ysize + dy / 2, Ny+1)                # (Ny+1,)
 
         # Rotated coordinate helpers (kept for post-processing / plotting)
         self.Xuy  = self.y[:, None] * self.cosa + self.xp[None, :]
@@ -165,8 +165,8 @@ class Grid:
         fig, ax = plt.subplots()
         ax.plot(X, Y, 'k', linewidth=0.4)
         ax.plot(X.T, Y.T, 'k', linewidth=0.4)
-        ax.set_xlim(-500, 2500)
-        ax.set_ylim(1800, 3800)
+        #ax.set_xlim(-500, 2500)
+        #ax.set_ylim(1800, 3800)
 
         y_line = self.y + 2000
         x_line = np.zeros_like(self.y)   # fault 在 x = 0
@@ -180,7 +180,7 @@ class Grid:
         plt.tight_layout()
         return fig
     
-    def plot_grid(self, show_sigma=False):
+    def plot_grid(self):
 
         fig, ax = plt.subplots(figsize=(6, 6))
 
@@ -200,18 +200,25 @@ class Grid:
         # ─────────────────────────────
         # 2. uy points（blue）
         # ─────────────────────────────
-        ax.scatter(self.Xuy, self.Yuy, s=5, c='blue', label='uy nodes')
+        ax.scatter(self.Xuy, self.Yuy, marker='^', c='blue', label='uy nodes')
 
         # ─────────────────────────────
         # 3. ux points（red）
         # ─────────────────────────────
-        ax.scatter(self.Xux, self.Yux, s=5, c='red', label='ux nodes')
+        ax.scatter(self.Xux, self.Yux, marker='^', c='red', label='ux nodes')
 
         # ─────────────────────────────
-        # 4. sigma points（green, optional）
+        # 4. sigma points（green)
         # ─────────────────────────────
-        if show_sigma:
-            ax.scatter(self.Xsigma, self.Ysigma, s=5, c='green', label='sigma nodes')
+
+        ax.scatter(self.Xsigma, self.Ysigma, marker='s', c='green', label='sigma nodes')
+
+        ax.scatter(self.Xtau, self.Ytau, s=5, c='black', label='tau nodes')
+
+        XP0, YP0 = np.meshgrid(self.xp, self.yp)
+        XP = YP0 * self.cosa + XP0
+        YP = YP0 * self.sina
+        ax.scatter(XP, YP, s=5, c='orange', label='pressure nodes')
 
         # ─────────────────────────────
         # 5. fault position（middle column）
@@ -255,6 +262,10 @@ class FrictionalZones:
         "Sandstone":  {"top": 2850, "bot": 3050, "a": 0.04065,  "b":  0.03796}, # Slochteren Sandstone
         "Carbonif":   {"top": 3050, "bot": 4000, "a": 0.02538,  "b":  0.02347}, # Carboniferous member
     }
+
+    # LAYERS = {
+    #     "Sandstone":  {"top": 2000, "bot": 4000, "a": 0.04065,  "b":  0.03796} # Slochteren Sandstone
+    # }
 
     def __init__(self, p: ModelParameters, y: np.ndarray):
         self.p = p
@@ -385,9 +396,9 @@ class StressState:
                + Ptop + 1.16e6 * (y > 850))
 
         sigman0 = ((1 + p.K0) / 2 * sigmav
-                   + (1 - p.K0) / 2 * np.cos(np.deg2rad(2 * p.alpha)) * sigmav
+                   + (1 - p.K0) / 2 * cosd(2 * p.alpha) * sigmav
                    - np.where(y < 1000, Pl0, Pr0))
-        tau0 = (1 - p.K0) / 2 * np.sin(np.deg2rad(2 * p.alpha)) * sigmav
+        tau0 = (1 - p.K0) / 2 * sind(2 * p.alpha) * sigmav
         return sigman0, tau0, Pl0, Pr0
 
     # ------------------------------------------------------------------
@@ -419,12 +430,8 @@ class FaultState:
         Ny = p.Ny
         self.U     = np.zeros(Ny)
         self.V     = np.full(Ny, p.Vi)
-        self.theta = (p.L / p.V0
-                      * np.exp(fric.a / fric.b
-                               * np.log(2 * p.V0 / p.Vi
-                                        * np.sinh((stress.tau0 - p.eta * p.Vi)
-                                                  / fric.a / stress.sigman0))
-                               - p.mu0 / fric.b))
+        logarg = 2 * p.V0 / p.Vi * np.sinh((stress.tau0 - p.eta * p.Vi) / fric.a / stress.sigman0)
+        self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.emath.log(logarg)- p.mu0 / fric.b))
         self.sigma = stress.sigman0.copy()
         self.tau   = stress.tau0 - p.eta * self.V
 
@@ -1133,6 +1140,43 @@ def bisection(f,
 
     return x, fx + target, -1
 
+
+def cosd(angle_deg, tol=1e-15):
+
+    angle = angle_deg % 360
+
+    if np.isclose(angle, 0, atol=tol):
+        return 1.0
+
+    if np.isclose(angle, 90, atol=tol):
+        return 0.0
+
+    if np.isclose(angle, 180, atol=tol):
+        return -1.0
+
+    if np.isclose(angle, 270, atol=tol):
+        return 0.0
+
+    return np.cos(np.deg2rad(angle))
+
+
+def sind(angle_deg, tol=1e-15):
+
+    angle = angle_deg % 360
+
+    if np.isclose(angle, 0, atol=tol):
+        return 0.0
+
+    if np.isclose(angle, 90, atol=tol):
+        return 1.0
+
+    if np.isclose(angle, 180, atol=tol):
+        return 0.0
+
+    if np.isclose(angle, 270, atol=tol):
+        return -1.0
+
+    return np.sin(np.deg2rad(angle))
 # ─────────────────────────────────────────────────────────────
 # 10.  Top-level Model Driver
 # ─────────────────────────────────────────────────────────────
@@ -1474,6 +1518,7 @@ if __name__ == "__main__":
 
     model = FaultSlipModel(params=params, output_dir="output")
     model.run()
-    fig = model.grid.plot_mesh()
-    fig.show()
+    #fig = model.grid.plot_mesh()
+    #fig.show()
+    #fig = model.grid.plot_grid()
     model.plot_results()
