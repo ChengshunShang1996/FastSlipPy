@@ -2201,6 +2201,420 @@ def test_fault_slip_symmetry():
     plt.tight_layout()
     plt.show()
 
+def test_radiation_damping():
+
+    """
+    Benchmark 7:
+    radiation damping decay test
+
+    Solve:
+
+        eta * V + k * U = 0
+
+        dU/dt = V
+
+    Exact solution:
+
+        U(t) = U0 * exp(-k/eta * t)
+
+    Expected:
+        exponential decay
+        monotonic energy dissipation
+    """
+
+    # --------------------------------------------------
+    # 1. Parameters
+    # --------------------------------------------------
+
+    params = ModelParameters()
+
+    eta = params.eta
+
+    k = 1e6
+
+    U0 = 1e-3
+
+    dt = 0.01
+
+    Nt = 2000
+
+    # --------------------------------------------------
+    # 2. Arrays
+    # --------------------------------------------------
+
+    U = np.zeros(Nt)
+
+    V = np.zeros(Nt)
+
+    t = np.arange(Nt) * dt
+
+    # initial condition
+    U[0] = U0
+
+    # --------------------------------------------------
+    # 3. Time integration
+    # --------------------------------------------------
+
+    for n in range(Nt - 1):
+
+        # damping relation
+        V[n] = -k / eta * U[n]
+
+        # forward Euler
+        U[n+1] = U[n] + dt * V[n]
+
+    # final velocity
+    V[-1] = -k / eta * U[-1]
+
+    # --------------------------------------------------
+    # 4. Exact solution
+    # --------------------------------------------------
+
+    U_exact = U0 * np.exp(-k / eta * t)
+
+    # --------------------------------------------------
+    # 5. Error diagnostics
+    # --------------------------------------------------
+
+    max_error = np.max(np.abs(U - U_exact))
+
+    monotonic = np.all(np.diff(U) <= 0)
+
+    print("\n========== RADIATION DAMPING TEST ==========")
+
+    print(f"max error       = {max_error:.3e}")
+
+    print(f"monotonic decay = {monotonic}")
+
+    # --------------------------------------------------
+    # 6. Pass/fail
+    # --------------------------------------------------
+
+    if max_error < 1e-6 and monotonic:
+        print("PASS")
+    else:
+        print("FAIL")
+
+    # --------------------------------------------------
+    # 7. Plot
+    # --------------------------------------------------
+
+    plt.figure(figsize=(6,4))
+
+    plt.plot(t, U, label="numerical")
+
+    plt.plot(t, U_exact, "--", label="exact")
+
+    plt.xlabel("time")
+
+    plt.ylabel("U")
+
+    plt.title("Radiation Damping Decay")
+
+    plt.legend()
+
+    plt.grid(True)
+
+    plt.tight_layout()
+
+    plt.show()
+
+    # --------------------------------------------------
+    # 8. Energy decay
+    # --------------------------------------------------
+
+    energy = 0.5 * k * U**2
+
+    plt.figure(figsize=(6,4))
+
+    plt.semilogy(t, energy)
+
+    plt.xlabel("time")
+
+    plt.ylabel("energy")
+
+    plt.title("Energy Dissipation")
+
+    plt.grid(True)
+
+    plt.tight_layout()
+
+    plt.show()
+
+def test_rate_state_steady_state():
+
+    """
+    Benchmark 8:
+    rate-and-state steady state test
+
+    Verify:
+
+        theta_ss = L / V
+
+    and:
+
+        f_ss = f0 + (a-b)*ln(V/V0)
+    """
+
+    # --------------------------------------------------
+    # 1. Parameters
+    # --------------------------------------------------
+
+    a = 0.01
+    b = 0.015
+
+    f0 = 0.6
+
+    V0 = 1e-6
+
+    L = 1e-5
+
+    sigma_n = 50e6
+
+    # test velocities
+    V_values = np.logspace(-9, -3, 50)
+
+    # --------------------------------------------------
+    # 2. Numerical steady-state friction
+    # --------------------------------------------------
+
+    f_numerical = np.zeros_like(V_values)
+
+    theta_ss = L / V_values
+
+    for i, V in enumerate(V_values):
+
+        f_numerical[i] = (
+            f0
+            + a * np.log(V / V0)
+            + b * np.log(V0 * theta_ss[i] / L)
+        )
+
+    # --------------------------------------------------
+    # 3. Exact steady-state solution
+    # --------------------------------------------------
+
+    f_exact = f0 + (a - b) * np.log(V_values / V0)
+
+    # --------------------------------------------------
+    # 4. Error
+    # --------------------------------------------------
+
+    error = np.max(np.abs(f_numerical - f_exact))
+
+    print("\n========== RATE-STATE STEADY-STATE TEST ==========")
+
+    print(f"max error = {error:.3e}")
+
+    # --------------------------------------------------
+    # 5. Pass/fail
+    # --------------------------------------------------
+
+    if error < 1e-12:
+        print("PASS")
+    else:
+        print("FAIL")
+
+    # --------------------------------------------------
+    # 6. Plot
+    # --------------------------------------------------
+
+    plt.figure(figsize=(6,4))
+
+    plt.semilogx(V_values, f_numerical, label="numerical")
+
+    plt.semilogx(V_values, f_exact, "--", label="exact")
+
+    plt.xlabel("Slip velocity V")
+
+    plt.ylabel("Steady-state friction")
+
+    plt.title("Rate-State Steady State")
+
+    plt.legend()
+
+    plt.grid(True)
+
+    plt.tight_layout()
+
+    plt.show()
+
+def test_rate_state_velocity_step():
+
+    """
+    Benchmark 9:
+    rate-state velocity-step test
+
+    Verify:
+
+        1. direct effect
+        2. state evolution
+        3. steady-state relaxation
+    """
+
+    # --------------------------------------------------
+    # 1. Parameters
+    # --------------------------------------------------
+
+    a = 0.01
+    b = 0.015
+
+    f0 = 0.6
+
+    V0 = 1e-6
+
+    L = 1e-5
+
+    # velocity step
+    V1 = 1e-6
+    V2 = 1e-5
+
+    # --------------------------------------------------
+    # 2. Time setup
+    # --------------------------------------------------
+
+    dt = 0.01
+
+    Nt = 4000
+
+    t = np.arange(Nt) * dt
+
+    t_step = 10.0
+
+    # --------------------------------------------------
+    # 3. Velocity history
+    # --------------------------------------------------
+
+    V = np.ones(Nt) * V1
+
+    V[t >= t_step] = V2
+
+    # --------------------------------------------------
+    # 4. State evolution
+    # --------------------------------------------------
+
+    theta = np.zeros(Nt)
+
+    # initial steady state
+    theta[0] = L / V1
+
+    # aging law integration
+    for n in range(Nt - 1):
+
+        dtheta = 1 - V[n] * theta[n] / L
+
+        theta[n+1] = theta[n] + dt * dtheta
+
+    # --------------------------------------------------
+    # 5. Friction evolution
+    # --------------------------------------------------
+
+    f = (
+        f0
+        + a * np.log(V / V0)
+        + b * np.log(V0 * theta / L)
+    )
+
+    # --------------------------------------------------
+    # 6. Theoretical predictions
+    # --------------------------------------------------
+
+    # direct effect
+    direct_theory = a * np.log(V2 / V1)
+
+    # steady-state change
+    steady_theory = (a - b) * np.log(V2 / V1)
+
+    # measured values
+    i_before = np.where(t < t_step)[0][-1]
+
+    i_after = np.where(t >= t_step)[0][0]
+
+    direct_numerical = f[i_after] - f[i_before]
+
+    steady_numerical = f[-1] - f[0]
+
+    # --------------------------------------------------
+    # 7. Errors
+    # --------------------------------------------------
+
+    direct_error = abs(direct_numerical - direct_theory)
+
+    steady_error = abs(steady_numerical - steady_theory)
+
+    print("\n========== VELOCITY STEP TEST ==========")
+
+    print(f"direct effect error      = {direct_error:.3e}")
+
+    print(f"steady-state error       = {steady_error:.3e}")
+
+    print()
+
+    print(f"theoretical direct jump  = {direct_theory:.3e}")
+
+    print(f"numerical direct jump    = {direct_numerical:.3e}")
+
+    print()
+
+    print(f"theoretical steady state = {steady_theory:.3e}")
+
+    print(f"numerical steady state   = {steady_numerical:.3e}")
+
+    # --------------------------------------------------
+    # 8. Pass/fail
+    # --------------------------------------------------
+
+    tol = 1e-4
+
+    if direct_error < tol and steady_error < tol:
+        print("PASS")
+    else:
+        print("FAIL")
+
+    # --------------------------------------------------
+    # 9. Plot friction evolution
+    # --------------------------------------------------
+
+    plt.figure(figsize=(7,4))
+
+    plt.plot(t, f)
+
+    plt.axvline(t_step, color='k', linestyle='--')
+
+    plt.xlabel("time")
+
+    plt.ylabel("friction")
+
+    plt.title("Rate-State Velocity Step")
+
+    plt.grid(True)
+
+    plt.tight_layout()
+
+    plt.show()
+
+    # --------------------------------------------------
+    # 10. Plot state evolution
+    # --------------------------------------------------
+
+    plt.figure(figsize=(7,4))
+
+    plt.semilogy(t, theta)
+
+    plt.axvline(t_step, color='k', linestyle='--')
+
+    plt.xlabel("time")
+
+    plt.ylabel("state variable theta")
+
+    plt.title("State Evolution")
+
+    plt.grid(True)
+
+    plt.tight_layout()
+
+    plt.show()
+    
 # ─────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────
@@ -2230,4 +2644,6 @@ if __name__ == "__main__":
     #test_uniaxial_extension()
     #test_constant_strain_equilibrium()
     #test_pure_shear()
-    test_fault_slip_symmetry()
+    #test_fault_slip_symmetry()
+    #test_radiation_damping()
+    #test_rate_state_steady_state()
