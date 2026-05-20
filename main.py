@@ -61,8 +61,8 @@ class ModelParameters:
     # --- Grid ---
     xsize: float = 2000.0        # Horizontal model size [m]
     ysize: float = 2000.0        # Vertical model size [m]
-    Nx: int = 5                # Horizontal grid points  (must be odd)
-    Ny: int = 5                # Vertical grid points    (must be odd)
+    Nx: int = 55                # Horizontal grid points  (must be odd)
+    Ny: int = 55                # Vertical grid points    (must be odd)
 
     # --- Material ---
     rho: float = 2400.0          # Rock density [kg/m³]
@@ -92,7 +92,7 @@ class ModelParameters:
 
     # --- Pressure rate ---
     dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]
-    dPdt_post: float = -0.0127  # Pressure rate after depletion starts [Pa/s]
+    dPdt_post: float = 0.0 #-0.0127  # Pressure rate after depletion starts [Pa/s]
 
     # --- Output intervals ---
     output_interval: int = 10
@@ -601,7 +601,18 @@ class FaultState:
     def advance(self, dt: float, tauqs_col: np.ndarray, stress: StressState):
         """Update theta, U, tau after the velocity solve."""
         p = self.p
-        self.theta = self.theta + dt * (1 - self.V * self.theta / p.L)
+        
+        #self.theta = self.theta + dt * (1 - self.V * self.theta / p.L)
+        x = self.V * dt / p.L
+        expo = x > 1e-6
+        theta_new = np.empty_like(self.theta)
+        theta_new[expo] = (
+            p.L / self.V[expo] * (1.0 - np.exp(-x[expo]))
+            + self.theta[expo] * np.exp(-x[expo]))
+        theta_new[~expo] = (self.theta[~expo]
+            + dt * (1.0 - self.V[~expo] * self.theta[~expo] / p.L))
+        self.theta = theta_new
+
         self.tau   = tauqs_col + stress.tau0 - p.eta * self.V
         self.U     = self.U + dt * self.V
         #print(f"self.U=[{', '.join(f'{x:.6e}' for x in self.U)}]")
@@ -669,8 +680,8 @@ class MatrixBuilder:
         def add(r, c, v):
             rows.append(r); cols.append(c); vals.append(v)
 
-        for ix in range(Nx + 1):           # 0 … Nx  (MATLAB 1 … Nx+1)
-            for iy in range(Ny + 1):       # 0 … Ny
+        for ix in range(Nx+1):           # 0 … Nx  (MATLAB 1 … Nx+1)
+            for iy in range(Ny+1):       # 0 … Ny
 
                 kux, kuy = self._dofs(ix, iy, Ny)
                 mid = (Nx) // 2            # fault column index (0-based)
@@ -817,46 +828,63 @@ class MatrixBuilder:
 
         RH = np.zeros(N)
 
-        for ix in range(Nx + 1):
-            for iy in range(Ny + 1):
+        for ix in range(Nx+1):
+            for iy in range(Ny+1):
                 kux, kuy = self._dofs(ix, iy, Ny)
 
                 # ── uy block ──
                 if iy < Ny:
-                    if ix not in (0, Nx) and iy not in (0, Ny - 1):
-                        if ix == mid:
-                            RH[kuy] = V[iy]
-                        elif ix == mid + 1:
-                            pass  # velocity BC handled above
-                        else:
-                            yv = y[iy]
-                            if yv == 850 and ix >= mid + 1:
-                                RH[kuy] =  dPdt / dy * dx*dx / G * sina
-                            if yv == 1050 and ix >= mid + 1:
-                                RH[kuy] = -dPdt / dy * dx*dx / G * sina
-                            if yv == 800 and ix <= mid:
-                                RH[kuy] =  dPdt / dy * dx*dx / G * sina
-                            if yv == 1000 and ix <= mid:
-                                RH[kuy] = -dPdt / dy * dx*dx / G * sina
+                    #if ix not in (0, Nx) and iy not in (0, Ny - 1):
+                    if ix == 0:
+                        pass
+                    elif ix == Nx:
+                        pass
+                    elif iy == 0:
+                        RH[kuy] = 0.0
+                    elif iy == Ny - 1:
+                        pass
+                    elif ix == mid:
+                        RH[kuy] = V[iy]
+                    elif ix == mid + 1:
+                        pass  # velocity BC handled above
+                    else:
+                        yv = y[iy]
+                        if yv == 850 and ix >= mid + 1:
+                            RH[kuy] =  dPdt / dy * dx*dx / G * sina
+                        if yv == 1050 and ix >= mid + 1:
+                            RH[kuy] = -dPdt / dy * dx*dx / G * sina
+                        if yv == 800 and ix <= mid:
+                            RH[kuy] =  dPdt / dy * dx*dx / G * sina
+                        if yv == 1000 and ix <= mid:
+                            RH[kuy] = -dPdt / dy * dx*dx / G * sina
 
                 # ── ux block ──
                 if ix < Nx:
-                    if iy not in (0, Ny) and ix not in (0, Nx - 1):
+                    #if iy not in (0, Ny) and ix not in (0, Nx - 1):
+                    if iy == 0:
+                        pass
+                    elif iy == Ny:
+                        pass
+                    elif ix == 0:
+                        pass
+                    elif ix == Nx - 1:
+                        pass
+                    elif ix == mid:
                         yv = y[iy]
-                        if ix == mid:
-                            if 800 < yv <= 850:
-                                RH[kux] = -dPdt * dx / G
-                            if 1000 < yv <= 1050:
-                                RH[kux] =  dPdt * dx / G
-                        else:
-                            if yv == 1050 and ix > mid + 1:
-                                RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
-                            if yv == 1000 and ix < mid + 1:
-                                RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
-                            if yv == 850 and ix > mid + 1:
-                                RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
-                            if yv == 800 and ix < mid + 1:
-                                RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
+                        if 800 < yv <= 850:
+                            RH[kux] = -dPdt * dx / G
+                        if 1000 < yv <= 1050:
+                            RH[kux] =  dPdt * dx / G
+                    else:
+                        yv = y[iy]
+                        if yv == 1050 and ix > mid + 1:
+                            RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
+                        if yv == 1000 and ix < mid + 1:
+                            RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
+                        if yv == 850 and ix > mid + 1:
+                            RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
+                        if yv == 800 and ix < mid + 1:
+                            RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
         return RH
 
 # ─────────────────────────────────────────────────────────────
@@ -1227,7 +1255,7 @@ class FaultSlipModel:
     def _build_and_factor_LH(self, dPdt: float):
         builder = MatrixBuilder(self.p, self.grid)
         LH = builder.build_LH()
-        print(LH)
+        #print(LH)
         self.RH_builder = builder
         self.dPdt = dPdt
         self._solve = factorized(LH.tocsc())   # sparse LU decomposition
@@ -1306,6 +1334,7 @@ class FaultSlipModel:
             # Inject velocity BC at fault column
             fault_rows = (np.arange(1, Ny - 1) + (Nx // 2) * (Ny + 1)) * 2 + 1
             RH[fault_rows] = self.fault.V[1: Ny - 1]
+            #print(RH[fault_rows])
 
             # ── elastic solve ──
             S   = self._solve(RH)
@@ -1503,6 +1532,675 @@ class FaultSlipModel:
         plt.show()
 
         return fig
+
+def test_rigid_translation():
+
+    """
+    Benchmark 1:
+    rigid body translation
+
+    ux = constant
+    uy = constant
+
+    Expected:
+        tauqs   = 0
+        sigmaqs = 0
+    """
+
+    # --------------------------------------------------
+    # 1. Build minimal model
+    # --------------------------------------------------
+
+    params = ModelParameters(
+        Nx=51,
+        Ny=51
+    )
+
+    grid = Grid(params)
+
+    # --------------------------------------------------
+    # 2. Constant displacement field
+    # --------------------------------------------------
+
+    ux_const = 1.2345
+    uy_const = -2.3456
+
+    # ux shape = (Ny+1, Nx)
+    ux = np.ones((params.Ny + 1, params.Nx)) * ux_const
+
+    # uy shape = (Ny, Nx+1)
+    uy = np.ones((params.Ny, params.Nx + 1)) * uy_const
+
+    # --------------------------------------------------
+    # 3. Compute stresses
+    # --------------------------------------------------
+
+    tauqs, sigmaqs = compute_stress_fields(
+        uy=uy,
+        ux=ux,
+        dx=grid.dx,
+        dy=grid.dy,
+        lam=params.lam,
+        G=params.G,
+        cosa=grid.cosa,
+        sina=grid.sina,
+        Ny=params.Ny,
+        Nx=params.Nx
+    )
+
+    # --------------------------------------------------
+    # 4. Compute errors
+    # --------------------------------------------------
+
+    max_tau = np.max(np.abs(tauqs))
+    max_sigma = np.max(np.abs(sigmaqs))
+
+    print("\n========== RIGID TRANSLATION TEST ==========")
+
+    print(f"max |tauqs|   = {max_tau:.3e}")
+    print(f"max |sigmaqs| = {max_sigma:.3e}")
+
+    # --------------------------------------------------
+    # 5. Pass/fail
+    # --------------------------------------------------
+
+    tol = 1e-12
+
+    if max_tau < tol and max_sigma < tol:
+        print("PASS")
+    else:
+        print("FAIL")
+
+    # --------------------------------------------------
+    # 6. Optional visualization
+    # --------------------------------------------------
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    im0 = axes[0].imshow(tauqs)
+    axes[0].set_title("tauqs")
+
+    im1 = axes[1].imshow(sigmaqs)
+    axes[1].set_title("sigmaqs")
+
+    plt.colorbar(im0, ax=axes[0])
+    plt.colorbar(im1, ax=axes[1])
+
+    plt.tight_layout()
+    plt.show()
+
+def test_rigid_rotation():
+
+    """
+    Benchmark 2:
+    rigid body rotation
+
+    ux = -omega * y
+    uy =  omega * x
+
+    Expected:
+        tauqs   = 0
+        sigmaqs = 0
+    """
+
+    # --------------------------------------------------
+    # 1. Build model/grid
+    # --------------------------------------------------
+
+    params = ModelParameters(
+        Nx=51,
+        Ny=51
+    )
+
+    grid = Grid(params)
+
+    omega = 1e-6
+
+    # --------------------------------------------------
+    # 2. Build coordinate arrays
+    # --------------------------------------------------
+
+    # ux nodes: shape (Ny+1, Nx)
+    Xux = grid.Xux
+    Yux = grid.Yux
+
+    # uy nodes: shape (Ny, Nx+1)
+    Xuy = grid.Xuy
+    Yuy = grid.Yuy
+
+    # --------------------------------------------------
+    # 3. Define rigid rotation field
+    # --------------------------------------------------
+
+    ux = -omega * Yux
+    uy =  omega * Xuy
+
+    # --------------------------------------------------
+    # 4. Compute stresses
+    # --------------------------------------------------
+
+    tauqs, sigmaqs = compute_stress_fields(
+        uy=uy,
+        ux=ux,
+        dx=grid.dx,
+        dy=grid.dy,
+        lam=params.lam,
+        G=params.G,
+        cosa=grid.cosa,
+        sina=grid.sina,
+        Ny=params.Ny,
+        Nx=params.Nx
+    )
+
+    # --------------------------------------------------
+    # 5. Errors
+    # --------------------------------------------------
+
+    max_tau = np.max(np.abs(tauqs))
+    max_sigma = np.max(np.abs(sigmaqs))
+
+    print("\n========== RIGID ROTATION TEST ==========")
+
+    print(f"max |tauqs|   = {max_tau:.3e}")
+    print(f"max |sigmaqs| = {max_sigma:.3e}")
+
+    tol = 1e-10
+
+    if max_tau < tol and max_sigma < tol:
+        print("PASS")
+    else:
+        print("FAIL")
+
+    # --------------------------------------------------
+    # 6. Visualization
+    # --------------------------------------------------
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    im0 = axes[0].imshow(tauqs)
+    axes[0].set_title("tauqs")
+
+    im1 = axes[1].imshow(sigmaqs)
+    axes[1].set_title("sigmaqs")
+
+    plt.colorbar(im0, ax=axes[0])
+    plt.colorbar(im1, ax=axes[1])
+
+    plt.tight_layout()
+    plt.show()
+
+def test_uniaxial_extension():
+
+    """
+    Benchmark 3:
+    uniaxial extension
+
+    ux = a * x
+    uy = 0
+
+    Expected:
+        tauqs ≈ 0
+        sigmaqs = constant
+    """
+
+    # --------------------------------------------------
+    # 1. Build model/grid
+    # --------------------------------------------------
+
+    params = ModelParameters(
+        Nx=51,
+        Ny=51
+    )
+
+    grid = Grid(params)
+
+    # prescribed strain
+    a = 1e-6
+
+    # --------------------------------------------------
+    # 2. Coordinates
+    # --------------------------------------------------
+
+    Xux = grid.Xux
+    Xuy = grid.Xuy
+
+    # --------------------------------------------------
+    # 3. Displacement field
+    # --------------------------------------------------
+
+    # ux shape = (Ny+1, Nx)
+    ux = a * Xux
+
+    # uy shape = (Ny, Nx+1)
+    uy = np.zeros_like(Xuy)
+
+    # --------------------------------------------------
+    # 4. Compute stresses
+    # --------------------------------------------------
+
+    tauqs, sigmaqs = compute_stress_fields(
+        uy=uy,
+        ux=ux,
+        dx=grid.dx,
+        dy=grid.dy,
+        lam=params.lam,
+        G=params.G,
+        cosa=grid.cosa,
+        sina=grid.sina,
+        Ny=params.Ny,
+        Nx=params.Nx
+    )
+
+    # --------------------------------------------------
+    # 5. Diagnostics
+    # --------------------------------------------------
+
+    max_tau = np.max(np.abs(tauqs))
+
+    sigma_mean = np.mean(sigmaqs)
+    sigma_std = np.std(sigmaqs)
+
+    print("\n========== UNIAXIAL EXTENSION TEST ==========")
+
+    print(f"max |tauqs|      = {max_tau:.3e}")
+
+    print(f"mean(sigmaqs)    = {sigma_mean:.3e}")
+
+    print(f"std(sigmaqs)     = {sigma_std:.3e}")
+
+    # --------------------------------------------------
+    # 6. Pass / fail
+    # --------------------------------------------------
+
+    tau_tol = 1e-10
+    sigma_tol = 1e-10
+
+    if max_tau < tau_tol and sigma_std < sigma_tol:
+        print("PASS")
+    else:
+        print("FAIL")
+
+    # --------------------------------------------------
+    # 7. Visualization
+    # --------------------------------------------------
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    im0 = axes[0].imshow(tauqs)
+    axes[0].set_title("tauqs")
+
+    im1 = axes[1].imshow(sigmaqs)
+    axes[1].set_title("sigmaqs")
+
+    plt.colorbar(im0, ax=axes[0])
+    plt.colorbar(im1, ax=axes[1])
+
+    plt.tight_layout()
+    plt.show()
+
+def test_constant_strain_equilibrium():
+
+    """
+    Benchmark 4:
+    Constant strain equilibrium test
+
+    ux = a * x
+    uy = 0
+
+    Since stress is constant:
+
+        div(sigma) = 0
+
+    therefore:
+
+        LH @ U = 0
+
+    should hold to machine precision.
+    """
+
+    # --------------------------------------------------
+    # 1. Build model/grid/matrix
+    # --------------------------------------------------
+
+    params = ModelParameters(
+        Nx=51,
+        Ny=51
+    )
+
+    grid = Grid(params)
+
+    builder = MatrixBuilder(params, grid)
+
+    LH = builder.build_LH()
+
+    # --------------------------------------------------
+    # 2. Prescribed displacement field
+    # --------------------------------------------------
+
+    a = 1e-6
+
+    # staggered fields
+    ux = a * grid.Xux
+    uy = np.zeros_like(grid.Xuy)
+
+    # --------------------------------------------------
+    # 3. Pack into global vector U
+    # --------------------------------------------------
+
+    U = np.zeros(grid.N)
+
+    for ix in range(params.Nx + 1):
+        for iy in range(params.Ny + 1):
+
+            kux, kuy = builder._dofs(ix, iy, params.Ny)
+
+            # ux nodes exist for ix < Nx
+            if ix < params.Nx:
+                U[kux] = ux[iy, ix]
+
+            # uy nodes exist for iy < Ny
+            if iy < params.Ny:
+                U[kuy] = uy[iy, ix]
+
+    # --------------------------------------------------
+    # 4. RHS = 0
+    # --------------------------------------------------
+
+    RH = np.zeros(grid.N)
+
+    # --------------------------------------------------
+    # 5. Residual
+    # --------------------------------------------------
+
+    residual = LH @ U - RH
+
+    max_residual = np.max(np.abs(residual))
+    rms_residual = np.sqrt(np.mean(residual**2))
+
+    print("\n========== CONSTANT STRAIN EQUILIBRIUM TEST ==========")
+
+    print(f"max residual = {max_residual:.3e}")
+    print(f"rms residual = {rms_residual:.3e}")
+
+    # --------------------------------------------------
+    # 6. Pass/fail
+    # --------------------------------------------------
+
+    tol = 1e-10
+
+    if max_residual < tol:
+        print("PASS")
+    else:
+        print("FAIL")
+
+    # --------------------------------------------------
+    # 7. Visualize residual
+    # --------------------------------------------------
+
+    Rux = residual[0::2].reshape(params.Ny + 1, params.Nx + 1)
+    Ruy = residual[1::2].reshape(params.Ny + 1, params.Nx + 1)
+
+    # interior only
+    interior_Rux = Rux[2:-2, 2:-2]
+    interior_Ruy = Ruy[2:-2, 2:-2]
+
+    print()
+    print("INTERIOR RESIDUAL")
+    print(np.max(np.abs(interior_Rux)))
+    print(np.max(np.abs(interior_Ruy)))
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    im0 = axes[0].imshow(Rux)
+    axes[0].set_title("Residual ux")
+
+    im1 = axes[1].imshow(Ruy)
+    axes[1].set_title("Residual uy")
+
+    plt.colorbar(im0, ax=axes[0])
+    plt.colorbar(im1, ax=axes[1])
+
+    plt.tight_layout()
+    plt.show()
+
+def test_pure_shear():
+
+    """
+    Benchmark 5:
+    pure shear test
+
+    ux = gamma * y
+    uy = 0
+
+    Expected:
+        tauqs   = constant
+        sigmaqs = 0
+    """
+
+    # --------------------------------------------------
+    # 1. Build model/grid
+    # --------------------------------------------------
+
+    params = ModelParameters(
+        Nx=51,
+        Ny=51
+    )
+
+    grid = Grid(params)
+
+    gamma = 1e-6
+
+    # --------------------------------------------------
+    # 2. Coordinates
+    # --------------------------------------------------
+
+    Yux = grid.Yux
+    Xuy = grid.Xuy
+
+    # --------------------------------------------------
+    # 3. Displacement field
+    # --------------------------------------------------
+
+    # ux shape = (Ny+1, Nx)
+    ux = gamma * Yux
+
+    # uy shape = (Ny, Nx+1)
+    uy = np.zeros_like(Xuy)
+
+    # --------------------------------------------------
+    # 4. Compute stresses
+    # --------------------------------------------------
+
+    tauqs, sigmaqs = compute_stress_fields(
+        uy=uy,
+        ux=ux,
+        dx=grid.dx,
+        dy=grid.dy,
+        lam=params.lam,
+        G=params.G,
+        cosa=grid.cosa,
+        sina=grid.sina,
+        Ny=params.Ny,
+        Nx=params.Nx
+    )
+
+    # --------------------------------------------------
+    # 5. Diagnostics
+    # --------------------------------------------------
+
+    tau_mean = np.mean(tauqs)
+    tau_std  = np.std(tauqs)
+
+    max_sigma = np.max(np.abs(sigmaqs))
+
+    print("\n========== PURE SHEAR TEST ==========")
+
+    print(f"mean(tauqs)      = {tau_mean:.3e}")
+
+    print(f"std(tauqs)       = {tau_std:.3e}")
+
+    print(f"max |sigmaqs|    = {max_sigma:.3e}")
+
+    np.set_printoptions(precision=12, suppress=True)
+    print(np.unique(np.round(tauqs, 12)))
+
+    # --------------------------------------------------
+    # 6. Pass / fail
+    # --------------------------------------------------
+
+    tau_tol = 1e-10
+    sigma_tol = 1e-10
+
+    if tau_std < tau_tol and max_sigma < sigma_tol:
+        print("PASS")
+    else:
+        print("FAIL")
+
+    # --------------------------------------------------
+    # 7. Visualization
+    # --------------------------------------------------
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    im0 = axes[0].imshow(tauqs)
+    axes[0].set_title("tauqs")
+
+    im1 = axes[1].imshow(sigmaqs)
+    axes[1].set_title("sigmaqs")
+
+    plt.colorbar(im0, ax=axes[0])
+    plt.colorbar(im1, ax=axes[1])
+
+    plt.tight_layout()
+    plt.show()
+
+
+def test_fault_slip_symmetry():
+
+    """
+    Benchmark 6:
+    smooth anti-symmetric fault slip
+
+    ux = 0.5*D*tanh(x/w)
+    uy = 0
+
+    Expected:
+        - tau localized near fault
+        - left/right symmetry
+        - sigma ≈ 0
+        - no checkerboard
+    """
+
+    # --------------------------------------------------
+    # 1. Build model/grid
+    # --------------------------------------------------
+
+    params = ModelParameters(
+        Nx=101,
+        Ny=101
+    )
+
+    grid = Grid(params)
+
+    # --------------------------------------------------
+    # 2. Slip parameters
+    # --------------------------------------------------
+
+    D = 1e-3
+
+    w = 3 * grid.dx
+
+    # --------------------------------------------------
+    # 3. Coordinates
+    # --------------------------------------------------
+
+    Xux = grid.Xux
+    Xuy = grid.Xuy
+
+    # --------------------------------------------------
+    # 4. Smooth fault slip field
+    # --------------------------------------------------
+
+    #This is compression
+    #ux = 0.5 * D * np.tanh(Xux / w)
+    #uy = np.zeros_like(Xuy)
+
+    ux = np.zeros_like(Xux)
+    uy = 0.5 * D * np.tanh(Xuy / w)
+
+    # --------------------------------------------------
+    # 5. Compute stresses
+    # --------------------------------------------------
+
+    tauqs, sigmaqs = compute_stress_fields(
+        uy=uy,
+        ux=ux,
+        dx=grid.dx,
+        dy=grid.dy,
+        lam=params.lam,
+        G=params.G,
+        cosa=grid.cosa,
+        sina=grid.sina,
+        Ny=params.Ny,
+        Nx=params.Nx
+    )
+
+    # --------------------------------------------------
+    # 6. Symmetry diagnostics
+    # --------------------------------------------------
+
+    mid = params.Nx // 2
+
+    tau_left  = tauqs[:, :mid]
+    tau_right = np.flip(tauqs[:, mid+1:], axis=1)
+
+    symmetry_error = np.max(np.abs(tau_left - tau_right))
+
+    max_sigma = np.max(np.abs(sigmaqs))
+
+    print("\n========== FAULT SLIP SYMMETRY TEST ==========")
+
+    print(f"max symmetry error = {symmetry_error:.3e}")
+
+    print(f"max |sigmaqs|      = {max_sigma:.3e}")
+
+    # --------------------------------------------------
+    # 7. Pass/fail
+    # --------------------------------------------------
+
+    tol = 1e-10
+
+    if symmetry_error < tol:
+        print("PASS")
+    else:
+        print("FAIL")
+
+    # --------------------------------------------------
+    # 8. Visualization
+    # --------------------------------------------------
+
+    fig, axes = plt.subplots(2, 2, figsize=(8, 8))
+
+    im0 = axes[0,0].imshow(ux)
+    axes[0,0].set_title("ux")
+
+    im1 = axes[0,1].imshow(uy)
+    axes[0,1].set_title("uy")
+
+    im2 = axes[1,0].imshow(tauqs)
+    axes[1,0].set_title("tauqs")
+
+    im3 = axes[1,1].imshow(sigmaqs)
+    axes[1,1].set_title("sigmaqs")
+
+    plt.colorbar(im0, ax=axes[0,0])
+    plt.colorbar(im1, ax=axes[0,1])
+    plt.colorbar(im2, ax=axes[1,0])
+    plt.colorbar(im3, ax=axes[1,1])
+
+    plt.tight_layout()
+    plt.show()
+
 # ─────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────
@@ -1517,11 +2215,19 @@ if __name__ == "__main__":
         checkpoint_interval=1000,
     )'''
 
-    params = ModelParameters()
+    # params = ModelParameters()
 
-    model = FaultSlipModel(params=params, output_dir="output")
-    model.run()
-    #fig = model.grid.plot_mesh()
-    #fig.show()
-    fig = model.grid.plot_grid()
-    model.plot_results()
+    # model = FaultSlipModel(params=params, output_dir="output")
+    # model.run()
+    # fig = model.grid.plot_mesh()
+    # fig.show()
+    # #fig = model.grid.plot_grid()
+    # model.plot_results()
+
+    #Benchmarks
+    #test_rigid_translation()
+    #test_rigid_rotation()
+    #test_uniaxial_extension()
+    #test_constant_strain_equilibrium()
+    #test_pure_shear()
+    test_fault_slip_symmetry()
