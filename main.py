@@ -61,8 +61,8 @@ class ModelParameters:
     # --- Grid ---
     xsize: float = 2000.0        # Horizontal model size [m]
     ysize: float = 2000.0        # Vertical model size [m]
-    Nx: int = 55                # Horizontal grid points  (must be odd)
-    Ny: int = 55                # Vertical grid points    (must be odd)
+    Nx: int = 51                # Horizontal grid points  (must be odd)
+    Ny: int = 51                # Vertical grid points    (must be odd)
 
     # --- Material ---
     rho: float = 2400.0          # Rock density [kg/m³]
@@ -143,6 +143,9 @@ class Grid:
         self.xp = np.linspace(-p.xsize / 2 - dx / 2,
                              p.xsize / 2 + dx / 2, Nx+1)       # (Nx+1,)
         self.yp = np.linspace(-dy / 2, p.ysize + dy / 2, Ny+1)                # (Ny+1,)
+
+        #print(self.xp)
+        #print(self.yp)
 
         # Rotated coordinate helpers (kept for post-processing / plotting)
         self.Xuy  = self.y[:, None] * self.cosa + self.xp[None, :]
@@ -255,17 +258,17 @@ class FrictionalZones:
     # Layer depths relative to surface (positive downward convention)
     # These are absolute depths [m from surface].  ysize is subtracted to
     # convert to the model's coordinate system where y=0 is the top.
-    LAYERS = {
-        "Rocksalt":   {"top": 2000, "bot": 2730, "a": 0.00447,  "b": -0.00590}, # Zechstein rocksalt (halite)
-        "BasalZech":  {"top": 2730, "bot": 2780, "a": 0.06895,  "b":  0.07209}, # Basal zechstein
-        "TenBoer":    {"top": 2780, "bot": 2850, "a": 0.00305,  "b": -0.00093}, # Ten Boer
-        "Sandstone":  {"top": 2850, "bot": 3050, "a": 0.04065,  "b":  0.03796}, # Slochteren Sandstone
-        "Carbonif":   {"top": 3050, "bot": 4000, "a": 0.02538,  "b":  0.02347}, # Carboniferous member
-    }
-
     # LAYERS = {
-    #     "Sandstone":  {"top": 2000, "bot": 4000, "a": 0.04065,  "b":  0.03796} # Slochteren Sandstone
+    #     "Rocksalt":   {"top": 2000, "bot": 2730, "a": 0.00447,  "b": -0.00590}, # Zechstein rocksalt (halite)
+    #     "BasalZech":  {"top": 2730, "bot": 2780, "a": 0.06895,  "b":  0.07209}, # Basal zechstein
+    #     "TenBoer":    {"top": 2780, "bot": 2850, "a": 0.00305,  "b": -0.00093}, # Ten Boer
+    #     "Sandstone":  {"top": 2850, "bot": 3050, "a": 0.04065,  "b":  0.03796}, # Slochteren Sandstone
+    #     "Carbonif":   {"top": 3050, "bot": 4000, "a": 0.02538,  "b":  0.02347}, # Carboniferous member
     # }
+
+    LAYERS = {
+        "Sandstone":  {"top": 2000, "bot": 4000, "a": 0.04,  "b":  0.03} # Slochteren Sandstone
+    }
 
     def __init__(self, p: ModelParameters, y: np.ndarray):
         self.p = p
@@ -602,16 +605,17 @@ class FaultState:
         """Update theta, U, tau after the velocity solve."""
         p = self.p
         
-        #self.theta = self.theta + dt * (1 - self.V * self.theta / p.L)
-        x = self.V * dt / p.L
-        expo = x > 1e-6
-        theta_new = np.empty_like(self.theta)
-        theta_new[expo] = (
-            p.L / self.V[expo] * (1.0 - np.exp(-x[expo]))
-            + self.theta[expo] * np.exp(-x[expo]))
-        theta_new[~expo] = (self.theta[~expo]
-            + dt * (1.0 - self.V[~expo] * self.theta[~expo] / p.L))
-        self.theta = theta_new
+        self.theta = self.theta + dt * (1 - self.V * self.theta / p.L)
+        # TODO: this one is better
+        # x = self.V * dt / p.L
+        # expo = x > 1e-6
+        # theta_new = np.empty_like(self.theta)
+        # theta_new[expo] = (
+        #     p.L / self.V[expo] * (1.0 - np.exp(-x[expo]))
+        #     + self.theta[expo] * np.exp(-x[expo]))
+        # theta_new[~expo] = (self.theta[~expo]
+        #     + dt * (1.0 - self.V[~expo] * self.theta[~expo] / p.L))
+        # self.theta = theta_new
 
         self.tau   = tauqs_col + stress.tau0 - p.eta * self.V
         self.U     = self.U + dt * self.V
@@ -846,16 +850,25 @@ class MatrixBuilder:
                     elif ix == mid:
                         RH[kuy] = V[iy]
                     elif ix == mid + 1:
+                        #RH[kuy] = -1 * V[iy]
                         pass  # velocity BC handled above
                     else:
                         yv = y[iy]
-                        if yv == 850 and ix >= mid + 1:
+                        # if yv == 850 and ix >= mid + 1:
+                        #     RH[kuy] =  dPdt / dy * dx*dx / G * sina
+                        # if yv == 1050 and ix >= mid + 1:
+                        #     RH[kuy] = -dPdt / dy * dx*dx / G * sina
+                        # if yv == 800 and ix <= mid:
+                        #     RH[kuy] =  dPdt / dy * dx*dx / G * sina
+                        # if yv == 1000 and ix <= mid:
+                        #RH[kuy] = -dPdt / dy * dx*dx / G * sina
+                        if yv == 860 and ix >= mid + 1:
                             RH[kuy] =  dPdt / dy * dx*dx / G * sina
-                        if yv == 1050 and ix >= mid + 1:
+                        if yv == 1060 and ix >= mid + 1:
                             RH[kuy] = -dPdt / dy * dx*dx / G * sina
-                        if yv == 800 and ix <= mid:
+                        if yv == 820 and ix <= mid:
                             RH[kuy] =  dPdt / dy * dx*dx / G * sina
-                        if yv == 1000 and ix <= mid:
+                        if yv == 1020 and ix <= mid:
                             RH[kuy] = -dPdt / dy * dx*dx / G * sina
 
                 # ── ux block ──
@@ -871,19 +884,31 @@ class MatrixBuilder:
                         pass
                     elif ix == mid:
                         yv = y[iy]
-                        if 800 < yv <= 850:
+                        # if 800 < yv <= 850:
+                        #     RH[kux] = -dPdt * dx / G
+                        # if 1000 < yv <= 1050:
+                        #     RH[kux] =  dPdt * dx / G
+                        if 820 < yv <= 860:
                             RH[kux] = -dPdt * dx / G
-                        if 1000 < yv <= 1050:
+                        if 1020 < yv <= 1060:
                             RH[kux] =  dPdt * dx / G
                     else:
                         yv = y[iy]
-                        if yv == 1050 and ix > mid + 1:
+                        # if yv == 1050 and ix > mid + 1:
+                        #     RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
+                        # if yv == 1000 and ix < mid + 1:
+                        #     RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
+                        # if yv == 850 and ix > mid + 1:
+                        #     RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
+                        # if yv == 800 and ix < mid + 1:
+                        #     RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
+                        if yv == 1060 and ix > mid + 1:
                             RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
-                        if yv == 1000 and ix < mid + 1:
+                        if yv == 1020 and ix < mid + 1:
                             RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
-                        if yv == 850 and ix > mid + 1:
+                        if yv == 860 and ix > mid + 1:
                             RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
-                        if yv == 800 and ix < mid + 1:
+                        if yv == 820 and ix < mid + 1:
                             RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
         return RH
 
@@ -1317,7 +1342,6 @@ class FaultSlipModel:
             V_inner = self.fault.V[1: Ny - 1]
             ksi_inner = self.ksi[1: Ny - 1]
             dt_cand = np.min(ksi_inner * p.L / V_inner)
-            #print(p.L)
             dt_cand = max(dt_cand, 1e-150)
             dt      = min(min(1.2 * dt, dt_cand), dt_max)
 
@@ -1473,7 +1497,8 @@ class FaultSlipModel:
         plt.tight_layout()
 
         plt.figure(figsize=(8, 5))
-        plt.plot(grid.y+2000, om.Vm, 'o-', lw=1)
+        #plt.plot(grid.y+2000, om.Vm, 'o-', lw=1)
+        plt.plot(grid.y+2000, om.Vm[:, it], 'o-', lw=1)
         plt.grid(True)
         plt.tight_layout()
 
@@ -1529,9 +1554,10 @@ class FaultSlipModel:
             ax.invert_yaxis()
 
         plt.tight_layout()
+
         plt.show()
 
-        return fig
+        #return fig
 
 def test_rigid_translation():
 
@@ -2629,14 +2655,14 @@ if __name__ == "__main__":
         checkpoint_interval=1000,
     )'''
 
-    # params = ModelParameters()
+    params = ModelParameters()
 
-    # model = FaultSlipModel(params=params, output_dir="output")
-    # model.run()
-    # fig = model.grid.plot_mesh()
-    # fig.show()
-    # #fig = model.grid.plot_grid()
-    # model.plot_results()
+    model = FaultSlipModel(params=params, output_dir="output")
+    model.run()
+    fig = model.grid.plot_mesh()
+    fig.show()
+    #fig = model.grid.plot_grid()
+    model.plot_results()
 
     #Benchmarks
     #test_rigid_translation()
