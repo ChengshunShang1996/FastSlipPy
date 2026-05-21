@@ -56,13 +56,13 @@ class ModelParameters:
     Edit the defaults here or pass keyword arguments to the constructor.
     """
     # --- Fault geometry ---
-    alpha: float = 90.0          # Fault dip angle [degrees]
+    alpha: float = 70.0          # Fault dip angle [degrees]
 
     # --- Grid ---
     xsize: float = 2000.0        # Horizontal model size [m]
     ysize: float = 2000.0        # Vertical model size [m]
-    Nx: int = 51                # Horizontal grid points  (must be odd)
-    Ny: int = 51                # Vertical grid points    (must be odd)
+    Nx: int = 201                # Horizontal grid points  (must be odd)
+    Ny: int = 201                # Vertical grid points    (must be odd)
 
     # --- Material ---
     rho: float = 2400.0          # Rock density [kg/m³]
@@ -92,7 +92,7 @@ class ModelParameters:
 
     # --- Pressure rate ---
     dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]
-    dPdt_post: float = 0.0 #-0.0127  # Pressure rate after depletion starts [Pa/s]
+    dPdt_post: float = -0.0127  # Pressure rate after depletion starts [Pa/s]
 
     # --- Output intervals ---
     output_interval: int = 10
@@ -258,17 +258,17 @@ class FrictionalZones:
     # Layer depths relative to surface (positive downward convention)
     # These are absolute depths [m from surface].  ysize is subtracted to
     # convert to the model's coordinate system where y=0 is the top.
-    # LAYERS = {
-    #     "Rocksalt":   {"top": 2000, "bot": 2730, "a": 0.00447,  "b": -0.00590}, # Zechstein rocksalt (halite)
-    #     "BasalZech":  {"top": 2730, "bot": 2780, "a": 0.06895,  "b":  0.07209}, # Basal zechstein
-    #     "TenBoer":    {"top": 2780, "bot": 2850, "a": 0.00305,  "b": -0.00093}, # Ten Boer
-    #     "Sandstone":  {"top": 2850, "bot": 3050, "a": 0.04065,  "b":  0.03796}, # Slochteren Sandstone
-    #     "Carbonif":   {"top": 3050, "bot": 4000, "a": 0.02538,  "b":  0.02347}, # Carboniferous member
-    # }
-
     LAYERS = {
-        "Sandstone":  {"top": 2000, "bot": 4000, "a": 0.04,  "b":  0.03} # Slochteren Sandstone
+        "Rocksalt":   {"top": 2000, "bot": 2730, "a": 0.00447,  "b": -0.00590}, # Zechstein rocksalt (halite)
+        "BasalZech":  {"top": 2730, "bot": 2780, "a": 0.06895,  "b":  0.07209}, # Basal zechstein
+        "TenBoer":    {"top": 2780, "bot": 2850, "a": 0.00305,  "b": -0.00093}, # Ten Boer
+        "Sandstone":  {"top": 2850, "bot": 3050, "a": 0.04065,  "b":  0.03796}, # Slochteren Sandstone
+        "Carbonif":   {"top": 3050, "bot": 4000, "a": 0.02538,  "b":  0.02347}, # Carboniferous member
     }
+
+    # LAYERS = {
+    #     "Sandstone":  {"top": 2000, "bot": 4000, "a": 0.04,  "b":  0.03} # Slochteren Sandstone
+    # }
 
     def __init__(self, p: ModelParameters, y: np.ndarray):
         self.p = p
@@ -439,7 +439,7 @@ class FaultState:
         self.tau   = stress.tau0 - p.eta * self.V
 
     # ------------------------------------------------------------------
-    def solve_slip_rate(self,
+    def solve_slip_rate2(self,
                     tauqs_col: np.ndarray,
                     stress: StressState,
                     fric: FrictionalZones):
@@ -478,7 +478,7 @@ class FaultState:
             lo = 1e-40
 
             #hi = max(2.0 * rhs / p.eta, float(np.max(self.V))) 
-            hi = np.max(self.V) 
+            hi = np.max(self.V)*2
 
             try:
 
@@ -498,7 +498,7 @@ class FaultState:
                     target=0.0,
                     tolX=0.0,
                     tolFun=5,
-                    maxiter=1e10)
+                    maxiter=1e3)
 
                 if np.isfinite(x):
                     self.V[iy] = x
@@ -516,7 +516,7 @@ class FaultState:
         self.V[0]  = self.V[1]
         self.V[-1] = self.V[-2]
 
-    def solve_slip_rate1(self, tauqs_col: np.ndarray, stress: StressState,
+    def solve_slip_rate(self, tauqs_col: np.ndarray, stress: StressState,
                     fric: FrictionalZones):
         """
         Solve for V at each fault node using the rate-and-state friction law
@@ -854,22 +854,22 @@ class MatrixBuilder:
                         pass  # velocity BC handled above
                     else:
                         yv = y[iy]
-                        # if yv == 850 and ix >= mid + 1:
+                        if yv == 850 and ix >= mid + 1:
+                            RH[kuy] =  dPdt / dy * dx*dx / G * sina
+                        if yv == 1050 and ix >= mid + 1:
+                            RH[kuy] = -dPdt / dy * dx*dx / G * sina
+                        if yv == 800 and ix <= mid:
+                            RH[kuy] =  dPdt / dy * dx*dx / G * sina
+                        if yv == 1000 and ix <= mid:
+                            RH[kuy] = -dPdt / dy * dx*dx / G * sina
+                        # if yv == 860 and ix >= mid + 1:
                         #     RH[kuy] =  dPdt / dy * dx*dx / G * sina
-                        # if yv == 1050 and ix >= mid + 1:
+                        # if yv == 1060 and ix >= mid + 1:
                         #     RH[kuy] = -dPdt / dy * dx*dx / G * sina
-                        # if yv == 800 and ix <= mid:
+                        # if yv == 820 and ix <= mid:
                         #     RH[kuy] =  dPdt / dy * dx*dx / G * sina
-                        # if yv == 1000 and ix <= mid:
-                        #RH[kuy] = -dPdt / dy * dx*dx / G * sina
-                        if yv == 860 and ix >= mid + 1:
-                            RH[kuy] =  dPdt / dy * dx*dx / G * sina
-                        if yv == 1060 and ix >= mid + 1:
-                            RH[kuy] = -dPdt / dy * dx*dx / G * sina
-                        if yv == 820 and ix <= mid:
-                            RH[kuy] =  dPdt / dy * dx*dx / G * sina
-                        if yv == 1020 and ix <= mid:
-                            RH[kuy] = -dPdt / dy * dx*dx / G * sina
+                        # if yv == 1020 and ix <= mid:
+                        #     RH[kuy] = -dPdt / dy * dx*dx / G * sina
 
                 # ── ux block ──
                 if ix < Nx:
@@ -884,32 +884,32 @@ class MatrixBuilder:
                         pass
                     elif ix == mid:
                         yv = y[iy]
-                        # if 800 < yv <= 850:
-                        #     RH[kux] = -dPdt * dx / G
-                        # if 1000 < yv <= 1050:
-                        #     RH[kux] =  dPdt * dx / G
-                        if 820 < yv <= 860:
+                        if 800 < yv <= 850:
                             RH[kux] = -dPdt * dx / G
-                        if 1020 < yv <= 1060:
+                        if 1000 < yv <= 1050:
                             RH[kux] =  dPdt * dx / G
+                        # if 820 < yv <= 860:
+                        #     RH[kux] = -dPdt * dx / G
+                        # if 1020 < yv <= 1060:
+                        #     RH[kux] =  dPdt * dx / G
                     else:
                         yv = y[iy]
-                        # if yv == 1050 and ix > mid + 1:
-                        #     RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
-                        # if yv == 1000 and ix < mid + 1:
-                        #     RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
-                        # if yv == 850 and ix > mid + 1:
-                        #     RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
-                        # if yv == 800 and ix < mid + 1:
-                        #     RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
-                        if yv == 1060 and ix > mid + 1:
+                        if yv == 1050 and ix > mid + 1:
                             RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
-                        if yv == 1020 and ix < mid + 1:
+                        if yv == 1000 and ix < mid + 1:
                             RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
-                        if yv == 860 and ix > mid + 1:
+                        if yv == 850 and ix > mid + 1:
                             RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
-                        if yv == 820 and ix < mid + 1:
+                        if yv == 800 and ix < mid + 1:
                             RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
+                        # if yv == 1060 and ix > mid + 1:
+                        #     RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
+                        # if yv == 1020 and ix < mid + 1:
+                        #     RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
+                        # if yv == 860 and ix > mid + 1:
+                        #     RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
+                        # if yv == 820 and ix < mid + 1:
+                        #     RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
         return RH
 
 # ─────────────────────────────────────────────────────────────
@@ -1362,8 +1362,10 @@ class FaultSlipModel:
 
             # ── elastic solve ──
             S   = self._solve(RH)
-            vpx = S[0::2].reshape(Ny + 1, Nx + 1)
-            vpy = S[1::2].reshape(Ny + 1, Nx + 1)
+            #vpx = S[0::2].reshape(Ny + 1, Nx + 1)
+            #vpy = S[1::2].reshape(Ny + 1, Nx + 1)
+            vpx = np.reshape(S[0::2], (p.Nx+1, p.Ny+1), order='C').T
+            vpy = np.reshape(S[1::2], (p.Ny+1, p.Nx+1), order='C').T
             self.vy = vpy[:Ny, :]
             self.vx = vpx[:, :Nx]
 
@@ -2100,7 +2102,6 @@ def test_pure_shear():
     plt.tight_layout()
     plt.show()
 
-
 def test_fault_slip_symmetry():
 
     """
@@ -2641,6 +2642,556 @@ def test_rate_state_velocity_step():
 
     plt.show()
     
+def run_uniaxial_extension_test():
+
+    print("\n========== UNIAXIAL EXTENSION (INCREMENTAL) ==========")
+
+    # -------------------------------------------------
+    # 1. parameters
+    # -------------------------------------------------
+
+    p = ModelParameters(
+        Nx=51,
+        Ny=51,
+        xsize=2000.0,
+        ysize=2000.0,
+    )
+
+    grid = Grid(p)
+
+    # -------------------------------------------------
+    # 2. build elastic matrix
+    # -------------------------------------------------
+
+    builder = MatrixBuilder(p, grid)
+
+    LH = builder.build_LH()
+
+    from scipy.sparse.linalg import factorized
+    solve = factorized(LH.tocsc())
+
+    # -------------------------------------------------
+    # 3. fields
+    # -------------------------------------------------
+
+    ux = np.zeros((p.Ny + 1, p.Nx))
+    uy = np.zeros((p.Ny, p.Nx + 1))
+
+    vx = np.zeros_like(ux)
+    vy = np.zeros_like(uy)
+
+    # -------------------------------------------------
+    # 4. loading
+    # -------------------------------------------------
+
+    Vpull = 1e-6       # m/s
+    dt = 1.0
+    Nt = 1000
+
+    # -------------------------------------------------
+    # 5. time stepping
+    # -------------------------------------------------
+
+    for it in range(Nt):
+
+        RH = np.zeros(grid.N)
+
+        # ---------------------------------------------
+        # LEFT boundary: ux = 0
+        # already enforced by LH
+        # ---------------------------------------------
+
+        # ---------------------------------------------
+        # RIGHT boundary: vx = Vpull
+        # ---------------------------------------------
+
+        ix = p.Nx - 1
+
+        for iy in range(1, p.Ny):
+
+            kux, _ = builder._dofs(ix, iy, p.Ny)
+
+            RH[kux] = Vpull
+
+        # ---------------------------------------------
+        # solve velocity system
+        # ---------------------------------------------
+
+        S = solve(RH)
+
+        #vpx = S[0::2].reshape(p.Ny + 1, p.Nx + 1)
+        #vpy = S[1::2].reshape(p.Ny + 1, p.Nx + 1)
+
+        vpx = np.reshape(S[0::2], (p.Nx+1, p.Ny+1), order='C').T
+        vpy = np.reshape(S[1::2], (p.Ny+1, p.Nx+1), order='C').T
+
+        vx = vpx[:, :p.Nx]
+        vy = vpy[:p.Ny, :]
+
+        # ---------------------------------------------
+        # integrate displacement
+        # ---------------------------------------------
+
+        ux += vx * dt
+        uy += vy * dt
+
+    # -------------------------------------------------
+    # 6. compute stresses
+    # -------------------------------------------------
+
+    tauqs, sigmaqs = compute_stress_fields(
+        uy,
+        ux,
+        grid.dx,
+        grid.dy,
+        p.lam,
+        p.G,
+        grid.cosa,
+        grid.sina,
+        p.Ny,
+        p.Nx
+    )
+
+    # -------------------------------------------------
+    # 7. diagnostics
+    # -------------------------------------------------
+
+    max_tau = np.max(np.abs(tauqs))
+
+    # theoretical strain
+    eps = Vpull * Nt * dt / p.xsize
+
+    # theoretical stress
+    sigma_theory = (p.lam + 2 * p.G) * eps
+
+    sigma_mean = np.mean(sigmaqs)
+    sigma_std  = np.std(sigmaqs)
+
+    print(f"max |tauqs|        = {max_tau:.3e}")
+    print(f"mean sigmaqs       = {sigma_mean:.3e}")
+    print(f"std sigmaqs        = {sigma_std:.3e}")
+    print(f"theoretical sigma  = {sigma_theory:.3e}")
+
+    # -------------------------------------------------
+    # 8. PASS/FAIL
+    # -------------------------------------------------
+
+    rel_error = abs(sigma_mean - sigma_theory) / abs(sigma_theory)
+
+    if (
+        max_tau < 1e-6 * abs(sigma_theory)
+        and sigma_std < 1e-3 * abs(sigma_theory)
+        and rel_error < 5e-2
+    ):
+        print("PASS")
+    else:
+        print("FAIL")
+
+    # -------------------------------------------------
+    # 9. plots
+    # -------------------------------------------------
+
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+
+    # ux
+    im = axes[0,0].pcolormesh(
+        grid.Xux,
+        grid.Yux,
+        ux,
+        shading='auto'
+    )
+    axes[0,0].set_title("ux")
+    fig.colorbar(im, ax=axes[0, 0])
+
+    # uy
+    im = axes[0,1].pcolormesh(
+        grid.Xuy,
+        grid.Yuy,
+        uy,
+        shading='auto'
+    )
+    axes[0,1].set_title("uy")
+    fig.colorbar(im, ax=axes[0, 1])
+
+    # tau
+    vmax = np.max(np.abs(tauqs))
+
+    im = axes[1,0].pcolormesh(
+        grid.Xtau,
+        grid.Ytau,
+        tauqs,
+        shading='auto',
+        vmin=-vmax,
+        vmax=vmax
+    )
+    axes[1,0].set_title("tauqs")
+    fig.colorbar(im, ax=axes[1, 0])
+
+    # sigma
+    im = axes[1,1].pcolormesh(
+        grid.Xsigma,
+        grid.Ysigma,
+        sigmaqs,
+        shading='auto'
+    )
+    axes[1,1].set_title("sigmaqs")
+    fig.colorbar(im, ax=axes[1, 1])
+
+    for ax in axes.flat:
+        ax.set_aspect('equal')
+
+    plt.tight_layout()
+    plt.show()
+
+def run_fault_traction_transfer_test():
+
+    print("\n========== FAULT TRACTION TRANSFER TEST ==========")
+
+    # -------------------------------------------------
+    # 1. parameters
+    # -------------------------------------------------
+
+    p = ModelParameters(
+        Nx=201,
+        Ny=201,
+        xsize=2000.0,
+        ysize=2000.0,
+    )
+
+    grid = Grid(p)
+
+    builder = MatrixBuilder(p, grid)
+
+    # -------------------------------------------------
+    # 2. build matrix
+    # -------------------------------------------------
+
+    LH = builder.build_LH()
+
+    from scipy.sparse.linalg import factorized
+
+    solve = factorized(LH.tocsc())
+
+    # -------------------------------------------------
+    # 3. fields
+    # -------------------------------------------------
+
+    ux = np.zeros((p.Nx+1, p.Ny))
+    uy = np.zeros((p.Nx, p.Ny+1))
+
+    vx = np.zeros_like(ux)
+    vy = np.zeros_like(uy)
+
+    # -------------------------------------------------
+    # 4. loading
+    # -------------------------------------------------
+
+    Vpl = 1e-6
+
+    dt = 1.0
+
+    Nt = 1000
+
+    # -------------------------------------------------
+    # 5. timestep loop
+    # -------------------------------------------------
+
+    for it in range(Nt):
+
+        RH = np.zeros(grid.N)
+
+        # ---------------------------------------------
+        # RIGHT boundary loading
+        # vy = Vpl
+        # ---------------------------------------------
+
+        ix = p.Nx
+
+        for iy in range(1, p.Ny):
+
+            _, kuy = builder._dofs(ix, iy, p.Ny)
+
+            RH[kuy] = Vpl
+
+        # ---------------------------------------------
+        # LOCKED FAULT
+        # uy+ - uy- = 0
+        # already enforced by LH
+        # RH remains zero there
+        # ---------------------------------------------
+
+        # ---------------------------------------------
+        # solve
+        # ---------------------------------------------
+
+        S = solve(RH)
+
+        vpx = S[0::2].reshape(
+            p.Nx+1,
+            p.Ny+1
+        ).T
+
+        vpy = S[1::2].reshape(
+            p.Nx+1,
+            p.Ny+1
+        ).T
+
+        vx = vpx[:, :p.Nx]
+        vy = vpy[:p.Ny, :]
+
+        # ---------------------------------------------
+        # integrate
+        # ---------------------------------------------
+
+        ux += vx * dt
+        uy += vy * dt
+
+    # -------------------------------------------------
+    # 6. stresses
+    # -------------------------------------------------
+
+    tauqs, sigmaqs = compute_stress_fields(
+        uy,
+        ux,
+        grid.dx,
+        grid.dy,
+        p.lam,
+        p.G,
+        grid.cosa,
+        grid.sina,
+        p.Ny,
+        p.Nx
+    )
+
+    # -------------------------------------------------
+    # 7. fault diagnostics
+    # -------------------------------------------------
+
+    mid = p.Nx // 2
+
+    # left/right traction
+    tau_left  = tauqs[:, mid-1]
+    tau_right = tauqs[:, mid]
+
+    traction_jump = tau_right - tau_left
+
+    max_jump = np.max(np.abs(traction_jump))
+
+    # displacement jump
+    uy_left  = uy[:, mid]
+    uy_right = uy[:, mid+1]
+
+    slip = uy_right - uy_left
+
+    max_slip = np.max(np.abs(slip))
+
+    print(f"max traction jump = {max_jump:.3e}")
+    print(f"max slip          = {max_slip:.3e}")
+
+    # -------------------------------------------------
+    # 8. PASS/FAIL
+    # -------------------------------------------------
+
+    if (
+        max_jump < 1e-8
+        and
+        max_slip < 1e-12
+    ):
+        print("PASS")
+    else:
+        print("FAIL")
+
+    # -------------------------------------------------
+    # 9. plots
+    # -------------------------------------------------
+
+    fig, axes = plt.subplots(2,2, figsize=(10,8))
+
+    im = axes[0,0].pcolormesh(
+        grid.Xuy,
+        grid.Yuy,
+        uy,
+        shading='auto'
+    )
+    axes[0,0].set_title("uy")
+
+    im = axes[0,1].pcolormesh(
+        grid.Xtau,
+        grid.Ytau,
+        tauqs,
+        shading='auto'
+    )
+    axes[0,1].set_title("tauqs")
+
+    im = axes[1,0].plot(
+        grid.y,
+        traction_jump
+    )
+
+    axes[1,0].set_title("traction jump")
+
+    im = axes[1,1].plot(
+        grid.y,
+        slip
+    )
+
+    axes[1,1].set_title("fault slip")
+
+    plt.tight_layout()
+
+    plt.show()
+
+def run_constant_fault_slip_test():
+
+    print("\n========== CONSTANT FAULT SLIP TEST ==========")
+
+    # -------------------------------------------------
+    # 1. setup
+    # -------------------------------------------------
+
+    p = ModelParameters(
+        Nx=101,
+        Ny=101,
+        xsize=2000.0,
+        ysize=2000.0,
+    )
+
+    grid = Grid(p)
+
+    builder = MatrixBuilder(p, grid)
+
+    LH = builder.build_LH()
+
+    from scipy.sparse.linalg import spsolve
+
+    # -------------------------------------------------
+    # 2. prescribed constant slip
+    # -------------------------------------------------
+
+    delta0 = 1e-3
+
+    RH = np.zeros(grid.N)
+
+    mid = p.Nx // 2
+
+    # impose constant tangential slip
+    for iy in range(1, p.Ny):
+
+        _, kuy = builder._dofs(mid, iy, p.Ny)
+
+        RH[kuy] = delta0
+
+    # -------------------------------------------------
+    # 3. solve
+    # -------------------------------------------------
+
+    S = spsolve(LH.tocsc(), RH)
+
+    vpx = S[0::2].reshape(
+        p.Nx+1,
+        p.Ny+1
+    ).T
+
+    vpy = S[1::2].reshape(
+        p.Nx+1,
+        p.Ny+1
+    ).T
+
+    ux = vpx[:, :p.Nx]
+    uy = vpy[:p.Ny, :]
+
+    #ux += vx * dt
+    #uy += vy * dt
+
+    # -------------------------------------------------
+    # 4. stresses
+    # -------------------------------------------------
+
+    tauqs, sigmaqs = compute_stress_fields(
+        uy,
+        ux,
+        grid.dx,
+        grid.dy,
+        p.lam,
+        p.G,
+        grid.cosa,
+        grid.sina,
+        p.Ny,
+        p.Nx
+    )
+
+    # -------------------------------------------------
+    # 5. diagnostics
+    # -------------------------------------------------
+
+    max_tau = np.max(np.abs(tauqs))
+    max_sigma = np.max(np.abs(sigmaqs))
+
+    # fault slip
+    slip = uy[:, mid+1] - uy[:, mid]
+
+    slip_error = np.max(np.abs(slip - delta0))
+
+    # traction jump
+    tau_left  = tauqs[:, mid-1]
+    tau_right = tauqs[:, mid]
+
+    traction_jump = tau_right - tau_left
+
+    max_jump = np.max(np.abs(traction_jump))
+
+    print(f"max |tauqs|         = {max_tau:.3e}")
+    print(f"max |sigmaqs|       = {max_sigma:.3e}")
+    print(f"max traction jump   = {max_jump:.3e}")
+    print(f"max slip error      = {slip_error:.3e}")
+
+    # -------------------------------------------------
+    # 6. PASS / FAIL
+    # -------------------------------------------------
+
+    if (
+        max_tau < 1e-8
+        and
+        max_sigma < 1e-8
+        and
+        max_jump < 1e-8
+        and
+        slip_error < 1e-12
+    ):
+        print("PASS")
+    else:
+        print("FAIL")
+
+    # -------------------------------------------------
+    # 7. plots
+    # -------------------------------------------------
+
+    fig, axes = plt.subplots(2,2, figsize=(10,8))
+
+    im = axes[0,0].pcolormesh(
+        grid.Xuy,
+        grid.Yuy,
+        uy,
+        shading='auto'
+    )
+    axes[0,0].set_title("uy")
+
+    im = axes[0,1].pcolormesh(
+        grid.Xtau,
+        grid.Ytau,
+        tauqs,
+        shading='auto'
+    )
+    axes[0,1].set_title("tauqs")
+
+    axes[1,0].plot(grid.y, slip)
+    axes[1,0].set_title("fault slip")
+
+    axes[1,1].plot(grid.y, traction_jump)
+    axes[1,1].set_title("traction jump")
+
+    plt.tight_layout()
+    plt.show()
 # ─────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────
@@ -2673,3 +3224,6 @@ if __name__ == "__main__":
     #test_fault_slip_symmetry()
     #test_radiation_damping()
     #test_rate_state_steady_state()
+    #run_uniaxial_extension_test()
+    #run_fault_traction_transfer_test()
+    #run_constant_fault_slip_test()
