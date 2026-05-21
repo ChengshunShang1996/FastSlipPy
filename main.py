@@ -84,7 +84,7 @@ class ModelParameters:
     Vi: float = 1e-30            # Initial/background slip rate [m/s]
 
     # --- Time stepping ---
-    Nt: int = 1000               # Number of time steps
+    Nt: int = 200               # Number of time steps
     dt_init: float = 1.0         # Initial time step [s]
     dt_max: float = 1e6          # Maximum time step [s]
     yr = 365 * 24 * 3600.0       # Seconds in a year
@@ -516,7 +516,7 @@ class FaultState:
         self.V[0]  = self.V[1]
         self.V[-1] = self.V[-2]
 
-    def solve_slip_rate(self, tauqs_col: np.ndarray, stress: StressState,
+    def solve_slip_rate1(self, tauqs_col: np.ndarray, stress: StressState,
                     fric: FrictionalZones):
         """
         Solve for V at each fault node using the rate-and-state friction law
@@ -600,6 +600,38 @@ class FaultState:
         self.V[0]  = self.V[1]
         self.V[-1] = self.V[-2]
 
+    def solve_slip_rate(self, tauqs_col: np.ndarray, stress: StressState,
+                        fric: FrictionalZones):
+        """
+        Solve for V at each fault node using the rate-and-state friction law
+        (with flash heating):
+
+            σ · a · asinh[ V/(2V₀) · exp((μ₀ + b·ln(V₀θ/L))/a) ]
+                / (1 + L/(Vw·θ))   +   η·V   =   τ_qs + τ₀
+        """
+        p = self.p
+        for iy in range(p.Ny):
+            rhs = tauqs_col[iy] + stress.tau0[iy]
+            a_i = fric.a[iy];  b_i = fric.b[iy]
+            th  = self.theta[iy]
+            sig = self.sigma[iy]
+
+            def equation(VV):
+                arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
+                friction = sig * a_i * np.arcsinh(VV / (2 * p.V0) * np.exp(arg))
+                flash    = 1 + p.L / p.Vw / th
+                return friction / flash + p.eta * VV - rhs
+
+            # Guard against sign errors in the bracket
+            try:
+                self.V[iy] = brentq(equation, 1e-40, 1e10, xtol=1e-12)
+            except ValueError:
+                pass   # keep previous V if bracketing fails
+
+        self.V = np.maximum(self.V, 1e-40)
+        self.V[0]  = self.V[1]
+        self.V[-1] = self.V[-2]
+    
     # ------------------------------------------------------------------
     def advance(self, dt: float, tauqs_col: np.ndarray, stress: StressState):
         """Update theta, U, tau after the velocity solve."""
@@ -844,7 +876,8 @@ class MatrixBuilder:
                     elif ix == Nx:
                         pass
                     elif iy == 0:
-                        RH[kuy] = 0.0
+                        #RH[kuy] = 0.0
+                        pass
                     elif iy == Ny - 1:
                         pass
                     elif ix == mid:
@@ -1388,6 +1421,7 @@ class FaultSlipModel:
                                      _movmean_discard(self.sigmaqs[:, mid_r], 0),
                                      [self.sigmaqs[-1, mid_r]]])
             self.fault.sigma = self.stress.sigman0 - np.minimum(sigmal, sigmar)
+            #self.fault.sigma = self.stress.sigman0 - 0.5 * (sigmal + sigmar)
 
             # ── pressure update ──
             self.stress.update_pressure(dt, dPdt)
@@ -1499,8 +1533,24 @@ class FaultSlipModel:
         plt.tight_layout()
 
         plt.figure(figsize=(8, 5))
+        plt.plot(grid.y+2000, om.taum[:, it] / 1e6, 'o-', lw=1)
+        plt.ylabel(r"Shear stress $\tau$ [MPa]")
+        plt.xlabel("Depth [m]")
+        plt.grid(True)
+        plt.tight_layout()
+
+        plt.figure(figsize=(8, 5))
+        plt.plot(grid.y+2000, om.sigmam[:, it] / 1e6, 'o-', lw=1)
+        plt.ylabel(r"Normal stress $\sigma_n$ [MPa]")
+        plt.xlabel("Depth [m]")
+        plt.grid(True)
+        plt.tight_layout()
+
+        plt.figure(figsize=(8, 5))
         #plt.plot(grid.y+2000, om.Vm, 'o-', lw=1)
         plt.plot(grid.y+2000, om.Vm[:, it], 'o-', lw=1)
+        plt.ylabel(r"Slip velocity $V$ [m/s]")
+        plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
 
