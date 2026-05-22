@@ -1,10 +1,8 @@
 import numpy as np
 
-from main import (
-    ModelParameters,
-    Grid,
-    compute_stress_fields
-)
+from fastslippy.pre_processing.model_parameters import ModelParameters
+from fastslippy.pre_processing.grid import Grid
+from fastslippy.utilities.stress_cal_util import StressCalUtil
 
 def test_rigid_translation():
 
@@ -19,7 +17,7 @@ def test_rigid_translation():
 
     uy = np.ones((params.Ny, params.Nx + 1)) * 2.345
 
-    tauqs, sigmaqs = compute_stress_fields(
+    tauqs, sigmaqs = StressCalUtil().compute_stress_fields(
         uy=uy,
         ux=ux,
         dx=grid.dx,
