@@ -77,14 +77,14 @@ class ModelParameters:
     # --- Rate-and-state defaults (used when heterogeneous profile is off) ---
     mu0: float = 0.3             # Reference friction coefficient
     V0: float = 1e-6             # Reference slip rate [m/s]
-    a0: float = 0.01             # Direct effect (homogeneous fallback)
-    b0: float = 0.015            # Evolution effect (homogeneous fallback)
+    a0: float = 0.015             # Direct effect (homogeneous fallback)
+    b0: float = 0.01            # Evolution effect (homogeneous fallback)
     L: float = 0.5               # Characteristic slip distance [m]
     Vw: float = 1e90             # Dynamic weakening velocity [m/s]
     Vi: float = 1e-30            # Initial/background slip rate [m/s]
 
     # --- Time stepping ---
-    Nt: int = 200               # Number of time steps
+    Nt: int = 1000               # Number of time steps
     dt_init: float = 1.0         # Initial time step [s]
     dt_max: float = 1e6          # Maximum time step [s]
     yr = 365 * 24 * 3600.0       # Seconds in a year
@@ -649,11 +649,10 @@ class FaultState:
         #     + dt * (1.0 - self.V[~expo] * self.theta[~expo] / p.L))
         # self.theta = theta_new
 
-        self.tau   = tauqs_col + stress.tau0 - p.eta * self.V
+        self.tau   = tauqs_col + stress.tau0 #- p.eta * self.V
         self.U     = self.U + dt * self.V
         #print(f"self.U=[{', '.join(f'{x:.6e}' for x in self.U)}]")
         #print('*************')
-
 
 # ─────────────────────────────────────────────────────────────
 # 6.  Adaptive time-step stabiliser  (ksi)
@@ -978,6 +977,7 @@ class OutputManager:
         self.vymall     = np.zeros((Ny, Nx+1, n))
         self.uxmall     = np.zeros((Ny+1, Nx, n))
         self.vxmall     = np.zeros((Ny+1, Nx, n))
+        self.tau0   = np.zeros((Ny, n))
 
         self._logfile = open(self.out / "output.txt", "w")
 
@@ -993,11 +993,12 @@ class OutputManager:
     # ------------------------------------------------------------------
     def write_memory(self, it: int,
                      U, V, tau, sigma, P, theta, dt, t,
-                     tauqs, sigmaqs, uy, vy, ux, vx):
+                     tauqs, sigmaqs, uy, vy, ux, vx, tau0):
         idx = it // self.p.output_interval - 1
         self.Um[:, idx]     = U
         self.Vm[:, idx]     = V
         self.taum[:, idx]   = tau
+        self.tau0[:, idx]   = tau0
         self.sigmam[:, idx] = sigma
         self.Pm[:, idx]     = P
         self.thetam[:, idx] = theta
@@ -1435,7 +1436,7 @@ class FaultSlipModel:
                     it, self.fault.U, self.fault.V, self.fault.tau,
                     self.fault.sigma, self.stress.P, self.fault.theta,
                     dt, t, self.tauqs, self.sigmaqs,
-                    self.uy, self.vy, self.ux, self.vx)
+                    self.uy, self.vy, self.ux, self.vx, self.stress.tau0)
 
             if it % p.checkpoint_interval == 0:
                 self.output.save_checkpoint(
@@ -1521,7 +1522,7 @@ class FaultSlipModel:
         sigma = om.sigmam[:, it]
         ratio = tau / (sigma + 1e-12)
 
-        plt.figure(figsize=(8, 5))
+        fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y+2000, ratio, 'o-', lw=1)
         #plt.gca().invert_yaxis()
         plt.ylabel(r"$\tau / \sigma_n$")
@@ -1531,28 +1532,77 @@ class FaultSlipModel:
         plt.title("Ratio shear / normal stress")
         plt.grid(True)
         plt.tight_layout()
+        fig.savefig(self.output.out / f"tau_sigma_ratio_it{it}.png", dpi=150)
 
-        plt.figure(figsize=(8, 5))
+        fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y+2000, om.taum[:, it] / 1e6, 'o-', lw=1)
         plt.ylabel(r"Shear stress $\tau$ [MPa]")
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
+        fig.savefig(self.output.out / f"tau_it{it}.png", dpi=150)
 
-        plt.figure(figsize=(8, 5))
+        fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y+2000, om.sigmam[:, it] / 1e6, 'o-', lw=1)
         plt.ylabel(r"Normal stress $\sigma_n$ [MPa]")
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
+        fig.savefig(self.output.out / f"sigma_it{it}.png", dpi=150)
 
-        plt.figure(figsize=(8, 5))
+        fig = plt.figure(figsize=(8, 5))
+        plt.plot(grid.y+2000, om.tau0[:, it] / 1e6, 'o-', lw=1)
+        plt.ylabel(r"$\tau_0$ [MPa]")
+        plt.xlabel("Depth [m]")
+        plt.grid(True)
+        plt.tight_layout()
+        fig.savefig(self.output.out / f"tau0_it{it}.png", dpi=150)
+
+        fig = plt.figure(figsize=(8, 5))
         #plt.plot(grid.y+2000, om.Vm, 'o-', lw=1)
         plt.plot(grid.y+2000, om.Vm[:, it], 'o-', lw=1)
         plt.ylabel(r"Slip velocity $V$ [m/s]")
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
+        fig.savefig(self.output.out / f"slip_velocity_it{it}.png", dpi=150)
+
+
+        mid = 201 // 2
+        plt.figure(figsize=(8,6))
+        plt.plot(
+            grid.y+2000,
+            om.taum[:,it],
+            'k',
+            lw=3,
+            label='stored tau'
+        )
+
+        for k in [mid-2, mid-1, mid, mid+1, mid+2]:
+            plt.plot(grid.y+2000, om.taumall[:,k,it], '--', label=f'col {k}')
+
+        plt.legend()
+        plt.grid(True)
+
+        plt.figure(figsize=(8,6))
+        plt.plot(
+            grid.y+2000,
+            om.taum[:,it] - om.tau0[:, it],
+            'k',
+            lw=3,
+            label='recovered tauqs'
+        )
+
+        for k in [98,99,100,101,102]:
+            plt.plot(
+                grid.y+2000,
+                om.taumall[:,k,it],
+                '--',
+                label=f'col {k}'
+            )
+
+        plt.legend()
+        plt.grid(True)
 
         # ─────────────────────────────────────────────
         # 2. Extract 2D fields
@@ -1606,6 +1656,7 @@ class FaultSlipModel:
             ax.invert_yaxis()
 
         plt.tight_layout()
+        fig.savefig(self.output.out / f"fields_it{it}.png", dpi=150)
 
         plt.show()
 
