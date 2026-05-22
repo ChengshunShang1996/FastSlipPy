@@ -39,8 +39,8 @@ class ModelParameters:
     # --- Rate-and-state defaults (used when heterogeneous profile is off) ---
     mu0: float = 0.3             # Reference friction coefficient
     V0: float = 1e-6             # Reference slip rate [m/s]
-    a0: float = 0.015             # Direct effect (homogeneous fallback)
-    b0: float = 0.01            # Evolution effect (homogeneous fallback)
+    a0: float = 0.01             # Direct effect (homogeneous fallback)
+    b0: float = 0.015            # Evolution effect (homogeneous fallback)
     L: float = 0.5               # Characteristic slip distance [m]
     Vw: float = 1e90             # Dynamic weakening velocity [m/s]
     Vi: float = 1e-30            # Initial/background slip rate [m/s]
@@ -50,7 +50,7 @@ class ModelParameters:
     dt_init: float = 1.0         # Initial time step [s]
     dt_max: float = 1e6          # Maximum time step [s]
     yr = 365 * 24 * 3600.0       # Seconds in a year
-    tload: float = 10.0 * yr     # Time to apply pressure rate change [s]  #TODO: CHECK
+    tload: float = 1000.0 * yr     # Time to apply pressure rate change [s]  #TODO: CHECK
 
     # --- Pressure rate ---
     dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]

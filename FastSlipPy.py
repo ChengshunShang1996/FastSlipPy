@@ -49,248 +49,10 @@ from src.pre_processing.model_parameters import ModelParameters
 from src.pre_processing.grid import Grid
 from src.pre_processing.frictional_zones import FrictionalZones
 from src.solver.stress_state import StressState
+from src.solver.fault_state import FaultState
+from src.solver.matrix_builder import MatrixBuilder
+from src.utilities.stress_cal_util import StressCalUtil
 from src.post_processing import *
-
-# ─────────────────────────────────────────────────────────────
-# 5.  Fault State
-# ─────────────────────────────────────────────────────────────
-
-class FaultState:
-    """
-    Holds and evolves the on-fault variables:
-      U      – cumulative slip [m]
-      V      – slip rate [m/s]
-      theta  – state variable [s]
-      sigma  – effective normal stress [Pa]
-      tau    – shear stress [Pa]
-    """
-
-    def __init__(self, p: ModelParameters, stress: StressState,
-                 fric: FrictionalZones):
-        self.p = p
-        Ny = p.Ny
-        self.U     = np.zeros(Ny)
-        self.V     = np.full(Ny, p.Vi)
-        logarg = 2 * p.V0 / p.Vi * np.sinh((stress.tau0 - p.eta * p.Vi) / fric.a / stress.sigman0)
-        self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.emath.log(logarg)- p.mu0 / fric.b))
-        self.sigma = stress.sigman0.copy()
-        self.tau   = stress.tau0 - p.eta * self.V
-
-    # ------------------------------------------------------------------
-    def solve_slip_rate2(self,
-                    tauqs_col: np.ndarray,
-                    stress: StressState,
-                    fric: FrictionalZones):
-
-        p = self.p
-
-        for iy in range(p.Ny):
-
-            rhs = tauqs_col[iy] + stress.tau0[iy]
-            a_i = fric.a[iy]
-            b_i = fric.b[iy]
-            th  = self.theta[iy]
-            sig = self.sigma[iy]
-
-            # arg = np.clip(
-            #     (p.mu0 + b_i*np.log(p.V0*th/p.L))/a_i,
-            #     -500.0,
-            #     500.0
-            # )
-
-            arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
-
-            flash_denom = 1.0 + p.L/(p.Vw*th)
-
-            exp_arg = np.exp(arg)
-
-            # -----------------------------------------
-            # monotone friction equation
-            # -----------------------------------------
-
-            def equation(VV):
-                friction = (sig * a_i * np.arcsinh(VV/(2.0*p.V0) * exp_arg))
-                return friction/flash_denom + p.eta*VV - rhs
-
-            # guaranteed bracket
-            lo = 1e-40
-
-            #hi = max(2.0 * rhs / p.eta, float(np.max(self.V))) 
-            hi = np.max(self.V)*2
-
-            try:
-
-                # sol = log_bisection(
-                #     equation,
-                #     lo,
-                #     hi,
-                #     tol_log=1e-14,
-                #     tol_f=5,
-                #     maxiter=200
-                # )
-
-                x, fx, flag = bisection(
-                    equation,
-                    lo,
-                    hi,
-                    target=0.0,
-                    tolX=0.0,
-                    tolFun=5,
-                    maxiter=1e3)
-
-                if np.isfinite(x):
-                    self.V[iy] = x
-
-            except Exception as e:
-
-                print(
-                    f"[iy={iy}] solver failed: {e} "
-                    f"f(lo)={equation(lo):.3e} "
-                    f"f(hi)={equation(hi):.3e}"
-                )
-        
-        self.V = np.maximum(self.V, 1e-40)
-
-        self.V[0]  = self.V[1]
-        self.V[-1] = self.V[-2]
-
-    def solve_slip_rate1(self, tauqs_col: np.ndarray, stress: StressState,
-                    fric: FrictionalZones):
-        """
-        Solve for V at each fault node using the rate-and-state friction law
-        with flash heating:
-
-            σ · a · arcsinh[ V/(2V₀) · exp((μ₀ + b·ln(V₀θ/L))/a) ]
-                / (1 + L/(Vw·θ))   +   η·V   =   τ_qs + τ₀
-
-        Exact equivalent of MATLAB:
-            V(iy) = fzero(@(VV) ..., V(iy))
-
-        Strategy
-        --------
-        The equation is STRICTLY MONOTONE INCREASING in V (both the arcsinh
-        friction term and η·V are non-decreasing, with η·V strictly increasing).
-        Therefore there is EXACTLY ONE root, and the bracket
-
-            lo = 1e-40,   hi = 2 · rhs / η
-
-        is GUARANTEED valid for all physically meaningful inputs:
-        • f(lo) ≈ –rhs < 0  (arcsinh(0) = 0,  η·0 = 0)
-        • f(hi) ≥ η·(2·rhs/η) – rhs = rhs > 0  (friction term ≥ 0)
-
-        brentq on this bracket is the closest Python equivalent to MATLAB's
-        fzero, which also uses Brent's method after locating a bracket from x0.
-        """
-        p = self.p
-
-        for iy in range(p.Ny):
-            rhs = tauqs_col[iy] + stress.tau0[iy]
-
-            # rhs must be positive for a physical solution to exist.
-            # (Both tauqs and tau0 are positive driving stresses.)
-            if rhs <= 0:
-                # No positive-V root exists; keep previous value.
-                continue
-
-            a_i  = fric.a[iy]
-            b_i  = fric.b[iy]
-            th   = self.theta[iy]
-            sig  = self.sigma[iy]
-
-            # Precompute constants for this node (same for every function eval)
-            arg         = np.clip((p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i,
-                                -500.0, 500.0)
-            flash_denom = 1.0 + p.L / (p.Vw * th)
-
-            #print(f"[iy={iy}] tauqs={tauqs_col[iy]:.6e} tau0={stress.tau0[iy]:.6e}  a={a_i:.6e}  b={b_i:.6e}  th={th:.6e}  sig={sig:.6e} mu={p.mu0:.6e}  V0={p.V0:.6e} L={p.L:.6e}  Vw={p.Vw:.6e} eta={p.eta:.6e}")
-
-            def equation(VV):
-                friction = sig * a_i * np.arcsinh(VV / (2.0 * p.V0) * np.exp(arg))
-                return friction / flash_denom + p.eta * VV - rhs
-
-            # Analytically guaranteed bracket — no search loop needed.
-            lo = 1e-40
-            hi = 2.0 * rhs / p.eta   # f(hi) >= rhs > 0  always
-            #hi = max(self.V)
-
-            #print(f"[iy={iy}] V={self.V[iy]:.6e}")
-            
-            try:
-                #sol = brentq(equation, lo, hi, xtol=1e-14, rtol=1e-12, maxiter=200)
-                sol = brentq(
-                            equation,
-                            lo,
-                            hi,
-                            xtol=1e-300,
-                            rtol=1e-15,
-                            maxiter=1000
-                        )
-                self.V[iy] = sol
-            except Exception as e:
-                print(f"[iy={iy}] brentq failed: {e}  "
-                    f"f(lo)={equation(lo):.3e}  f(hi)={equation(hi):.3e}")
-                # Keep previous V[iy]
-
-            #print(f"[iy={iy}] V={self.V[iy]:.6e}")
-            #print(f"*************")
-
-        self.V = np.maximum(self.V, 1e-40)
-        self.V[0]  = self.V[1]
-        self.V[-1] = self.V[-2]
-
-    def solve_slip_rate(self, tauqs_col: np.ndarray, stress: StressState,
-                        fric: FrictionalZones):
-        """
-        Solve for V at each fault node using the rate-and-state friction law
-        (with flash heating):
-
-            σ · a · asinh[ V/(2V₀) · exp((μ₀ + b·ln(V₀θ/L))/a) ]
-                / (1 + L/(Vw·θ))   +   η·V   =   τ_qs + τ₀
-        """
-        p = self.p
-        for iy in range(p.Ny):
-            rhs = tauqs_col[iy] + stress.tau0[iy]
-            a_i = fric.a[iy];  b_i = fric.b[iy]
-            th  = self.theta[iy]
-            sig = self.sigma[iy]
-
-            def equation(VV):
-                arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
-                friction = sig * a_i * np.arcsinh(VV / (2 * p.V0) * np.exp(arg))
-                flash    = 1 + p.L / p.Vw / th
-                return friction / flash + p.eta * VV - rhs
-
-            # Guard against sign errors in the bracket
-            try:
-                self.V[iy] = brentq(equation, 1e-40, 1e10, xtol=1e-12)
-            except ValueError:
-                pass   # keep previous V if bracketing fails
-
-        self.V = np.maximum(self.V, 1e-40)
-        self.V[0]  = self.V[1]
-        self.V[-1] = self.V[-2]
-    
-    # ------------------------------------------------------------------
-    def advance(self, dt: float, tauqs_col: np.ndarray, stress: StressState):
-        """Update theta, U, tau after the velocity solve."""
-        p = self.p
-        
-        self.theta = self.theta + dt * (1 - self.V * self.theta / p.L)
-        # TODO: this one is better
-        # x = self.V * dt / p.L
-        # expo = x > 1e-6
-        # theta_new = np.empty_like(self.theta)
-        # theta_new[expo] = (
-        #     p.L / self.V[expo] * (1.0 - np.exp(-x[expo]))
-        #     + self.theta[expo] * np.exp(-x[expo]))
-        # theta_new[~expo] = (self.theta[~expo]
-        #     + dt * (1.0 - self.V[~expo] * self.theta[~expo] / p.L))
-        # self.theta = theta_new
-
-        self.tau   = tauqs_col + stress.tau0 #- p.eta * self.V
-        self.U     = self.U + dt * self.V
-        #print(f"self.U=[{', '.join(f'{x:.6e}' for x in self.U)}]")
-        #print('*************')
 
 # ─────────────────────────────────────────────────────────────
 # 6.  Adaptive time-step stabiliser  (ksi)
@@ -313,274 +75,6 @@ def build_ksi(p: ModelParameters, fric: FrictionalZones,
 
     return ksi
 
-
-# ─────────────────────────────────────────────────────────────
-# 7.  Matrix Builder  (LH, RH)
-# ─────────────────────────────────────────────────────────────
-
-class MatrixBuilder:
-    """
-    Assembles the sparse stiffness matrix LH and right-hand-side vector RH
-    for the quasi-static elastic equilibrium problem on the staggered grid.
-
-    The stencil follows the original MATLAB build_LH / build_RH logic exactly.
-    """
-
-    def __init__(self, p: ModelParameters, grid: Grid):
-        self.p    = p
-        self.grid = grid
-
-    # ------------------------------------------------------------------
-    # Helper: global DOF indices
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _dofs(ix: int, iy: int, Ny: int):
-        """Return (kux, kuy) 0-based DOF indices for node (ix, iy)."""
-        kux = ((ix) * (Ny + 1) + iy) * 2        # ux DOF (0-based)
-        kuy = kux + 1                            # uy DOF (0-based)
-        return kux, kuy
-
-    # ------------------------------------------------------------------
-    def build_LH(self) -> sparse.csr_matrix:
-        p, g = self.p, self.grid
-        Nx, Ny, N = p.Nx, p.Ny, g.N
-        dx, dy   = g.dx, g.dy
-        lam, G   = p.lam, p.G
-        sina, cosa = g.sina, g.cosa
-
-        rows, cols, vals = [], [], []
-
-        def add(r, c, v):
-            rows.append(r); cols.append(c); vals.append(v)
-
-        for ix in range(Nx+1):           # 0 … Nx  (MATLAB 1 … Nx+1)
-            for iy in range(Ny+1):       # 0 … Ny
-
-                kux, kuy = self._dofs(ix, iy, Ny)
-                mid = (Nx) // 2            # fault column index (0-based)
-
-                # ── uy equation (iy < Ny) ──────────────────────────────
-                if iy < Ny:
-                    if ix == 0: # Neumann BC
-                        add(kuy, kuy, 1);  add(kuy, kuy + (Ny+1)*2, -1)
-                    elif ix == Nx:
-                        add(kuy, kuy, 1);  add(kuy, kuy - (Ny+1)*2, -1)
-                    elif iy == 0:
-                        add(kuy, kuy, 1)
-                    elif iy == Ny - 1:
-                        add(kuy, kuy, 1)
-                    elif ix == mid:
-                        # Fault left side
-                        add(kuy, kuy, -1); add(kuy, kuy + (Ny+1)*2, 1)
-                    elif ix == mid + 1:
-                        # Fault right side
-                        kux_n, kuy_n = self._dofs(ix, iy, Ny)
-                        add(kuy, kuy - 2*(Ny+1)*2, 1)
-                        add(kuy, kuy - (Ny+1)*2,  -1)
-                        add(kuy, kuy,              -1)
-                        add(kuy, kuy + (Ny+1)*2,   1)
-                        # Cross-coupling terms with ux
-                        add(kuy, kux + (Ny+1)*2,       cosa/4)
-                        add(kuy, kux + (Ny+1)*2 + 2,   cosa/4)
-                        add(kuy, kux - (Ny+1)*2,       -cosa/2)
-                        add(kuy, kux - (Ny+1)*2 + 2,   -cosa/2)
-                        add(kuy, kux - 3*(Ny+1)*2,     cosa/4)
-                        add(kuy, kux - 3*(Ny+1)*2 + 2, cosa/4)
-                        add(kuy, kuy + (Ny+1)*2 - 2,   cosa/4/dy*dx)
-                        add(kuy, kuy + (Ny+1)*2 + 2,  -cosa/4/dy*dx)
-                        add(kuy, kuy - 2,               cosa/4/dy*dx)
-                        add(kuy, kuy + 2,              -cosa/4/dy*dx)
-                        add(kuy, kuy - (Ny+1)*2 - 2,  -cosa/4/dy*dx)
-                        add(kuy, kuy - (Ny+1)*2 + 2,   cosa/4/dy*dx)
-                        add(kuy, kuy - 2*(Ny+1)*2 - 2,  -cosa/4/dy*dx)
-                        add(kuy, kuy - 2*(Ny+1)*2 + 2,   cosa/4/dy*dx)
-                    else:
-                        # Interior bulk
-                        r2 = dx*dx / dy/dy * (lam + 2*G) / G
-                        add(kuy, kuy, -2 - 2*r2)
-                        add(kuy, kuy - (Ny+1)*2, 1)
-                        add(kuy, kuy + (Ny+1)*2, 1)
-                        add(kuy, kuy - 2,  r2)
-                        add(kuy, kuy + 2,  r2)
-                        c_val = cosa/dy*dx*(lam + 3*G)/G/4
-                        add(kuy, kuy + (Ny+1)*2 - 2,   c_val)
-                        add(kuy, kuy + (Ny+1)*2 + 2,  -c_val)
-                        add(kuy, kuy - (Ny+1)*2 - 2,  -c_val)
-                        add(kuy, kuy - (Ny+1)*2 + 2,   c_val)
-                        #kux, _ = self._dofs(ix, iy, Ny)
-                        fac = 1/dy*dx*(lam + G)/G
-                        if ix == 1 or ix == Nx - 1:
-                            add(kuy, kux - (Ny+1)*2,      fac)
-                            add(kuy, kux - (Ny+1)*2 + 2, -fac)
-                            add(kuy, kux,                 -fac)
-                            add(kuy, kux + 2,              fac)
-                        else:
-                            cf = cosa*(lam + G)/G/4
-                            add(kuy, kux - (Ny+1)*2,      fac + cf)
-                            add(kuy, kux - (Ny+1)*2 + 2, -fac + cf)
-                            add(kuy, kux,                 -fac + cf)
-                            add(kuy, kux + 2,              fac + cf)
-                            add(kuy, kux - 2*(Ny+1)*2,    -cf)
-                            add(kuy, kux - 2*(Ny+1)*2+2,  -cf)
-                            add(kuy, kux + (Ny+1)*2,      -cf)
-                            add(kuy, kux + (Ny+1)*2 + 2,  -cf)
-                else:
-                    add(kuy, kuy, 1)
-
-                # ── ux equation (ix < Nx) ──────────────────────────────
-                if ix < Nx:
-                    # _, kuy_n = self._dofs(ix, iy, Ny)
-                    #mid_ix = mid
-                    r2 = dx*dx / dy/dy
-                    r_lam = (lam + 2*G) / G
-                    if iy == 0:
-                        add(kux, kux, 1); add(kux, kux + 2, -1)
-                    elif iy == Ny:
-                        add(kux, kux, 1); add(kux, kux - 2, -1)
-                    elif ix == 0:
-                        add(kux, kux, 1)
-                    elif ix == Nx - 1:
-                        add(kux, kux, 1)
-                    elif ix == mid:
-                        # Fault column – normal stress jump condition
-                        add(kux, kux,              -2*r_lam)
-                        add(kux, kux + (Ny+1)*2,   r_lam)
-                        add(kux, kux - (Ny+1)*2,   r_lam)
-                        fac = lam/G/dy*dx
-                        add(kux, kuy,                    -fac)
-                        add(kux, kuy + (Ny+1)*2,          fac)
-                        add(kux, kuy - 2,                 fac)
-                        add(kux, kuy + (Ny+1)*2 - 2,     -fac)
-                    else:
-                        # Interior bulk
-                        add(kux, kux, -2*r_lam - 2*r2)
-                        add(kux, kux - (Ny+1)*2, r_lam)
-                        add(kux, kux + (Ny+1)*2, r_lam)
-                        add(kux, kux - 2, r2)
-                        add(kux, kux + 2, r2)
-                        c_val = cosa/dy*dx*(lam + 3*G)/G/4
-                        add(kux, kux + (Ny+1)*2 - 2,   c_val)
-                        add(kux, kux + (Ny+1)*2 + 2,  -c_val)
-                        add(kux, kux - (Ny+1)*2 - 2,  -c_val)
-                        add(kux, kux - (Ny+1)*2 + 2,   c_val)
-                        fac = 1/dy*dx*(lam + G)/G
-                        if iy == 1 or iy == Ny - 1:
-                            add(kux, kuy + (Ny+1)*2,      fac)
-                            add(kux, kuy + (Ny+1)*2 - 2, -fac)
-                            add(kux, kuy,                 -fac)
-                            add(kux, kuy - 2,              fac)
-                        else:
-                            cf = cosa/dy/dy*dx*dx*(lam + G)/G/4
-                            add(kux, kuy + (Ny+1)*2,        fac + cf)
-                            add(kux, kuy + (Ny+1)*2 - 2,   -fac + cf)
-                            add(kux, kuy,                   -fac + cf)
-                            add(kux, kuy - 2,                fac + cf)
-                            add(kux, kuy + (Ny+1)*2 + 2,   -cf)
-                            add(kux, kuy + (Ny+1)*2 - 4,   -cf)
-                            add(kux, kuy + 2,               -cf)
-                            add(kux, kuy - 4,               -cf)
-                else:
-                    add(kux, kux, 1)
-
-        LH = sparse.csr_matrix((vals, (rows, cols)), shape=(N, N))
-
-        #from scipy.io import loadmat
-        #LH_mat = loadmat('LH.mat')['LH']
-        #print(np.max(np.abs(LH - LH_mat)))
-        return LH
-
-    # ------------------------------------------------------------------
-    def build_RH(self, dPdt: float, V: np.ndarray) -> np.ndarray:
-        p, g = self.p, self.grid
-        Nx, Ny, N = p.Nx, p.Ny, g.N
-        dx, dy   = g.dx, g.dy
-        G        = p.G
-        sina, cosa = g.sina, g.cosa
-        y        = g.y
-        mid      = Nx // 2    # fault column 0-based
-
-        RH = np.zeros(N)
-
-        for ix in range(Nx+1):
-            for iy in range(Ny+1):
-                kux, kuy = self._dofs(ix, iy, Ny)
-
-                # ── uy block ──
-                if iy < Ny:
-                    #if ix not in (0, Nx) and iy not in (0, Ny - 1):
-                    if ix == 0:
-                        pass
-                    elif ix == Nx:
-                        pass
-                    elif iy == 0:
-                        #RH[kuy] = 0.0
-                        pass
-                    elif iy == Ny - 1:
-                        pass
-                    elif ix == mid:
-                        RH[kuy] = V[iy]
-                    elif ix == mid + 1:
-                        #RH[kuy] = -1 * V[iy]
-                        pass  # velocity BC handled above
-                    else:
-                        yv = y[iy]
-                        if yv == 850 and ix >= mid + 1:
-                            RH[kuy] =  dPdt / dy * dx*dx / G * sina
-                        if yv == 1050 and ix >= mid + 1:
-                            RH[kuy] = -dPdt / dy * dx*dx / G * sina
-                        if yv == 800 and ix <= mid:
-                            RH[kuy] =  dPdt / dy * dx*dx / G * sina
-                        if yv == 1000 and ix <= mid:
-                            RH[kuy] = -dPdt / dy * dx*dx / G * sina
-                        # if yv == 860 and ix >= mid + 1:
-                        #     RH[kuy] =  dPdt / dy * dx*dx / G * sina
-                        # if yv == 1060 and ix >= mid + 1:
-                        #     RH[kuy] = -dPdt / dy * dx*dx / G * sina
-                        # if yv == 820 and ix <= mid:
-                        #     RH[kuy] =  dPdt / dy * dx*dx / G * sina
-                        # if yv == 1020 and ix <= mid:
-                        #     RH[kuy] = -dPdt / dy * dx*dx / G * sina
-
-                # ── ux block ──
-                if ix < Nx:
-                    #if iy not in (0, Ny) and ix not in (0, Nx - 1):
-                    if iy == 0:
-                        pass
-                    elif iy == Ny:
-                        pass
-                    elif ix == 0:
-                        pass
-                    elif ix == Nx - 1:
-                        pass
-                    elif ix == mid:
-                        yv = y[iy]
-                        if 800 < yv <= 850:
-                            RH[kux] = -dPdt * dx / G
-                        if 1000 < yv <= 1050:
-                            RH[kux] =  dPdt * dx / G
-                        # if 820 < yv <= 860:
-                        #     RH[kux] = -dPdt * dx / G
-                        # if 1020 < yv <= 1060:
-                        #     RH[kux] =  dPdt * dx / G
-                    else:
-                        yv = y[iy]
-                        if yv == 1050 and ix > mid + 1:
-                            RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
-                        if yv == 1000 and ix < mid + 1:
-                            RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
-                        if yv == 850 and ix > mid + 1:
-                            RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
-                        if yv == 800 and ix < mid + 1:
-                            RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
-                        # if yv == 1060 and ix > mid + 1:
-                        #     RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
-                        # if yv == 1020 and ix < mid + 1:
-                        #     RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
-                        # if yv == 860 and ix > mid + 1:
-                        #     RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
-                        # if yv == 820 and ix < mid + 1:
-                        #     RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
-        return RH
 
 # ─────────────────────────────────────────────────────────────
 # 8.  Output Manager
@@ -679,232 +173,6 @@ class OutputManager:
         return dict(np.load(fname))
 
 # ─────────────────────────────────────────────────────────────
-# 9.  Stress computation helpers
-# ─────────────────────────────────────────────────────────────
-
-def _movmean_discard(arr: np.ndarray, axis: int) -> np.ndarray:
-    """Running mean of adjacent pairs along *axis*, discarding endpoints."""
-    sl_a = [slice(None)] * arr.ndim
-    sl_b = [slice(None)] * arr.ndim
-    sl_a[axis] = slice(None, -1)
-    sl_b[axis] = slice(1, None)
-    return (arr[tuple(sl_a)] + arr[tuple(sl_b)]) / 2
-
-def compute_stress_fields(uy, ux, dx, dy, lam, G, cosa, sina, Ny, Nx):
-    """
-    Compute tauqs (Ny × Nx) and sigmaqs (Ny-1 × Nx-1) from displacement fields.
-
-    Grid shapes (matching MATLAB staggered layout):
-        uy  : (Ny,   Nx+1)   – y-displacement on uy-nodes
-        ux  : (Ny+1, Nx)     – x-displacement on ux-nodes
-
-    MATLAB equivalents:
-        tauqs   = G/sina*(diff(uy,1,2)/dx
-                          + (1-2*cosa²)*diff(ux,1,1)/dy
-                          + cosa*(movmean(duxdx,2,1,'discard')
-                                  - movmean(duydy,2,2,'discard')))
-        sigmaqs = (λ+2G)*diff(ux[2:Ny,:],1,2)/dx
-                  + λ*diff(uy[:,2:Nx],1,1)/dy
-                  - 2G*cosa*movmean(movmean(diff(ux,1,1)/dy,2,2,'discard'),2,1,'discard')
-    """
-    # ── Term 1: diff(uy, axis=1) / dx  →  shape (Ny, Nx) ──────────────
-    # uy is (Ny, Nx+1), diff along columns → (Ny, Nx)  ✓
-    term1 = np.diff(uy, axis=1) / dx                    # (Ny, Nx)
-
-    # ── Term 2: (1-2cos²α) * diff(ux, axis=0) / dy  →  shape (Ny, Nx) ─
-    # ux is (Ny+1, Nx), diff along rows → (Ny, Nx)  ✓
-    term2 = (1 - 2 * cosa**2) * np.diff(ux, axis=0) / dy   # (Ny, Nx)
-
-    # ── Term 3a: movmean(duxdx, 2, axis=0, 'discard')  →  (Ny, Nx) ────
-    # duxdx = gradient(ux, dx, axis=1): ux is (Ny+1, Nx) → duxdx (Ny+1, Nx)
-    # movmean of adjacent pairs along axis=0 discarding endpoints → (Ny, Nx)
-    duxdx = np.gradient(ux, dx, axis=1)                 # (Ny+1, Nx)
-    mm_duxdx = _movmean_discard(duxdx, axis=0)          # (Ny,   Nx)  ✓
-
-    # ── Term 3b: movmean(duydy, 2, axis=1, 'discard')  →  (Ny, Nx) ────
-    # duydy = gradient(uy, dy, axis=0): uy is (Ny, Nx+1) → duydy (Ny, Nx+1)
-    # movmean of adjacent pairs along axis=1 discarding endpoints → (Ny, Nx)
-    duydy = np.gradient(uy, dy, axis=0)                 # (Ny, Nx+1)
-    mm_duydy = _movmean_discard(duydy, axis=1)          # (Ny, Nx)    ✓
-
-    # ── Assemble tauqs ──────────────────────────────────────────────────
-    tauqs = G / sina * (term1 + term2 + cosa * (mm_duxdx - mm_duydy))  # (Ny, Nx)
-
-    # Interpolate across the fault column (fault sits at mid)
-    mid = Nx // 2    # 0-based centre column index
-    tauqs[:, mid] = (tauqs[:, mid - 1] + tauqs[:, mid + 1]) / 2
-
-    # ══ sigmaqs  (Ny-1, Nx-1) ═══════════════════════════════════════════
-    # MATLAB: diff(ux(2:Ny,:),1,2)/dx
-    #   ux(2:Ny,:) in 1-based = ux[1:Ny, :] in 0-based → shape (Ny-1, Nx)
-    #   diff along columns → (Ny-1, Nx-1)  ✓
-    s_term1 = np.diff(ux[1:Ny, :], axis=1) / dx         # (Ny-1, Nx-1)
-
-    # MATLAB: diff(uy(:,2:Nx),1,1)/dy
-    #   uy(:,2:Nx) in 1-based = uy[:, 1:Nx] in 0-based → shape (Ny, Nx-1)
-    #   diff along rows → (Ny-1, Nx-1)  ✓
-    s_term2 = np.diff(uy[:, 1:Nx], axis=0) / dy         # (Ny-1, Nx-1)
-
-    # MATLAB: movmean(movmean(diff(ux,1,1)/dy, 2,2,'discard'), 2,1,'discard')
-    #   diff(ux,1,1)/dy: ux (Ny+1,Nx), diff rows → (Ny, Nx)
-    #   inner movmean along axis=1 'discard' → (Ny, Nx-1)
-    #   outer movmean along axis=0 'discard' → (Ny-1, Nx-1)  ✓
-    dux_dy     = np.diff(ux, axis=0) / dy                # (Ny,   Nx)
-    mm_inner   = _movmean_discard(dux_dy, axis=1)        # (Ny,   Nx-1)
-    mm_outer   = _movmean_discard(mm_inner, axis=0)      # (Ny-1, Nx-1)
-
-    sigmaqs = ((lam + 2*G) * s_term1
-               + lam       * s_term2
-               - 2*G*cosa  * mm_outer)                   # (Ny-1, Nx-1)
-
-    return tauqs, sigmaqs
-
-def log_bisection(func,
-                  lo,
-                  hi,
-                  tol_log=1e-14,
-                  tol_f=1e-12,
-                  maxiter=200):
-    """
-    Robust log-space bisection solver.
-
-    Solves:
-        func(V) = 0
-
-    using:
-        x = log(V)
-
-    Extremely stable for:
-        V ~ 1e-40 ... 1e+10
-    """
-
-    f_lo = func(lo)
-    f_hi = func(hi)
-
-    # root must be bracketed
-    if f_lo * f_hi > 0:
-        return np.nan
-
-    log_lo = np.log(lo)
-    log_hi = np.log(hi)
-
-    for _ in range(maxiter):
-
-        log_mid = 0.5 * (log_lo + log_hi)
-
-        mid = np.exp(log_mid)
-
-        f_mid = func(mid)
-
-        # convergence tests
-        if abs(log_hi - log_lo) < tol_log:
-            return mid
-
-        if abs(f_mid) < tol_f:
-            return mid
-
-        # keep bracket
-        if f_lo * f_mid < 0:
-            log_hi = log_mid
-            f_hi = f_mid
-        else:
-            log_lo = log_mid
-            f_lo = f_mid
-
-    return np.exp(0.5 * (log_lo + log_hi))
-
-def bisection(f,
-              lb,
-              ub,
-              target=0.0,
-              tolX=1e-6,
-              tolFun=0.0,
-              maxiter=1000):
-
-    # shift function by target
-    def g(x):
-        return f(x) - target
-
-    flb = g(lb)
-    fub = g(ub)
-
-    if flb == 0:
-        return lb, target, 3
-
-    if fub == 0:
-        return ub, target, 3
-
-    # root must be bracketed
-    if flb * fub > 0:
-        return np.nan, np.nan, -2
-
-    #for _ in range(maxiter):
-
-    x = 0.5 * (lb + ub)
-
-    fx = g(x)
-
-    outsideTolX = abs(ub - x) > tolX
-    outsideTolFun = abs(fx) > tolFun
-
-    # convergence
-    if (not outsideTolX) and (not outsideTolFun):
-        return x, fx + target, 3
-
-    if not outsideTolX:
-        return x, fx + target, 1
-
-    if not outsideTolFun:
-        return x, fx + target, 2
-
-    # keep bracket
-    if np.sign(fx) != np.sign(fub):
-        lb = x
-        flb = fx
-    else:
-        ub = x
-        fub = fx
-
-    return x, fx + target, -1
-
-
-def cosd(angle_deg, tol=1e-15):
-
-    angle = angle_deg % 360
-
-    if np.isclose(angle, 0, atol=tol):
-        return 1.0
-
-    if np.isclose(angle, 90, atol=tol):
-        return 0.0
-
-    if np.isclose(angle, 180, atol=tol):
-        return -1.0
-
-    if np.isclose(angle, 270, atol=tol):
-        return 0.0
-
-    return np.cos(np.deg2rad(angle))
-
-
-def sind(angle_deg, tol=1e-15):
-
-    angle = angle_deg % 360
-
-    if np.isclose(angle, 0, atol=tol):
-        return 0.0
-
-    if np.isclose(angle, 90, atol=tol):
-        return 1.0
-
-    if np.isclose(angle, 180, atol=tol):
-        return 0.0
-
-    if np.isclose(angle, 270, atol=tol):
-        return -1.0
-
-    return np.sin(np.deg2rad(angle))
-# ─────────────────────────────────────────────────────────────
 # 10.  Top-level Model Driver
 # ─────────────────────────────────────────────────────────────
 
@@ -948,16 +216,13 @@ class FaultSlipModel:
         self.tauqs   = np.zeros((Ny, Nx))
         self.sigmaqs = np.zeros((Ny - 1, Nx - 1))
 
-    # ------------------------------------------------------------------
     def _build_and_factor_LH(self, dPdt: float):
         builder = MatrixBuilder(self.p, self.grid)
         LH = builder.build_LH()
-        #print(LH)
         self.RH_builder = builder
         self.dPdt = dPdt
         self._solve = factorized(LH.tocsc())   # sparse LU decomposition
 
-    # ------------------------------------------------------------------
     def run(self):
         t0_wall = time.perf_counter()
         p = self.p
@@ -1007,8 +272,6 @@ class FaultSlipModel:
             mid = Nx // 2
             self.fault.solve_slip_rate(self.tauqs[:, mid],
                                        self.stress, self.fric)
-            
-            #print(self.fault.V)
 
             # ── adaptive time step ──
             V_inner = self.fault.V[1: Ny - 1]
@@ -1030,12 +293,9 @@ class FaultSlipModel:
             # Inject velocity BC at fault column
             fault_rows = (np.arange(1, Ny - 1) + (Nx // 2) * (Ny + 1)) * 2 + 1
             RH[fault_rows] = self.fault.V[1: Ny - 1]
-            #print(RH[fault_rows])
 
             # ── elastic solve ──
             S   = self._solve(RH)
-            #vpx = S[0::2].reshape(Ny + 1, Nx + 1)
-            #vpy = S[1::2].reshape(Ny + 1, Nx + 1)
             vpx = np.reshape(S[0::2], (p.Nx+1, p.Ny+1), order='C').T
             vpy = np.reshape(S[1::2], (p.Ny+1, p.Nx+1), order='C').T
             self.vy = vpy[:Ny, :]
@@ -1046,7 +306,8 @@ class FaultSlipModel:
             self.ux += self.vx * dt
 
             # ── compute stress ──
-            self.tauqs, self.sigmaqs = compute_stress_fields(
+            StressCalculator = StressCalUtil()
+            self.tauqs, self.sigmaqs = StressCalculator.compute_stress_fields(
                 self.uy, self.ux, self.grid.dx, self.grid.dy,
                 p.lam, p.G, self.grid.cosa, self.grid.sina, Ny, Nx)
 
@@ -1054,13 +315,12 @@ class FaultSlipModel:
             mid_l = (Nx - 1) // 2 - 1
             mid_r = (Nx - 1) // 2
             sigmal = np.concatenate([[self.sigmaqs[0, mid_l]],
-                                     _movmean_discard(self.sigmaqs[:, mid_l], 0),
+                                     StressCalculator._movmean_discard(self.sigmaqs[:, mid_l], 0),
                                      [self.sigmaqs[-1, mid_l]]])
             sigmar = np.concatenate([[self.sigmaqs[0, mid_r]],
-                                     _movmean_discard(self.sigmaqs[:, mid_r], 0),
+                                     StressCalculator._movmean_discard(self.sigmaqs[:, mid_r], 0),
                                      [self.sigmaqs[-1, mid_r]]])
             self.fault.sigma = self.stress.sigman0 - np.minimum(sigmal, sigmar)
-            #self.fault.sigma = self.stress.sigman0 - 0.5 * (sigmal + sigmar)
 
             # ── pressure update ──
             self.stress.update_pressure(dt, dPdt)
@@ -1088,13 +348,10 @@ class FaultSlipModel:
             if phase == 2:
                 t2 += dt
 
-            # print(t)
-            # print(t2)
-
         # ── wrap up ──
         self.output.save_all()
         self.output.close()
-        print(f"Done.  Total wall time: {time.perf_counter()-t0_wall:.1f}s")
+        print(f"Done.  Total running time: {time.perf_counter()-t0_wall:.1f}s")
 
     def plot_results(self, it: int = -1):
         """
@@ -1261,102 +518,6 @@ class FaultSlipModel:
         plt.show()
 
         #return fig
-
-def test_rigid_translation():
-
-    """
-    Benchmark 1:
-    rigid body translation
-
-    ux = constant
-    uy = constant
-
-    Expected:
-        tauqs   = 0
-        sigmaqs = 0
-    """
-
-    # --------------------------------------------------
-    # 1. Build minimal model
-    # --------------------------------------------------
-
-    params = ModelParameters(
-        Nx=51,
-        Ny=51
-    )
-
-    grid = Grid(params)
-
-    # --------------------------------------------------
-    # 2. Constant displacement field
-    # --------------------------------------------------
-
-    ux_const = 1.2345
-    uy_const = -2.3456
-
-    # ux shape = (Ny+1, Nx)
-    ux = np.ones((params.Ny + 1, params.Nx)) * ux_const
-
-    # uy shape = (Ny, Nx+1)
-    uy = np.ones((params.Ny, params.Nx + 1)) * uy_const
-
-    # --------------------------------------------------
-    # 3. Compute stresses
-    # --------------------------------------------------
-
-    tauqs, sigmaqs = compute_stress_fields(
-        uy=uy,
-        ux=ux,
-        dx=grid.dx,
-        dy=grid.dy,
-        lam=params.lam,
-        G=params.G,
-        cosa=grid.cosa,
-        sina=grid.sina,
-        Ny=params.Ny,
-        Nx=params.Nx
-    )
-
-    # --------------------------------------------------
-    # 4. Compute errors
-    # --------------------------------------------------
-
-    max_tau = np.max(np.abs(tauqs))
-    max_sigma = np.max(np.abs(sigmaqs))
-
-    print("\n========== RIGID TRANSLATION TEST ==========")
-
-    print(f"max |tauqs|   = {max_tau:.3e}")
-    print(f"max |sigmaqs| = {max_sigma:.3e}")
-
-    # --------------------------------------------------
-    # 5. Pass/fail
-    # --------------------------------------------------
-
-    tol = 1e-12
-
-    if max_tau < tol and max_sigma < tol:
-        print("PASS")
-    else:
-        print("FAIL")
-
-    # --------------------------------------------------
-    # 6. Optional visualization
-    # --------------------------------------------------
-
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-
-    im0 = axes[0].imshow(tauqs)
-    axes[0].set_title("tauqs")
-
-    im1 = axes[1].imshow(sigmaqs)
-    axes[1].set_title("sigmaqs")
-
-    plt.colorbar(im0, ax=axes[0])
-    plt.colorbar(im1, ax=axes[1])
-
-    plt.tight_layout()
-    plt.show()
 
 def test_rigid_rotation():
 
