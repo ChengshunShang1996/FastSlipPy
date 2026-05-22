@@ -1,0 +1,174 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# ============================================================
+# Project Metadata
+# ============================================================
+
+[project]
+name = "fastslippy"
+version = "0.1.0"
+
+description = "Induced Seismic Fault Slip Modeling"
+readme = "README.md"
+
+requires-python = ">=3.10"
+
+license = { text = "MIT" }
+
+authors = [
+    { name = "Chengshun Shang", email = "c.shang@uu.nl" }
+]
+
+maintainers = [
+    { name = "Chengshun Shang", email = "c.shang@uu.nl" }
+]
+
+keywords = [
+    "earthquake",
+    "fault-slip",
+    "geophysics",
+    "computational-mechanics",
+    "simulation",
+    "finite-difference",
+    "fault-dynamics",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering",
+
+    "License :: OSI Approved :: MIT License",
+
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+
+    "Operating System :: OS Independent",
+]
+
+# ============================================================
+# Runtime Dependencies
+# ============================================================
+
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+]
+
+# ============================================================
+# Optional Dependencies
+# ============================================================
+
+[project.optional-dependencies]
+
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "black>=24.0",
+    "ruff>=0.4",
+    "mypy>=1.8",
+    "build>=1.0",
+    "twine>=5.0",
+]
+
+docs = [
+    "mkdocs",
+    "mkdocs-material",
+]
+
+# ============================================================
+# URLs
+# ============================================================
+
+[project.urls]
+Homepage = "https://github.com/ChengshunShang1996/FastSlipPy"
+Documentation = "https://github.com/ChengshunShang1996/FastSlipPy"
+Repository = "https://github.com/ChengshunShang1996/FastSlipPy"
+Issues = "https://github.com/ChengshunShang1996/FastSlipPy/issues"
+
+# ============================================================
+# Console Scripts (CLI)
+# ============================================================
+
+#[project.scripts]
+#fastslippy = "fastslippy.cli:main"
+
+# ============================================================
+# setuptools package discovery
+# ============================================================
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# ============================================================
+# Include package data
+# ============================================================
+
+[tool.setuptools.package-data]
+fastslippy = [
+    "*.txt",
+    "*.md",
+    "*.json",
+]
+
+# ============================================================
+# pytest
+# ============================================================
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+# ============================================================
+# Black
+# ============================================================
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+# ============================================================
+# Ruff
+# ============================================================
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+]
+
+# ============================================================
+# MyPy
+# ============================================================
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+# ============================================================
+# Coverage
+# ============================================================
+
+[tool.coverage.run]
+source = ["src/fastslippy"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

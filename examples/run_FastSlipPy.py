@@ -12,7 +12,7 @@ __license__     = "MIT License"
 from src.fast_slip_py import FastSlipPy
 from src.pre_processing.model_parameters import ModelParameters
 
-class RunFaultSlipPy(FastSlipPy):
+class RunFastSlipPy(FastSlipPy):
     """
     This can be customized for specific runs.
     """
@@ -30,5 +30,5 @@ if __name__ == "__main__":
     )'''
 
     params = ModelParameters()
-    model = RunFaultSlipPy(params=params, output_dir="output")
+    model = RunFastSlipPy(params=params, output_dir="output")
     model.run()
