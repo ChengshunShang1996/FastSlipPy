@@ -55,6 +55,22 @@ Required Python Pakage:
 
 ## Instructions
 
+### Install
+
+Download this software or use Git:
+
+> git clone https://github.com/ChengshunShang1996/FastSlipPy.git
+
+Then, in the project folder, run cmd command:
+
+> pip install -e .
+
+Test it:
+
+> from fastslippy import FastSlipPy
+
+If you see the logo, you have successfully installed it.
+
 ### Input and Output Files
 
 * **Input Parameters (_.json_)**: 
