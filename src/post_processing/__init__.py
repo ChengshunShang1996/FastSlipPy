@@ -25,7 +25,7 @@ SOFTWARE.
 """
 
 
-__all__         =["pre_processing","post_processing","solver"]
+__all__         =[]
 
 __author__      = "Chengshun Shang (Utrecht University)"
 __copyright__   = "Copyright (C) 2026-present by Chengshun Shang"
@@ -35,11 +35,11 @@ __URL__         = 'https://github.com/ChengshunShang1996/FastSlipPy'
 __logo__        = ''
 
 
-print(f"\n"
-      f"{__logo__}\n"
-      f"FastSlipPy\n"
-      f"Version: {__version__}\n"
-      f"Author: {__author__}\n"
-      f"Copyright: {__copyright__}\n"
-      f"URL: {__URL__}\n"
-      f"----------------------------------------------------------------------------\n")
+# print(f"\n"
+#       f"{__logo__}\n"
+#       f"FastSlipPy\n"
+#       f"Version: {__version__}\n"
+#       f"Author: {__author__}\n"
+#       f"Copyright: {__copyright__}\n"
+#       f"URL: {__URL__}\n"
+#       f"----------------------------------------------------------------------------\n")

@@ -25,14 +25,22 @@ SOFTWARE.
 """
 
 
-__all__         =["pre_processing","post_processing","solver"]
+__all__         =["pre_processing","post_processing","solver","utilities"]
 
 __author__      = "Chengshun Shang (Utrecht University)"
 __copyright__   = "Copyright (C) 2026-present by Chengshun Shang"
 __version__     = "0.0.1"
 __license__     = "MIT License"
 __URL__         = 'https://github.com/ChengshunShang1996/FastSlipPy'
-__logo__        = ''
+__logo__        = '''
+ ______         _    _____ _         _____       
+|  ____|       | |  / ____| (_)     |  __ \      
+| |__ __ _ ___ | |_| (___ | |_ _ __ | |__) |   _ 
+|  __/ _` / __|| __|\___ \| | | '_ \|  ___/ | | |
+| | | (_| \__ \| |_ ____) | | | |_) | |   | |_| |
+|_|  \__,_|___/ \__|_____/|_|_| .__/|_|    \__, |
+                              | |           __/ |
+                              |_|          |___/ '''
 
 
 print(f"\n"
