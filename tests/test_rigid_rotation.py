@@ -15,18 +15,44 @@ from fastslippy.pre_processing.model_parameters import ModelParameters
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.utilities.stress_cal_util import StressCalUtil
 
-def test_rigid_translation():
+def test_rigid_rotation():
+
+    """
+    Benchmark 2:
+    rigid body rotation
+
+    ux = -omega * y
+    uy =  omega * x
+
+    Expected:
+        tauqs   = 0
+        sigmaqs = 0
+    """
+
+    # --------------------------------------------------
+    # 1. Build model/grid
+    # --------------------------------------------------
 
     params = ModelParameters(
+        alpha = 90.0,
         Nx=51,
         Ny=51
     )
 
     grid = Grid(params)
 
-    ux = np.ones((params.Ny + 1, params.Nx)) * 1.234
+    omega = 1e-6
 
-    uy = np.ones((params.Ny, params.Nx + 1)) * 2.345
+    # ux nodes: shape (Ny+1, Nx)
+    Xux = grid.Xux
+    Yux = grid.Yux
+
+    # uy nodes: shape (Ny, Nx+1)
+    Xuy = grid.Xuy
+    Yuy = grid.Yuy
+
+    ux = -omega * Yux
+    uy =  omega * Xuy
 
     tauqs, sigmaqs = StressCalUtil().compute_stress_fields(
         uy=uy,
@@ -41,6 +67,9 @@ def test_rigid_translation():
         Nx=params.Nx
     )
 
-    assert np.max(np.abs(tauqs)) < 1e-12
+    max_tau = np.max(np.abs(tauqs))
+    max_sigma = np.max(np.abs(sigmaqs))
+    tol = 1e-10
 
-    assert np.max(np.abs(sigmaqs)) < 1e-12
+    assert max_tau < tol
+    assert max_sigma < tol

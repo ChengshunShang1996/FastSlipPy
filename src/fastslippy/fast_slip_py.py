@@ -5,7 +5,7 @@ __version__     = "0.0.1"
 __maintainer__  = "Chengshun Shang"
 __email__       = "c.shang@uu.nl"
 __status__      = "development"
-__date__        = "May 5, 2026"
+__date__        = "May 22, 2026"
 __license__     = "MIT License"
 #/////////////////////////////////////////////////
 
@@ -225,106 +225,6 @@ class FastSlipPy:
     def after_run(self):
         pass
 
-
-def test_rigid_rotation():
-
-    """
-    Benchmark 2:
-    rigid body rotation
-
-    ux = -omega * y
-    uy =  omega * x
-
-    Expected:
-        tauqs   = 0
-        sigmaqs = 0
-    """
-
-    # --------------------------------------------------
-    # 1. Build model/grid
-    # --------------------------------------------------
-
-    params = ModelParameters(
-        Nx=51,
-        Ny=51
-    )
-
-    grid = Grid(params)
-
-    omega = 1e-6
-
-    # --------------------------------------------------
-    # 2. Build coordinate arrays
-    # --------------------------------------------------
-
-    # ux nodes: shape (Ny+1, Nx)
-    Xux = grid.Xux
-    Yux = grid.Yux
-
-    # uy nodes: shape (Ny, Nx+1)
-    Xuy = grid.Xuy
-    Yuy = grid.Yuy
-
-    # --------------------------------------------------
-    # 3. Define rigid rotation field
-    # --------------------------------------------------
-
-    ux = -omega * Yux
-    uy =  omega * Xuy
-
-    # --------------------------------------------------
-    # 4. Compute stresses
-    # --------------------------------------------------
-
-    tauqs, sigmaqs = compute_stress_fields(
-        uy=uy,
-        ux=ux,
-        dx=grid.dx,
-        dy=grid.dy,
-        lam=params.lam,
-        G=params.G,
-        cosa=grid.cosa,
-        sina=grid.sina,
-        Ny=params.Ny,
-        Nx=params.Nx
-    )
-
-    # --------------------------------------------------
-    # 5. Errors
-    # --------------------------------------------------
-
-    max_tau = np.max(np.abs(tauqs))
-    max_sigma = np.max(np.abs(sigmaqs))
-
-    print("\n========== RIGID ROTATION TEST ==========")
-
-    print(f"max |tauqs|   = {max_tau:.3e}")
-    print(f"max |sigmaqs| = {max_sigma:.3e}")
-
-    tol = 1e-10
-
-    if max_tau < tol and max_sigma < tol:
-        print("PASS")
-    else:
-        print("FAIL")
-
-    # --------------------------------------------------
-    # 6. Visualization
-    # --------------------------------------------------
-
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-
-    im0 = axes[0].imshow(tauqs)
-    axes[0].set_title("tauqs")
-
-    im1 = axes[1].imshow(sigmaqs)
-    axes[1].set_title("sigmaqs")
-
-    plt.colorbar(im0, ax=axes[0])
-    plt.colorbar(im1, ax=axes[1])
-
-    plt.tight_layout()
-    plt.show()
 
 def test_uniaxial_extension():
 
