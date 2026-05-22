@@ -9,42 +9,18 @@ __date__        = "May 5, 2026"
 __license__     = "MIT License"
 #/////////////////////////////////////////////////
 
-"""
-Classes
--------
-ModelParameters   – all physical / numerical input parameters
-Grid              – spatial discretisation and coordinate arrays
-FrictionalZones   – depth-dependent rate-and-state a/b profiles
-StressState       – initial stress, pressure, sigma, tau
-FaultState        – fault slip variables (U, V, theta, sigma, tau)
-MatrixBuilder     – builds LH (stiffness) and RH (forcing) sparse matrices
-OutputManager     – in-memory storage + text-file logging + checkpointing
-FaultSlipModel    – top-level driver that wires everything together
-
-Usage
------
-    model = FaultSlipModel()
-    model.run()
-"""
-
 import os
 import json
 import sys
 import time
 import numpy as np
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
-
-from scipy import sparse
 from scipy.sparse.linalg import factorized
-from scipy.optimize import brentq
-import matplotlib.pyplot as plt
-from pathlib import Path
 from typing import Optional
-from scipy.optimize import root_scalar
-from numba import njit
+from pathlib import Path
 
-from src import *
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
 from src.pre_processing.model_parameters import ModelParameters
 from src.pre_processing.grid import Grid
 from src.pre_processing.frictional_zones import FrictionalZones
@@ -52,140 +28,13 @@ from src.solver.stress_state import StressState
 from src.solver.fault_state import FaultState
 from src.solver.matrix_builder import MatrixBuilder
 from src.utilities.stress_cal_util import StressCalUtil
-from src.post_processing import *
+from src.post_processing.output_manager import OutputManager
+from src.post_processing.figure_creator import FigureCreator
 
-# ─────────────────────────────────────────────────────────────
-# 6.  Adaptive time-step stabiliser  (ksi)
-# ─────────────────────────────────────────────────────────────
-
-def build_ksi(p: ModelParameters, fric: FrictionalZones,
-              sigman0: np.ndarray, dy: float) -> np.ndarray:
-    """
-    Stability factor ksi used for adaptive time stepping:
-    """
-    a = fric.a
-    b = fric.b
-
-    k1 = (np.pi / 4.0) * p.G / dy * p.L / a / sigman0
-    k2 = (b - a) / a
-    k3 = (k1 - k2)**2 / 4.0 - k1
-    k4 = np.minimum(1.0 / (k1 - k2), 0.2)
-    k5 = np.minimum(1.0 - k2 / k1, 0.2)
-    ksi = np.where(k3 > 0, k4, k5)
-
-    return ksi
-
-
-# ─────────────────────────────────────────────────────────────
-# 8.  Output Manager
-# ─────────────────────────────────────────────────────────────
-
-class OutputManager:
-    """
-    Handles:
-      - in-memory snapshot arrays (like MATLAB globals Um, Vm, …)
-      - ASCII log file (output.txt)
-      - NumPy checkpoints
-    """
-
-    def __init__(self, p: ModelParameters, output_dir: Path = Path(".")):
-        self.p   = p
-        self.out = output_dir
-        self.out.mkdir(parents=True, exist_ok=True)
-        Ny, Nx = p.Ny, p.Nx
-        n = p.Nt // p.output_interval
-
-        self.Um      = np.zeros((Ny, n))
-        self.Vm      = np.zeros((Ny, n))
-        self.taum    = np.zeros((Ny, n))
-        self.sigmam  = np.zeros((Ny, n))
-        self.Pm      = np.zeros((Ny, n))
-        self.thetam  = np.zeros((Ny, n))
-        self.dtm     = np.zeros(n)
-        self.tm      = np.zeros(n)
-        self.taumall    = np.zeros((Ny, Nx, n))
-        self.sigmamall  = np.zeros((Ny-1, Nx-1, n))
-        self.uymall     = np.zeros((Ny, Nx+1, n))
-        self.vymall     = np.zeros((Ny, Nx+1, n))
-        self.uxmall     = np.zeros((Ny+1, Nx, n))
-        self.vxmall     = np.zeros((Ny+1, Nx, n))
-        self.tau0   = np.zeros((Ny, n))
-
-        self._logfile = open(self.out / "output.txt", "w")
-
-    # ------------------------------------------------------------------
-    def log(self, it: int, t: float, dt: float, V: np.ndarray, U: np.ndarray,
-            checkpointer: int = 0):
-        yr = 365 * 24 * 3600
-        line = (f"it={checkpointer+it}, t={t/yr:.6f} yr, dt={dt:.3e}, "
-                f"maxV={V.max():.3e}, minV={V.min():.3e}, maxU={U.max():.6f}\n")
-        self._logfile.write(line)
-        self._logfile.flush()
-
-    # ------------------------------------------------------------------
-    def write_memory(self, it: int,
-                     U, V, tau, sigma, P, theta, dt, t,
-                     tauqs, sigmaqs, uy, vy, ux, vx, tau0):
-        idx = it // self.p.output_interval - 1
-        self.Um[:, idx]     = U
-        self.Vm[:, idx]     = V
-        self.taum[:, idx]   = tau
-        self.tau0[:, idx]   = tau0
-        self.sigmam[:, idx] = sigma
-        self.Pm[:, idx]     = P
-        self.thetam[:, idx] = theta
-        self.dtm[idx]       = dt
-        self.tm[idx]        = t
-        self.taumall[:, :, idx]   = tauqs
-        self.sigmamall[:, :, idx] = sigmaqs
-        self.uymall[:, :, idx]    = uy
-        self.vymall[:, :, idx]    = vy
-        self.uxmall[:, :, idx]    = ux
-        self.vxmall[:, :, idx]    = vx
-
-    # ------------------------------------------------------------------
-    def save_checkpoint(self, it: int, checkpointer: int,
-                        fault: "FaultState", tauqs, sigmaqs,
-                        uy, vy, ux, vx, dt: float, t: float):
-        fname = self.out / f"data_{checkpointer + it}.npz"
-        np.savez(fname,
-                 U=fault.U, V=fault.V, tau=fault.tau, sigma=fault.sigma,
-                 P=np.zeros_like(fault.U),  # placeholder; update as needed
-                 theta=fault.theta, dt=dt, t=t,
-                 tauqs=tauqs, sigmaqs=sigmaqs,
-                 uy=uy, vy=vy, ux=ux, vx=vx)
-
-    # ------------------------------------------------------------------
-    def save_all(self):
-        fname = self.out / "dataall.npz"
-        np.savez(fname,
-                 Um=self.Um, Vm=self.Vm, taum=self.taum,
-                 sigmam=self.sigmam, Pm=self.Pm, thetam=self.thetam,
-                 dtm=self.dtm, tm=self.tm)
-
-    # ------------------------------------------------------------------
-    def close(self):
-        self._logfile.close()
-
-    # ------------------------------------------------------------------
-    def load_checkpoint(self, checkpointer: int) -> dict:
-        fname = self.out / f"data_{checkpointer}.npz"
-        return dict(np.load(fname))
-
-# ─────────────────────────────────────────────────────────────
-# 10.  Top-level Model Driver
-# ─────────────────────────────────────────────────────────────
-
-class FaultSlipModel:
+class FastSlipPy:
     """
     Top-level driver.  Instantiate with a ModelParameters object (or use
     defaults), then call .run().
-
-    Example
-    -------
-        params = ModelParameters(Nx=51, Ny=51, Nt=200)
-        model  = FaultSlipModel(params)
-        model.run()
     """
 
     def __init__(self, params: Optional[ModelParameters] = None,
@@ -204,7 +53,7 @@ class FaultSlipModel:
         # Fault state
         self.fault  = FaultState(self.p, self.stress, self.fric)
         # ksi for adaptive dt
-        self.ksi    = build_ksi(self.p, self.fric, self.stress.sigman0, self.grid.dy)
+        self.ksi    = self._build_ksi(self.p, self.fric, self.stress.sigman0, self.grid.dy)
 
         # Displacement / velocity fields
         p  = self.p
@@ -216,6 +65,8 @@ class FaultSlipModel:
         self.tauqs   = np.zeros((Ny, Nx))
         self.sigmaqs = np.zeros((Ny - 1, Nx - 1))
 
+        self.figure_creator = FigureCreator(self.output, self.grid)
+
     def _build_and_factor_LH(self, dPdt: float):
         builder = MatrixBuilder(self.p, self.grid)
         LH = builder.build_LH()
@@ -223,11 +74,28 @@ class FaultSlipModel:
         self.dPdt = dPdt
         self._solve = factorized(LH.tocsc())   # sparse LU decomposition
 
+    def _build_ksi(self, p: ModelParameters, fric: FrictionalZones,
+              sigman0: np.ndarray, dy: float) -> np.ndarray:
+        """
+        Stability factor ksi used for adaptive time stepping:
+        """
+        a = fric.a
+        b = fric.b
+        k1 = (np.pi / 4.0) * p.G / dy * p.L / a / sigman0
+        k2 = (b - a) / a
+        k3 = (k1 - k2)**2 / 4.0 - k1
+        k4 = np.minimum(1.0 / (k1 - k2), 0.2)
+        k5 = np.minimum(1.0 - k2 / k1, 0.2)
+        ksi = np.where(k3 > 0, k4, k5)
+        return ksi
+
+    def before_run(self):
+        pass
+    
     def run(self):
         t0_wall = time.perf_counter()
         p = self.p
         Nx, Ny = p.Nx, p.Ny
-        yr = 365 * 24 * 3600
 
         # ── initialise / load checkpoint ──
         if not self.checkpointer:
@@ -351,173 +219,12 @@ class FaultSlipModel:
         # ── wrap up ──
         self.output.save_all()
         self.output.close()
+        self.figure_creator.plot_results(Nx)
         print(f"Done.  Total running time: {time.perf_counter()-t0_wall:.1f}s")
+    
+    def after_run(self):
+        pass
 
-    def plot_results(self, it: int = -1):
-        """
-        Enhanced plotting:
-        - τ/σ vs depth
-        - 2D fields (ux, uy, vx, vy, tauqs, sigmaqs)
-        
-        Parameters
-        ----------
-        it : int
-            Time index (default = last snapshot)
-        """
-
-        om = self.output
-        grid = self.grid
-        yr = 365 * 24 * 3600
-
-        if it < 0:
-            it = om.Um.shape[1] - 1  # last stored snapshot
-
-        # ─────────────────────────────────────────────
-        # 1. Ratio τ/σ vs depth
-        # ─────────────────────────────────────────────
-        tau = om.taum[:, it]
-        sigma = om.sigmam[:, it]
-        ratio = tau / (sigma + 1e-12)
-
-        fig = plt.figure(figsize=(8, 5))
-        plt.plot(grid.y+2000, ratio, 'o-', lw=1)
-        #plt.gca().invert_yaxis()
-        plt.ylabel(r"$\tau / \sigma_n$")
-        plt.xlabel("Depth [m]")
-        #plt.ylim(0.3, 0.35)
-        #plt.xlim(2000, 4000)
-        plt.title("Ratio shear / normal stress")
-        plt.grid(True)
-        plt.tight_layout()
-        fig.savefig(self.output.out / f"tau_sigma_ratio_it{it}.png", dpi=150)
-
-        fig = plt.figure(figsize=(8, 5))
-        plt.plot(grid.y+2000, om.taum[:, it] / 1e6, 'o-', lw=1)
-        plt.ylabel(r"Shear stress $\tau$ [MPa]")
-        plt.xlabel("Depth [m]")
-        plt.grid(True)
-        plt.tight_layout()
-        fig.savefig(self.output.out / f"tau_it{it}.png", dpi=150)
-
-        fig = plt.figure(figsize=(8, 5))
-        plt.plot(grid.y+2000, om.sigmam[:, it] / 1e6, 'o-', lw=1)
-        plt.ylabel(r"Normal stress $\sigma_n$ [MPa]")
-        plt.xlabel("Depth [m]")
-        plt.grid(True)
-        plt.tight_layout()
-        fig.savefig(self.output.out / f"sigma_it{it}.png", dpi=150)
-
-        fig = plt.figure(figsize=(8, 5))
-        plt.plot(grid.y+2000, om.tau0[:, it] / 1e6, 'o-', lw=1)
-        plt.ylabel(r"$\tau_0$ [MPa]")
-        plt.xlabel("Depth [m]")
-        plt.grid(True)
-        plt.tight_layout()
-        fig.savefig(self.output.out / f"tau0_it{it}.png", dpi=150)
-
-        fig = plt.figure(figsize=(8, 5))
-        #plt.plot(grid.y+2000, om.Vm, 'o-', lw=1)
-        plt.plot(grid.y+2000, om.Vm[:, it], 'o-', lw=1)
-        plt.ylabel(r"Slip velocity $V$ [m/s]")
-        plt.xlabel("Depth [m]")
-        plt.grid(True)
-        plt.tight_layout()
-        fig.savefig(self.output.out / f"slip_velocity_it{it}.png", dpi=150)
-
-
-        mid = 201 // 2
-        plt.figure(figsize=(8,6))
-        plt.plot(
-            grid.y+2000,
-            om.taum[:,it],
-            'k',
-            lw=3,
-            label='stored tau'
-        )
-
-        for k in [mid-2, mid-1, mid, mid+1, mid+2]:
-            plt.plot(grid.y+2000, om.taumall[:,k,it], '--', label=f'col {k}')
-
-        plt.legend()
-        plt.grid(True)
-
-        plt.figure(figsize=(8,6))
-        plt.plot(
-            grid.y+2000,
-            om.taum[:,it] - om.tau0[:, it],
-            'k',
-            lw=3,
-            label='recovered tauqs'
-        )
-
-        for k in [98,99,100,101,102]:
-            plt.plot(
-                grid.y+2000,
-                om.taumall[:,k,it],
-                '--',
-                label=f'col {k}'
-            )
-
-        plt.legend()
-        plt.grid(True)
-
-        # ─────────────────────────────────────────────
-        # 2. Extract 2D fields
-        # ─────────────────────────────────────────────
-        ux = om.uxmall[:, :, it]
-        uy = om.uymall[:, :, it]
-        vx = om.vxmall[:, :, it]
-        vy = om.vymall[:, :, it]
-        tauqs = om.taumall[:, :, it]
-        sigmaqs = om.sigmamall[:, :, it]
-
-        # ─────────────────────────────────────────────
-        # 3. 2D plots (match your layout)
-        # ─────────────────────────────────────────────
-        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-
-        # --- ux / vx ---
-        im = axes[0, 0].pcolormesh(
-            grid.Xux, grid.Yux, vx,
-            shading='auto'
-        )
-        axes[0, 0].set_title("Vx")
-        fig.colorbar(im, ax=axes[0, 0])
-
-        # --- tauqs ---
-        im = axes[0, 1].pcolormesh(
-            grid.Xtau, grid.Ytau, tauqs,
-            shading='auto'
-        )
-        axes[0, 1].set_title(r"Shear stress $\tau_{qs}$")
-        fig.colorbar(im, ax=axes[0, 1])
-
-        # --- uy ---
-        im = axes[1, 0].pcolormesh(
-            grid.Xuy, grid.Yuy, vy,
-            shading='auto'
-        )
-        axes[1, 0].set_title("Vy")
-        fig.colorbar(im, ax=axes[1, 0])
-
-        # --- sigmaqs ---
-        im = axes[1, 1].pcolormesh(
-            grid.Xsigma, grid.Ysigma, sigmaqs,
-            shading='auto'
-        )
-        axes[1, 1].set_title(r"Normal stress $\sigma_{qs}$")
-        fig.colorbar(im, ax=axes[1, 1])
-
-        for ax in axes.flat:
-            ax.set_aspect('equal')
-            ax.invert_yaxis()
-
-        plt.tight_layout()
-        fig.savefig(self.output.out / f"fields_it{it}.png", dpi=150)
-
-        plt.show()
-
-        #return fig
 
 def test_rigid_rotation():
 
@@ -2070,12 +1777,11 @@ if __name__ == "__main__":
 
     params = ModelParameters()
 
-    model = FaultSlipModel(params=params, output_dir="output")
+    model = FaultSlipPy(params=params, output_dir="output")
     model.run()
     fig = model.grid.plot_mesh()
     fig.show()
     #fig = model.grid.plot_grid()
-    model.plot_results()
 
     #Benchmarks
     #test_rigid_translation()

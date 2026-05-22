@@ -23,8 +23,8 @@ class ModelParameters:
     # --- Grid ---
     xsize: float = 2000.0        # Horizontal model size [m]
     ysize: float = 2000.0        # Vertical model size [m]
-    Nx: int = 201                # Horizontal grid points  (must be odd)
-    Ny: int = 201                # Vertical grid points    (must be odd)
+    Nx: int = 51                # Horizontal grid points  (must be odd)
+    Ny: int = 51                # Vertical grid points    (must be odd)
 
     # --- Material ---
     rho: float = 2400.0          # Rock density [kg/m³]
