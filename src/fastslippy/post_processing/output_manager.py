@@ -12,8 +12,8 @@ __license__     = "MIT License"
 import numpy as np
 from pathlib import Path
 
-from src.pre_processing.model_parameters import ModelParameters
-from src.solver.fault_state import FaultState
+from fastslippy.pre_processing.model_parameters import ModelParameters
+from fastslippy.solver.fault_state import FaultState
 
 class OutputManager:
     """

@@ -9,6 +9,9 @@ __date__        = "May 5, 2026"
 __license__     = "MIT License"
 #/////////////////////////////////////////////////
 
+import matplotlib
+matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 
 class FigureCreator:
@@ -178,6 +181,6 @@ class FigureCreator:
         plt.tight_layout()
         fig.savefig(self.output.out / f"fields_it{it}.png", dpi=150)
 
-        plt.show()
+        #plt.show()
 
         #return fig

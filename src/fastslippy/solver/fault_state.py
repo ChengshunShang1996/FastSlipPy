@@ -12,10 +12,10 @@ __license__     = "MIT License"
 import numpy as np
 from scipy.optimize import brentq
 
-from src.pre_processing.model_parameters import ModelParameters
-from src.pre_processing.frictional_zones import FrictionalZones
-from src.solver.stress_state import StressState
-from src.utilities.math_util import MathUtil
+from fastslippy.pre_processing.model_parameters import ModelParameters
+from fastslippy.pre_processing.frictional_zones import FrictionalZones
+from fastslippy.solver.stress_state import StressState
+from fastslippy.utilities.math_util import MathUtil
 
 class FaultState:
     """

@@ -25,7 +25,7 @@ SOFTWARE.
 """
 
 
-__all__         =[]
+__all__         =["FigureCreator", "OutputManager"]
 
 __author__      = "Chengshun Shang (Utrecht University)"
 __copyright__   = "Copyright (C) 2026-present by Chengshun Shang"

@@ -9,8 +9,8 @@ __date__        = "May 5, 2026"
 __license__     = "MIT License"
 #/////////////////////////////////////////////////
 
-from src.fast_slip_py import FastSlipPy
-from src.pre_processing.model_parameters import ModelParameters
+from fastslippy import FastSlipPy
+from fastslippy.pre_processing.model_parameters import ModelParameters
 
 class RunFastSlipPy(FastSlipPy):
     """

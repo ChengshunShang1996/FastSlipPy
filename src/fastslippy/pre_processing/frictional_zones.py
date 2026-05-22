@@ -11,7 +11,7 @@ __license__     = "MIT License"
 
 import numpy as np
 
-from src.pre_processing.model_parameters import ModelParameters
+from fastslippy.pre_processing.model_parameters import ModelParameters
 
 class FrictionalZones:
     """

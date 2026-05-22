@@ -12,8 +12,8 @@ __license__     = "MIT License"
 import numpy as np
 from scipy import sparse
 
-from src.pre_processing.model_parameters import ModelParameters
-from src.pre_processing.grid import Grid
+from fastslippy.pre_processing.model_parameters import ModelParameters
+from fastslippy.pre_processing.grid import Grid
 
 
 class MatrixBuilder:

@@ -21,15 +21,15 @@ from pathlib import Path
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from src.pre_processing.model_parameters import ModelParameters
-from src.pre_processing.grid import Grid
-from src.pre_processing.frictional_zones import FrictionalZones
-from src.solver.stress_state import StressState
-from src.solver.fault_state import FaultState
-from src.solver.matrix_builder import MatrixBuilder
-from src.utilities.stress_cal_util import StressCalUtil
-from src.post_processing.output_manager import OutputManager
-from src.post_processing.figure_creator import FigureCreator
+from fastslippy.pre_processing.model_parameters import ModelParameters
+from fastslippy.pre_processing.grid import Grid
+from fastslippy.pre_processing.frictional_zones import FrictionalZones
+from fastslippy.solver.stress_state import StressState
+from fastslippy.solver.fault_state import FaultState
+from fastslippy.solver.matrix_builder import MatrixBuilder
+from fastslippy.utilities.stress_cal_util import StressCalUtil
+from fastslippy.post_processing.output_manager import OutputManager
+from fastslippy.post_processing.figure_creator import FigureCreator
 
 class FastSlipPy:
     """

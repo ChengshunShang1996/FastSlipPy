@@ -208,4 +208,4 @@ __marimo__/
 
 #user specific ignores
 output/
-plots/
+*.npz

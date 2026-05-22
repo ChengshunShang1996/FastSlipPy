@@ -25,7 +25,7 @@ SOFTWARE.
 """
 
 
-__all__         =["model_parameters", "frictional_zones", "grid"]
+__all__         =["ModelParameters", "FrictionalZones", "Grid"]
 
 __author__      = "Chengshun Shang (Utrecht University)"
 __copyright__   = "Copyright (C) 2026-present by Chengshun Shang"
