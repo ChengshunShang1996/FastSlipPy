@@ -120,8 +120,27 @@ class MathUtil:
             return ub, target, 3
 
         # root must be bracketed
-        if flb * fub > 0:
-            return np.nan, np.nan, -2
+        # if flb * fub > 0:
+        #     return np.nan, np.nan, -2
+        #     #raise ValueError("Root is not bracketed: f(lb) and f(ub) must have opposite signs.")
+        
+        # -------------------------------------------------
+        # adaptive bracket expansion
+        # -------------------------------------------------
+
+        expand_iter = 0
+        max_expand = 20
+
+        while flb * fub > 0:
+
+            ub *= 10.0
+            fub = g(ub)
+
+            expand_iter += 1
+
+            if expand_iter > max_expand:
+                return np.nan, np.nan, -2
+                #raise ValueError("Root is not bracketed: f(lb) and f(ub) must have opposite signs.")
 
         for _ in range(maxiter):
 

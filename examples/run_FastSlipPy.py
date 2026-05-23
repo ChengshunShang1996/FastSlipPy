@@ -21,14 +21,15 @@ class RunFastSlipPy(FastSlipPy):
 
 if __name__ == "__main__":
     # Customise parameters here or leave all defaults
-    '''
-    params = ModelParameters(
-        Nx=21, Ny=21,
-        Nt=1000,
-        output_interval=10,
-        checkpoint_interval=1000,
-    )'''
 
-    params = ModelParameters()
+    params = ModelParameters(
+        Nx=201, Ny=201,
+        Nt=201,
+        output_interval=10,
+        checkpoint_interval=201,
+        dPdt_post = -0.1
+    )
+
+    #params = ModelParameters()
     model = RunFastSlipPy(params=params, output_dir="output")
     model.run()
