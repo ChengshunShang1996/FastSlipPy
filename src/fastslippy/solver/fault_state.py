@@ -110,7 +110,8 @@ class FaultState:
 
             arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
 
-            flash_denom = 1.0 + p.L/(p.Vw*th)
+            #flash_denom = 1.0 + p.L/(p.Vw*th)
+            flash_denom = 1.0
 
             exp_arg = np.exp(arg)
 

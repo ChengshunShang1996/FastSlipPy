@@ -98,6 +98,10 @@ class StressState:
                    + (1 - p.K0) / 2 * MathUtil.cosd(2 * p.alpha) * sigmav
                    - np.where(y < 1000, Pl0, Pr0))
         tau0 = (1 - p.K0) / 2 * MathUtil.sind(2 * p.alpha) * sigmav
+
+        #Lab-test version (for testing only, will be removed)
+        sigman0 = 15e6
+        tau0 = 0.0
         return sigman0, tau0, Pl0, Pr0
 
     def update_pressure(self, dt: float, dPdt: float):
