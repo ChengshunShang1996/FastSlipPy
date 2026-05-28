@@ -82,26 +82,28 @@ class StressState:
     # TODO: This should be replaced by a more flexible function 
     def _initial_stress(self):
         p, y = self.p, self.y
-        sigmatop = p.rho * p.g * 2000 - 4.70e6
-        Ptop     = p.rhof * p.g * 2000
+        # sigmatop = p.rho * p.g * 2000 - 4.70e6
+        # Ptop     = p.rhof * p.g * 2000
 
-        sigmav = p.rho * p.g * y + sigmatop
+        # sigmav = p.rho * p.g * y + sigmatop
 
-        Pl0 = (p.rhof * p.g * y
-               + (p.rhof - p.rhog) * p.g * (1000 - y) * (y > 800) * (y <= 1000)
-               + Ptop + 1.16e6 * (y > 800))
-        Pr0 = (p.rhof * p.g * y
-               + (p.rhof - p.rhog) * p.g * (1000 - y) * (y > 850) * (y <= 1050)
-               + Ptop + 1.16e6 * (y > 850))
+        # Pl0 = (p.rhof * p.g * y
+        #        + (p.rhof - p.rhog) * p.g * (1000 - y) * (y > 800) * (y <= 1000)
+        #        + Ptop + 1.16e6 * (y > 800))
+        # Pr0 = (p.rhof * p.g * y
+        #        + (p.rhof - p.rhog) * p.g * (1000 - y) * (y > 850) * (y <= 1050)
+        #        + Ptop + 1.16e6 * (y > 850))
 
-        sigman0 = ((1 + p.K0) / 2 * sigmav
-                   + (1 - p.K0) / 2 * MathUtil.cosd(2 * p.alpha) * sigmav
-                   - np.where(y < 1000, Pl0, Pr0))
-        tau0 = (1 - p.K0) / 2 * MathUtil.sind(2 * p.alpha) * sigmav
+        # sigman0 = ((1 + p.K0) / 2 * sigmav
+        #            + (1 - p.K0) / 2 * MathUtil.cosd(2 * p.alpha) * sigmav
+        #            - np.where(y < 1000, Pl0, Pr0))
+        # tau0 = (1 - p.K0) / 2 * MathUtil.sind(2 * p.alpha) * sigmav
 
         #Lab-test version (for testing only, will be removed)
-        sigman0 = 15e6
-        tau0 = 0.0
+        sigman0 = 0.0 * y + 15e6
+        tau0 = 0.0 * y + 1e-30
+        Pl0 = 0.0 * y + 1e6
+        Pr0 = 0.0 * y + 1e6
         return sigman0, tau0, Pl0, Pr0
 
     def update_pressure(self, dt: float, dPdt: float):

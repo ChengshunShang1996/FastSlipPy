@@ -27,6 +27,7 @@ from fastslippy.pre_processing.frictional_zones import FrictionalZones
 from fastslippy.solver.stress_state import StressState
 from fastslippy.solver.fault_state import FaultState
 from fastslippy.solver.matrix_builder import MatrixBuilder
+from fastslippy.solver.matrix_builder_shear import MatrixBuilderShear
 from fastslippy.utilities.stress_cal_util import StressCalUtil
 from fastslippy.post_processing.output_manager import OutputManager
 from fastslippy.post_processing.figure_creator import FigureCreator
@@ -68,7 +69,7 @@ class FastSlipPy:
         self.figure_creator = FigureCreator(self.output, self.grid)
 
     def _build_and_factor_LH(self, dPdt: float):
-        builder = MatrixBuilder(self.p, self.grid)
+        builder = MatrixBuilderShear(self.p, self.grid)
         LH = builder.build_LH()
         self.RH_builder = builder
         self.dPdt = dPdt
@@ -146,7 +147,7 @@ class FastSlipPy:
             ksi_inner = self.ksi[1: Ny - 1]
             dt_cand = np.min(ksi_inner * p.L / V_inner)
             dt_cand = max(dt_cand, 1e-150)
-            dt      = min(min(1.2 * dt, dt_cand), dt_max)
+            #dt      = min(min(1.2 * dt, dt_cand), dt_max)
 
             # Clamp dt so we hit tload exactly
             if phase == 0 and t + dt >= p.tload:

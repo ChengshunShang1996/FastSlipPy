@@ -26,7 +26,7 @@ class FrictionalZones:
     # These are absolute depths [m from surface].  ysize is subtracted to
     # convert to the model's coordinate system where y=0 is the top.
     LAYERS = {
-        "Rocksalt":   {"top": 0, "bot": 1, "a": 0.012,  "b": 0.0135}, # Zechstein rocksalt (halite)
+        "Rocksalt":   {"top": 1, "bot": 2, "a": 0.012,  "b": 0.0135}, # Zechstein rocksalt (halite)
     }
 
     def __init__(self, p: ModelParameters, y: np.ndarray):
