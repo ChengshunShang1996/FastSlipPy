@@ -126,4 +126,4 @@ class Grid:
         ax.legend(loc='upper right', fontsize=8)
 
         plt.tight_layout()
-        plt.show()
+        fig.savefig(f"grid.png", dpi=150)
