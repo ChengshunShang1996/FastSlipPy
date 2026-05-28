@@ -23,7 +23,7 @@ if __name__ == "__main__":
     # Customise parameters here or leave all defaults
 
     params = ModelParameters(
-        Nx=11, Ny=11,
+        Nx=5, Ny=7,
         Nt=201,
         output_interval=10,
         checkpoint_interval=201
