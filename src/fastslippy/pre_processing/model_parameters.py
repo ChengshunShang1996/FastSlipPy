@@ -27,7 +27,7 @@ class ModelParameters:
     Ny: int = 11                # Vertical grid points    (must be odd)
 
     # --- Material ---
-    rho: float = 2400.0          # Rock density [kg/m³]
+    rho: float = 2650 #2400.0          # Rock density [kg/m³]
     rhof: float = 1150.0         # Fluid density [kg/m³]
     rhog: float = 200.0          # Gas density [kg/m³]
     Vp: float = 0.0              # Far-field loading rate [m/s]

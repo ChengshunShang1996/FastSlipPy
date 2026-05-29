@@ -161,6 +161,8 @@ class FastSlipPy:
             RH = self.RH_builder.build_RH(dPdt, self.fault.V)
             # Inject velocity BC at fault column
             fault_rows = (np.arange(1, Ny - 1) + (Nx // 2) * (Ny + 1)) * 2 + 1
+            #temp:
+            #self.fault.V[:] = -1e-5
             RH[fault_rows] = self.fault.V[1: Ny - 1]
 
             # ── elastic solve ──
@@ -220,7 +222,7 @@ class FastSlipPy:
         # ── wrap up ──
         self.output.save_all()
         self.output.close()
-        self.figure_creator.plot_results(Nx)
+        self.figure_creator.plot_results_shear(Nx)
         print(f"Done.  Total running time: {time.perf_counter()-t0_wall:.1f}s")
     
     def after_run(self):
