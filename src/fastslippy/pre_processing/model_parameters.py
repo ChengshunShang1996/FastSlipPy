@@ -47,8 +47,8 @@ class ModelParameters:
 
     # --- Time stepping ---
     Nt: int = 1000               # Number of time steps
-    dt_init: float = 0.002         # Initial time step [s]
-    dt_max: float = 1e6          # Maximum time step [s]
+    dt_init: float = 1e-5         # Initial time step [s]
+    dt_max: float = 0.002          # Maximum time step [s]
     yr = 365 * 24 * 3600.0       # Seconds in a year
     tload: float = 0.0 * yr     # Time to apply pressure rate change [s]  #TODO: CHECK
 

@@ -101,9 +101,9 @@ class StressState:
 
         #Lab-test version (for testing only, will be removed)
         sigman0 = 0.0 * y + 15e6
-        tau0 = 0.0 * y + 1e-30
-        Pl0 = 0.0 * y + 1e6
-        Pr0 = 0.0 * y + 1e6
+        tau0 = 0.0 * y  + 1e-30
+        Pl0 = 0.0 * y + 1e-30
+        Pr0 = 0.0 * y + 1e-30
         return sigman0, tau0, Pl0, Pr0
 
     def update_pressure(self, dt: float, dPdt: float):

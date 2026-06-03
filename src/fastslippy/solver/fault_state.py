@@ -34,7 +34,14 @@ class FaultState:
         self.U     = np.zeros(Ny)
         self.V     = np.full(Ny, p.Vi)
         logarg = 2 * p.V0 / p.Vi * np.sinh((stress.tau0 - p.eta * p.Vi) / fric.a / stress.sigman0)
-        self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.emath.log(logarg)- p.mu0 / fric.b))
+        #safe_logarg = np.maximum(logarg, 1e-30)
+        # if np.any(logarg <= 0):
+        #     print(logarg)
+        #     print("Warning: logarg has non-positive values, which may cause issues in the solver.")
+        #self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.log(safe_logarg)- p.mu0 / fric.b))
+        hold_time = 1e-40
+        self.theta = np.full(Ny, hold_time)
+        #self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.emath.log(logarg)- p.mu0 / fric.b))
         self.sigma = stress.sigman0.copy()
         self.tau   = stress.tau0 - p.eta * self.V
 
@@ -87,7 +94,7 @@ class FaultState:
         #     + dt * (1.0 - self.V[~expo] * self.theta[~expo] / p.L))
         # self.theta = theta_new
 
-        self.tau   = tauqs_col + stress.tau0 #- p.eta * self.V
+        self.tau   = tauqs_col + stress.tau0 - p.eta * self.V
         self.U     = self.U + dt * self.V
 
     # Tip: The following two methods are alternative implementations of the slip rate solver. 
@@ -118,7 +125,13 @@ class FaultState:
             def equation(VV):
                 friction = (sig * a_i * np.arcsinh(VV/(2.0*p.V0) * exp_arg))
                 return friction/flash_denom + p.eta*VV - rhs
+            
+            if rhs == 0 or rhs < 0:
+                self.V[iy] = 1e-40
+                continue
 
+            #print(f"Solving for V at iy={iy} with theta={th:.3e}, arg={arg:.3e}, exp_arg={exp_arg:.3e}, sigma={sig:.3e}")
+            
             # guaranteed bracket
             lo = 1e-40
 
@@ -134,12 +147,33 @@ class FaultState:
                     lo,
                     hi,
                     target=0.0,
-                    tolX=0.0,
-                    tolFun=5,
+                    tolX=1e-14,
+                    tolFun=10,
                     maxiter=100)
 
-                if np.isfinite(x):
+                # if np.isfinite(x):
+                #     self.V[iy] = x
+                if flag > 0:
                     self.V[iy] = x
+                else:              
+                    print(
+                            iy,
+                            f"theta={th:.3e}",
+                            f"arg={arg:.3e}",
+                            f"exp_arg={exp_arg:.3e}",
+                            f"rhs={rhs:.3e}",
+                            f"sig={sig:.3e}",
+                            f"f(lo)={equation(lo):.3e}",
+                            f"f(hi)={equation(hi):.3e}",
+                            f"eta = {p.eta:.3e}",
+                            f"flag={flag}"
+                        )
+                    print(
+                            "tauqs =", tauqs_col[iy],
+                            "tau0  =", stress.tau0[iy],
+                            "rhs   =", rhs
+                        ) 
+                    print("root failed", iy, flag)
 
             except Exception as e:
 
@@ -148,6 +182,38 @@ class FaultState:
                     f"f(lo)={equation(lo):.3e} "
                     f"f(hi)={equation(hi):.3e}"
                 )
+        
+        self.V = np.maximum(self.V, 1e-40)
+
+        self.V[0]  = self.V[1]
+        self.V[-1] = self.V[-2]
+
+    def solve_slip_rate_3(self,
+                    tauqs_col: np.ndarray,
+                    stress: StressState,
+                    fric: FrictionalZones):
+
+        p = self.p
+
+        for iy in range(p.Ny):
+            
+            rhs = tauqs_col[iy] + stress.tau0[iy]
+            a_i = fric.a[iy]
+            b_i = fric.b[iy]
+            th  = self.theta[iy]
+            sig = self.sigma[iy]
+
+            arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
+            
+            lo = 1e-40
+            hi = self.V[iy]*2
+
+            if rhs/sig < p.mu0:
+                self.V[iy] = lo
+            else:
+                if hi > 1e-5:
+                    hi = 1e-5
+                self.V[iy] = hi
         
         self.V = np.maximum(self.V, 1e-40)
 

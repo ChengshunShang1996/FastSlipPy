@@ -72,7 +72,7 @@ class MatrixBuilderShear(MatrixBuilder):
                         kux_n, kuy_n = self._dofs(ix, iy, Ny)
                         add(kuy, kuy - 2*(Ny+1)*2, 1)
                         add(kuy, kuy - (Ny+1)*2,  -1)
-                        add(kuy, kuy,              -1)
+                        add(kuy, kuy,             -1)
                         add(kuy, kuy + (Ny+1)*2,   1)
                         # Cross-coupling terms with ux
                         add(kuy, kux + (Ny+1)*2,       cosa/4)
@@ -128,12 +128,21 @@ class MatrixBuilderShear(MatrixBuilder):
                     r_lam = (lam + 2*G) / G
                     if iy == 0:
                         add(kux, kux, 1)
+                        # if ix < mid:
+                        #     add(kux, kux, 1)
+                        # else:
+                        #     add(kux, kux, 1); add(kux, kux + 2, -1)
                     elif iy == Ny:
                         add(kux, kux, 1)
+                        # if ix < mid:
+                        #     add(kux, kux, 1)
+                        # else:
+                        #     add(kux, kux, 1); add(kux, kux - 2, -1)
                     elif ix == 0:
                         add(kux, kux, 1)
                     elif ix == Nx - 1:
                         add(kux, kux, 1)
+                        #add(kux, kux, 1); add(kux, kux - (Ny+1)*2, -1)
                     elif ix == mid:
                         # Fault column – normal stress jump condition
                         add(kux, kux,              -2*r_lam)
@@ -200,10 +209,10 @@ class MatrixBuilderShear(MatrixBuilder):
                     if ix == 0:
                         pass
                     elif ix == Nx:
-                        RH[kuy] = - 1e-5
+                        RH[kuy] = 1e-5
                     elif iy == 0 or iy == Ny - 1:
                         if ix > mid:
-                            RH[kuy] = -1e-5
+                            RH[kuy] = 1e-5
                     elif ix == mid:
                         RH[kuy] = V[iy]
 

@@ -161,8 +161,7 @@ class FastSlipPy:
             RH = self.RH_builder.build_RH(dPdt, self.fault.V)
             # Inject velocity BC at fault column
             fault_rows = (np.arange(1, Ny - 1) + (Nx // 2) * (Ny + 1)) * 2 + 1
-            #temp:
-            #self.fault.V[:] = -1e-5
+            #self.fault.V[:] = 1e-5
             RH[fault_rows] = self.fault.V[1: Ny - 1]
 
             # ── elastic solve ──
@@ -194,7 +193,7 @@ class FastSlipPy:
             self.fault.sigma = self.stress.sigman0 - np.minimum(sigmal, sigmar)
 
             # ── pressure update ──
-            self.stress.update_pressure(dt, dPdt)
+            #self.stress.update_pressure(dt, dPdt)
 
             # ── logging ──
             self.output.log(it, t2 if phase == 2 else t, dt,
@@ -219,6 +218,18 @@ class FastSlipPy:
             if phase == 2:
                 t2 += dt
 
+        mid = Nx//2
+        print(
+            "tauqs min/max",
+            np.min(self.tauqs[:, mid]),
+            np.max(self.tauqs[:, mid])
+        )
+
+        print(
+            "sigma min/max",
+            np.min(self.sigmaqs[:, mid]),
+            np.max(self.sigmaqs[:, mid])
+        )
         # ── wrap up ──
         self.output.save_all()
         self.output.close()

@@ -23,11 +23,16 @@ if __name__ == "__main__":
     # Customise parameters here or leave all defaults
 
     params = ModelParameters(
-        Nx=51, Ny=51,
-        Nt=3000,
-        output_interval=10,
-        checkpoint_interval=1000
-        #dPdt_post = -0.1
+        alpha = 90.0,
+        xsize = 1.0,
+        ysize = 1.0,
+        Nx=11, Ny=11,
+        Nt=100000,
+        output_interval=1000,
+        checkpoint_interval=10000,
+        Vi=1e-10,
+        dt_init=0.002,
+        mu0=0.76
     )
 
     #params = ModelParameters()
