@@ -72,7 +72,7 @@ class MatrixBuilder:
                         kux_n, kuy_n = self._dofs(ix, iy, Ny)
                         add(kuy, kuy - 2*(Ny+1)*2, 1)
                         add(kuy, kuy - (Ny+1)*2,  -1)
-                        add(kuy, kuy,              -1)
+                        add(kuy, kuy,             -1)
                         add(kuy, kuy + (Ny+1)*2,   1)
                         # Cross-coupling terms with ux
                         add(kuy, kux + (Ny+1)*2,       cosa/4)

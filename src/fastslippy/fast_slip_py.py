@@ -157,14 +157,19 @@ class FastSlipPy:
             # ── aging law + fault advance ──
             self.fault.advance(dt, self.tauqs[:, mid], self.stress)
 
+            if it <= 25000:
+                v_load = 1e-5
+            elif it <= 35000:
+                v_load = 1e-4
+            else:
+                v_load = 1e-5
+
             # ── update RH with current slip velocities ──
-            RH = self.RH_builder.build_RH(dPdt, self.fault.V)
+            RH = self.RH_builder.build_RH(dPdt, self.fault.V, v_load)
             # Inject velocity BC at fault column
             fault_rows = (np.arange(1, Ny - 1) + (Nx // 2) * (Ny + 1)) * 2 + 1
             #self.fault.V[:] = 1e-5
             RH[fault_rows] = self.fault.V[1: Ny - 1]
-
-            #if it == 300000
 
             # ── elastic solve ──
             S   = self._solve(RH)

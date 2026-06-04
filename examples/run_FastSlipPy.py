@@ -26,16 +26,18 @@ if __name__ == "__main__":
         alpha = 90.0,
         xsize = 1.0,
         ysize = 1.0,
-        Nx=11, Ny=11,
-        Nt=500000,
-        output_interval=1000,
-        checkpoint_interval=100000,
+        Nx=21, Ny=21,
+        Nt=25000,
+        output_interval=100,
+        checkpoint_interval=5000,
         Vi=1e-10,
         dt_init=0.002,
-        mu0=0.76,
+        mu0=0.72,
         nu=0.25,
-        E=5.5e9,
-        V0 = 1e-6
+        E=64e9,
+        V0 = 1e-6,
+        a0 = 0.0012,
+        b0 = 0.00135
     )
 
     #params = ModelParameters()

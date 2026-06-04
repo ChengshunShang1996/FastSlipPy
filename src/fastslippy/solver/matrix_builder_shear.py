@@ -189,7 +189,7 @@ class MatrixBuilderShear(MatrixBuilder):
 
         return LH
 
-    def build_RH(self, dPdt: float, V: np.ndarray) -> np.ndarray:
+    def build_RH(self, dPdt: float, V: np.ndarray, v_load: float) -> np.ndarray:
         p, g = self.p, self.grid
         Nx, Ny, N = p.Nx, p.Ny, g.N
         dx, dy   = g.dx, g.dy
@@ -209,10 +209,10 @@ class MatrixBuilderShear(MatrixBuilder):
                     if ix == 0:
                         pass
                     elif ix == Nx:
-                        RH[kuy] = 1e-5
+                        RH[kuy] = v_load
                     elif iy == 0 or iy == Ny - 1:
                         if ix > mid:
-                            RH[kuy] = 1e-5
+                            RH[kuy] = v_load
                     elif ix == mid:
                         RH[kuy] = V[iy]
 
