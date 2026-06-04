@@ -35,6 +35,7 @@ class ModelParameters:
     nu: float = 0.25             # Poisson's ratio
     g: float = 9.81              # Gravitational acceleration [m/s²]
     K0: float = 0.75             # Ratio σ_min / σ_max
+    E: float = 0.0              # Young's modulus [Pa] 
 
     # --- Rate-and-state defaults (used when heterogeneous profile is off) ---
     mu0: float = 0.72             # Reference friction coefficient
@@ -67,7 +68,8 @@ class ModelParameters:
 
     def __post_init__(self):
         
-        self.G = self.rho * self.cs ** 2
+        #self.G = self.rho * self.cs ** 2
+        self.G = self.E / (2 * (1 + self.nu)) if self.E > 0 else self.rho * self.cs ** 2
         self.lam = 2 * self.G * (1 + self.nu) / 3 / (1 - 2 * self.nu) - 2 / 3 * self.G
         self.eta = self.G / 2 / self.cs
         assert self.Nx % 2 == 1, "Nx must be odd (fault at centre column)."

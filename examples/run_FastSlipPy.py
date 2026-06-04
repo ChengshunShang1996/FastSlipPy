@@ -27,12 +27,14 @@ if __name__ == "__main__":
         xsize = 1.0,
         ysize = 1.0,
         Nx=11, Ny=11,
-        Nt=10000,
+        Nt=200000,
         output_interval=1000,
-        checkpoint_interval=10000,
+        checkpoint_interval=100000,
         Vi=1e-10,
         dt_init=0.002,
-        mu0=0.76
+        mu0=0.76,
+        nu=0.25,
+        E=5.5e9
     )
 
     #params = ModelParameters()
