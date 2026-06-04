@@ -41,6 +41,7 @@ class FaultState:
         #self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.log(safe_logarg)- p.mu0 / fric.b))
         hold_time = 1e-40
         self.theta = np.full(Ny, hold_time)
+        #self.theta = np.full(p.Ny, p.L / p.Vi)
         #self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.emath.log(logarg)- p.mu0 / fric.b))
         self.sigma = stress.sigman0.copy()
         self.tau   = stress.tau0 - p.eta * self.V

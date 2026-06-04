@@ -164,6 +164,8 @@ class FastSlipPy:
             #self.fault.V[:] = 1e-5
             RH[fault_rows] = self.fault.V[1: Ny - 1]
 
+            #if it == 300000
+
             # ── elastic solve ──
             S   = self._solve(RH)
             vpx = np.reshape(S[0::2], (p.Nx+1, p.Ny+1), order='C').T
@@ -236,6 +238,7 @@ class FastSlipPy:
             np.min(self.sigmaqs[:, mid]),
             np.max(self.sigmaqs[:, mid])
         )
+
         # ── wrap up ──
         self.output.save_all()
         self.output.close()

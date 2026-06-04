@@ -9,6 +9,8 @@ __date__        = "May 5, 2026"
 __license__     = "MIT License"
 #/////////////////////////////////////////////////
 
+import numpy as np
+
 from dataclasses import dataclass, field
 
 @dataclass
@@ -40,8 +42,8 @@ class ModelParameters:
     # --- Rate-and-state defaults (used when heterogeneous profile is off) ---
     mu0: float = 0.72             # Reference friction coefficient
     V0: float = 1e-6             # Reference slip rate [m/s]
-    a0: float = 0.012             # Direct effect (homogeneous fallback)
-    b0: float = 0.0135            # Evolution effect (homogeneous fallback)
+    a0: float = 0.0012             # Direct effect (homogeneous fallback)
+    b0: float = 0.00135            # Evolution effect (homogeneous fallback)
     L: float = 2.25e-6               # Characteristic slip distance [m]
     Vw: float = 1e90             # Dynamic weakening velocity [m/s]
     Vi: float = 1e-30            # Initial/background slip rate [m/s]
@@ -69,7 +71,11 @@ class ModelParameters:
     def __post_init__(self):
         
         #self.G = self.rho * self.cs ** 2
-        self.G = self.E / (2 * (1 + self.nu)) if self.E > 0 else self.rho * self.cs ** 2
+        if self.E > 0:
+            self.G = self.E / (2 * (1 + self.nu))
+            self.cs = np.sqrt(self.G / self.rho)
+        else:
+            self.G = self.rho * self.cs ** 2
         self.lam = 2 * self.G * (1 + self.nu) / 3 / (1 - 2 * self.nu) - 2 / 3 * self.G
         self.eta = self.G / 2 / self.cs
         assert self.Nx % 2 == 1, "Nx must be odd (fault at centre column)."
