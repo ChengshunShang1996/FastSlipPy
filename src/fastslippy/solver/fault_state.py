@@ -39,9 +39,9 @@ class FaultState:
         #     print(logarg)
         #     print("Warning: logarg has non-positive values, which may cause issues in the solver.")
         #self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.log(safe_logarg)- p.mu0 / fric.b))
-        hold_time = 1e-40
-        self.theta = np.full(Ny, hold_time)
-        #self.theta = np.full(p.Ny, p.L / p.Vi)
+        #hold_time = 1e-40
+        #self.theta = np.full(Ny, hold_time)
+        self.theta = np.full(p.Ny, p.L / p.V0)
         #self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.emath.log(logarg)- p.mu0 / fric.b))
         self.sigma = stress.sigman0.copy()
         self.tau   = stress.tau0 - p.eta * self.V
@@ -148,8 +148,8 @@ class FaultState:
                     lo,
                     hi,
                     target=0.0,
-                    tolX=1e-14,
-                    tolFun=10,
+                    tolX=0.0, #1e-14,
+                    tolFun=5,
                     maxiter=100)
 
                 # if np.isfinite(x):

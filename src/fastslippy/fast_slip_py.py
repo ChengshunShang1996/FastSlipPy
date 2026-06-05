@@ -147,7 +147,7 @@ class FastSlipPy:
             ksi_inner = self.ksi[1: Ny - 1]
             dt_cand = np.min(ksi_inner * p.L / V_inner)
             dt_cand = max(dt_cand, 1e-150)
-            #dt      = min(min(1.2 * dt, dt_cand), dt_max)
+            dt      = min(min(1.2 * dt, dt_cand), dt_max)
 
             # Clamp dt so we hit tload exactly
             if phase == 0 and t + dt >= p.tload:
@@ -157,9 +157,9 @@ class FastSlipPy:
             # ── aging law + fault advance ──
             self.fault.advance(dt, self.tauqs[:, mid], self.stress)
 
-            if it <= 25000:
+            if it <= 30000:
                 v_load = 1e-5
-            elif it <= 35000:
+            elif it <= 40000:
                 v_load = 1e-4
             else:
                 v_load = 1e-5
@@ -167,9 +167,8 @@ class FastSlipPy:
             # ── update RH with current slip velocities ──
             RH = self.RH_builder.build_RH(dPdt, self.fault.V, v_load)
             # Inject velocity BC at fault column
-            fault_rows = (np.arange(1, Ny - 1) + (Nx // 2) * (Ny + 1)) * 2 + 1
-            #self.fault.V[:] = 1e-5
-            RH[fault_rows] = self.fault.V[1: Ny - 1]
+            #fault_rows = (np.arange(1, Ny - 1) + (Nx // 2) * (Ny + 1)) * 2 + 1
+            #RH[fault_rows] = self.fault.V[1: Ny - 1]
 
             # ── elastic solve ──
             S   = self._solve(RH)

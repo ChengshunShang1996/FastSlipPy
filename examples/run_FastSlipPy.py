@@ -26,18 +26,19 @@ if __name__ == "__main__":
         alpha = 90.0,
         xsize = 1.0,
         ysize = 1.0,
-        Nx=21, Ny=21,
-        Nt=25000,
-        output_interval=100,
-        checkpoint_interval=5000,
-        Vi=1e-10,
-        dt_init=0.002,
+        Nx=11, Ny=11,
+        Nt=50000,
+        output_interval=50,
+        checkpoint_interval=10000,
+        Vi=1e-40,
+        dt_init=0.0001,
+        dt_max = 0.01,
         mu0=0.72,
         nu=0.25,
-        E=64e9,
+        E=0.55e10, #according to k_critical = sigam * (b-a) / d_c, E = 1e10
         V0 = 1e-6,
-        a0 = 0.0012,
-        b0 = 0.00135
+        a0 = 0.012,
+        b0 = 0.0135
     )
 
     #params = ModelParameters()
