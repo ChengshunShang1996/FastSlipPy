@@ -9,7 +9,6 @@ __date__        = "May 22, 2026"
 __license__     = "MIT License"
 #/////////////////////////////////////////////////
 
-from matplotlib.pyplot import grid
 import numpy as np
 
 from fastslippy.pre_processing.model_parameters import ModelParameters
