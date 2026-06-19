@@ -157,9 +157,9 @@ class FastSlipPy:
             # ── aging law + fault advance ──
             self.fault.advance(dt, self.tauqs[:, mid], self.stress)
 
-            if it <= 30000:
-                v_load = 1e-5
-            elif it <= 40000:
+            if it <= 10000:
+                v_load = 1e-4
+            elif it <= 20000:
                 v_load = 1e-4
             else:
                 v_load = 1e-5
@@ -212,11 +212,11 @@ class FastSlipPy:
                     dt, t, self.tauqs, self.sigmaqs,
                     self.uy, self.vy, self.ux, self.vx, self.stress.tau0)
                 
-                self.output.write_vtk(
-                    it, self.grid,
-                    self.ux, self.uy, self.vx, self.vy,
-                    self.tauqs, self.sigmaqs,
-                    self.fault, t)
+                # self.output.write_vtk(
+                #     it, self.grid,
+                #     self.ux, self.uy, self.vx, self.vy,
+                #     self.tauqs, self.sigmaqs,
+                #     self.fault, t)
 
             if it % p.checkpoint_interval == 0:
                 self.output.save_checkpoint(
