@@ -36,6 +36,8 @@ def test_constant_fault_slip():
     # --------------------------------------------------
 
     params = ModelParameters(
+        xsize=2000.0,
+        ysize=2000.0,
         Nx=101,
         Ny=101,
         alpha=90.0
