@@ -26,7 +26,7 @@ if __name__ == "__main__":
         alpha = 90.0,
         xsize = 1.0,
         ysize = 1.0,
-        Nx=51, Ny=51,
+        Nx=21, Ny=21,
         Nt=15000,
         output_interval=1,
         checkpoint_interval=5000,

@@ -11,7 +11,41 @@ __license__     = "MIT License"
 
 import numpy as np
 
+from enum import Enum
 from dataclasses import dataclass, field
+
+class BCType(str, Enum):
+    FIXED = "fixed"
+    FREE = "free"
+    VELOCITY = "velocity"
+
+@dataclass
+class BoundaryConditions:
+    """Boundary conditions for the model. Edit the defaults here 
+    or pass keyword arguments to the constructor."""
+    left: BCType = BCType.FIXED
+    right: BCType = BCType.VELOCITY
+    top: BCType = BCType.FIXED
+    bottom: BCType = BCType.FIXED
+
+class LoadingRegion(str, Enum):
+    RIGHT_BLOCK = "right_block"
+    LEFT_BLOCK = "left_block"
+
+@dataclass
+class LoadingConditions:
+    """Loading conditions for the model. Edit the defaults here 
+    or pass keyword arguments to the constructor."""
+
+    yr = 365 * 24 * 3600.0      # Seconds in a year
+    tload: float = 0.0 * yr     # Time to apply pressure rate change [s]
+
+    # --- Pressure rate ---
+    dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]
+    dPdt_post: float = -0.0127  # Pressure rate after depletion starts [Pa/s]
+
+    region: LoadingRegion = (LoadingRegion.RIGHT_BLOCK)
+    loading_velocity: float = 1e-9
 
 @dataclass
 class ModelParameters:
@@ -29,7 +63,7 @@ class ModelParameters:
     Ny: int = 11                # Vertical grid points    (must be odd)
 
     # --- Material ---
-    rho: float = 2650 #2400.0          # Rock density [kg/m³]
+    rho: float = 2650            # Rock density [kg/m³]
     rhof: float = 1150.0         # Fluid density [kg/m³]
     rhog: float = 200.0          # Gas density [kg/m³]
     Vp: float = 0.0              # Far-field loading rate [m/s]
@@ -37,9 +71,10 @@ class ModelParameters:
     nu: float = 0.25             # Poisson's ratio
     g: float = 9.81              # Gravitational acceleration [m/s²]
     K0: float = 0.75             # Ratio σ_min / σ_max
-    E: float = 0.0              # Young's modulus [Pa] 
+    E: float = 0.0               # Young's modulus [Pa] 
 
     # --- Rate-and-state defaults (used when heterogeneous profile is off) ---
+    friction_law: str = "rate_state"
     mu0: float = 0.72             # Reference friction coefficient
     V0: float = 1e-6             # Reference slip rate [m/s]
     a0: float = 0.0012             # Direct effect (homogeneous fallback)
@@ -52,12 +87,6 @@ class ModelParameters:
     Nt: int = 1000               # Number of time steps
     dt_init: float = 1e-5         # Initial time step [s]
     dt_max: float = 0.002          # Maximum time step [s]
-    yr = 365 * 24 * 3600.0       # Seconds in a year
-    tload: float = 0.0 * yr     # Time to apply pressure rate change [s]  #TODO: CHECK
-
-    # --- Pressure rate ---
-    dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]
-    dPdt_post: float = -0.0127  # Pressure rate after depletion starts [Pa/s]
 
     # --- Output intervals ---
     output_interval: int = 10
@@ -67,6 +96,9 @@ class ModelParameters:
     G: float = field(init=False)
     lam: float = field(init=False)   # First Lamé parameter (λ)
     eta: float = field(init=False)   # Radiation damping coefficient
+
+    bc: BoundaryConditions = field(default_factory=BoundaryConditions)
+    loading: LoadingConditions = field(default_factory=LoadingConditions)
 
     def __post_init__(self):
         

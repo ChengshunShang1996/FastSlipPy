@@ -28,14 +28,6 @@ class MatrixBuilderShear(MatrixBuilder):
     def __init__(self, p: ModelParameters, grid: Grid):
         super().__init__(p, grid)
 
-    # Helper: global DOF indices
-    # @staticmethod
-    # def _dofs(ix: int, iy: int, Ny: int):
-    #     """Return (kux, kuy) 0-based DOF indices for node (ix, iy)."""
-    #     kux = ((ix) * (Ny + 1) + iy) * 2        # ux DOF (0-based)
-    #     kuy = kux + 1                            # uy DOF (0-based)
-    #     return kux, kuy
-
     def build_LH(self) -> sparse.csr_matrix:
         p, g = self.p, self.grid
         Nx, Ny, N = p.Nx, p.Ny, g.N
@@ -128,21 +120,12 @@ class MatrixBuilderShear(MatrixBuilder):
                     r_lam = (lam + 2*G) / G
                     if iy == 0:
                         add(kux, kux, 1)
-                        # if ix < mid:
-                        #     add(kux, kux, 1)
-                        # else:
-                        #     add(kux, kux, 1); add(kux, kux + 2, -1)
                     elif iy == Ny:
                         add(kux, kux, 1)
-                        # if ix < mid:
-                        #     add(kux, kux, 1)
-                        # else:
-                        #     add(kux, kux, 1); add(kux, kux - 2, -1)
                     elif ix == 0:
                         add(kux, kux, 1)
                     elif ix == Nx - 1:
                         add(kux, kux, 1)
-                        #add(kux, kux, 1); add(kux, kux - (Ny+1)*2, -1)
                     elif ix == mid:
                         # Fault column – normal stress jump condition
                         add(kux, kux,              -2*r_lam)

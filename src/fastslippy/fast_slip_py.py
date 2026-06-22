@@ -100,7 +100,7 @@ class FastSlipPy:
 
         # ── initialise / load checkpoint ──
         if not self.checkpointer:
-            dPdt = p.dPdt_pre
+            dPdt = p.loading.dPdt_pre
             self._build_and_factor_LH(dPdt)
         else:
             ckpt = self.output.load_checkpoint(self.checkpointer)
@@ -130,7 +130,7 @@ class FastSlipPy:
 
             # Phase transition: pre → post depletion
             if phase == 1:
-                dPdt  = p.dPdt_post
+                dPdt  = p.loading.dPdt_post
                 self._build_and_factor_LH(dPdt)
                 dt    = p.dt_init
                 dt_max = p.dt_max
@@ -150,16 +150,16 @@ class FastSlipPy:
             dt      = min(min(1.2 * dt, dt_cand), dt_max)
 
             # Clamp dt so we hit tload exactly
-            if phase == 0 and t + dt >= p.tload:
-                dt    = p.tload - t
+            if phase == 0 and t + dt >= p.loading.tload:
+                dt    = p.loading.tload - t
                 phase = 1
 
             # ── aging law + fault advance ──
             self.fault.advance(dt, self.tauqs[:, mid], self.stress)
 
-            if it <= 10000:
+            if it <= 1000:
                 v_load = 1e-4
-            elif it <= 20000:
+            elif it <= 2000:
                 v_load = 1e-4
             else:
                 v_load = 1e-5
@@ -264,7 +264,7 @@ if __name__ == "__main__":
 
     params = ModelParameters()
 
-    model = FaultSlipPy(params=params, output_dir="output")
+    model = FastSlipPy(params=params, output_dir="output")
     model.run()
     fig = model.grid.plot_mesh()
     fig.show()
