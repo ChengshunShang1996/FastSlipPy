@@ -15,7 +15,7 @@ from fastslippy.pre_processing.model_parameters import ModelParameters
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.utilities.stress_cal_util import StressCalUtil
 
-def test_fault_slip_symmetry():
+def test_constant_fault_slip():
 
     """
     Benchmark 6:
