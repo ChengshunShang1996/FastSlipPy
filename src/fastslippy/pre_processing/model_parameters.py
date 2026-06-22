@@ -14,10 +14,18 @@ import numpy as np
 from enum import Enum
 from dataclasses import dataclass, field
 
+class CaseType(Enum):
+    GRONINGEN = "groningen"
+    LAB = "lab"
+
 class BCType(str, Enum):
     FIXED = "fixed"
     FREE = "free"
     VELOCITY = "velocity"
+
+class LoadingRegion(str, Enum):
+    RIGHT_BLOCK = "right_block"
+    LEFT_BLOCK = "left_block"
 
 @dataclass
 class BoundaryConditions:
@@ -27,10 +35,6 @@ class BoundaryConditions:
     right: BCType = BCType.VELOCITY
     top: BCType = BCType.FIXED
     bottom: BCType = BCType.FIXED
-
-class LoadingRegion(str, Enum):
-    RIGHT_BLOCK = "right_block"
-    LEFT_BLOCK = "left_block"
 
 @dataclass
 class LoadingConditions:
@@ -53,6 +57,8 @@ class ModelParameters:
     All physical and numerical parameters for the fault-slip model.
     Edit the defaults here or pass keyword arguments to the constructor.
     """
+    case_type: CaseType = CaseType.LAB
+    
     # --- Fault geometry ---
     alpha: float = 90.0          # Fault dip angle [degrees]
 
