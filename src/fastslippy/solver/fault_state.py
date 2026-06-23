@@ -87,7 +87,7 @@ class FaultState:
         #     + dt * (1.0 - self.V[~expo] * self.theta[~expo] / p.L))
         # self.theta = theta_new
 
-        self.tau   = tauqs_col + stress.tau0 #- p.eta * self.V
+        self.tau   = tauqs_col + stress.tau0 - p.eta * self.V
         self.U     = self.U + dt * self.V
 
     # Tip: The following two methods are alternative implementations of the slip rate solver. 
