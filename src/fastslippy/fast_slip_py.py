@@ -237,7 +237,7 @@ if __name__ == "__main__":
 
     params = ModelParameters()
 
-    model = FaultSlipPy(params=params, output_dir="output")
+    model = FastSlipPy(params=params, output_dir="output")
     model.run()
     fig = model.grid.plot_mesh()
     fig.show()
