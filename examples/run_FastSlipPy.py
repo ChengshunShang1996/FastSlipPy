@@ -24,9 +24,9 @@ if __name__ == "__main__":
 
     params = ModelParameters(
         Nx=401, Ny=401,
-        Nt=201,
+        Nt=1000,
         output_interval=10,
-        checkpoint_interval=201
+        checkpoint_interval=1000
         #dPdt_post = -0.1
     )
 
