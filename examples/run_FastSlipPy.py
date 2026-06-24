@@ -30,6 +30,5 @@ if __name__ == "__main__":
         #dPdt_post = -0.1
     )
 
-    #params = ModelParameters()
     model = RunFastSlipPy(params=params, output_dir="output")
     model.run()
