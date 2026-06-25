@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from fastslippy.pre_processing.model_parameters import ModelParameters
+from fastslippy.pre_processing.model_parameters import ModelParameters, CaseType
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.pre_processing.frictional_zones import FrictionalZones
 from fastslippy.solver.stress_state import StressState
@@ -69,7 +69,10 @@ class FastSlipPy:
         self.figure_creator = FigureCreator(self.output, self.grid)
 
     def _build_and_factor_LH(self, dPdt: float):
-        builder = MatrixBuilderShear(self.p, self.grid)
+        if self.p.case_type == CaseType.LAB:
+            builder = MatrixBuilderShear(self.p, self.grid)
+        else: # "groningen"
+            builder = MatrixBuilder(self.p, self.grid)
         LH = builder.build_LH()
         self.RH_builder = builder
         self.dPdt = dPdt
@@ -165,7 +168,7 @@ class FastSlipPy:
                 v_load = 1e-5
 
             # ── update RH with current slip velocities ──
-            RH = self.RH_builder.build_RH(dPdt, self.fault.V, v_load)
+            RH = self.RH_builder.build_RH(dPdt, self.fault.V)
             # Inject velocity BC at fault column
             #fault_rows = (np.arange(1, Ny - 1) + (Nx // 2) * (Ny + 1)) * 2 + 1
             #RH[fault_rows] = self.fault.V[1: Ny - 1]

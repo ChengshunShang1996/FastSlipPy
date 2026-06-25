@@ -18,6 +18,10 @@ class CaseType(Enum):
     GRONINGEN = "groningen"
     LAB = "lab"
 
+class FrictionLaw(Enum):
+    RATE_STATE = "rate_state"
+    SLIP_WEAKENING = "slip_weakening"
+
 class BCType(str, Enum):
     FIXED = "fixed"
     FREE = "free"
@@ -80,7 +84,7 @@ class ModelParameters:
     E: float = 0.0               # Young's modulus [Pa] 
 
     # --- Rate-and-state defaults (used when heterogeneous profile is off) ---
-    friction_law: str = "rate_state"
+    friction_law: FrictionLaw = FrictionLaw.RATE_STATE
     mu0: float = 0.72             # Reference friction coefficient
     V0: float = 1e-6             # Reference slip rate [m/s]
     a0: float = 0.0012             # Direct effect (homogeneous fallback)
