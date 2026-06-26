@@ -70,7 +70,7 @@ class FastSlipPy:
 
     def _build_and_factor_LH(self, dPdt: float):
         if self.p.case_type == CaseType.LAB:
-            builder = MatrixBuilderShear(self.p, self.grid)
+            builder = MatrixBuilder(self.p, self.grid)
         else: # "groningen"
             builder = MatrixBuilder(self.p, self.grid)
         LH = builder.build_LH()
@@ -160,12 +160,13 @@ class FastSlipPy:
             # ── aging law + fault advance ──
             self.fault.advance(dt, self.tauqs[:, mid], self.stress)
 
-            if it <= 1000:
-                v_load = 1e-4
-            elif it <= 2000:
-                v_load = 1e-4
-            else:
-                v_load = 1e-5
+            if p.case_type == CaseType.LAB:
+                if it <= 30000:
+                    p.bc.right.uy.set_velocity(1e-5)
+                elif it <= 40000:
+                    p.bc.right.uy.set_velocity(1e-4)
+                else:
+                    p.bc.right.uy.set_velocity(1e-5)
 
             # ── update RH with current slip velocities ──
             RH = self.RH_builder.build_RH(dPdt, self.fault.V)

@@ -23,13 +23,14 @@ if __name__ == "__main__":
     # Customise parameters here or leave all defaults
 
     params = ModelParameters(
+        case_type = "lab",
         alpha = 90.0,
         xsize = 1.0,
         ysize = 1.0,
         Nx=21, Ny=21,
-        Nt=1000,
-        output_interval=1,
-        checkpoint_interval=1000,
+        Nt=50000,
+        output_interval=1000,
+        checkpoint_interval=10000,
         Vi=1e-40,
         dt_init=0.0001,
         dt_max = 0.01,
@@ -40,6 +41,15 @@ if __name__ == "__main__":
         a0 = 0.012,
         b0 = 0.0135
     )
+
+    params.bc.left.ux.set_fixed()
+    params.bc.left.uy.set_fixed()
+    params.bc.right.ux.set_fixed()
+    params.bc.right.uy.set_velocity(1e-5)
+    params.bc.bottom.ux.set_fixed()
+    params.bc.bottom.uy.set_fixed()
+    params.bc.top.ux.set_fixed()
+    params.bc.top.uy.set_fixed()
 
     #params = ModelParameters()
     model = RunFastSlipPy(params=params, output_dir="output")

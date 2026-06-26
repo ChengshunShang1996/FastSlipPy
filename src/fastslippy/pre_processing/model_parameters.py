@@ -26,19 +26,75 @@ class BCType(str, Enum):
     FIXED = "fixed"
     FREE = "free"
     VELOCITY = "velocity"
+    TRACTION = "traction"
 
-class LoadingRegion(str, Enum):
-    RIGHT_BLOCK = "right_block"
-    LEFT_BLOCK = "left_block"
+@dataclass
+class DirectionBC:
+
+    type: BCType = BCType.FIXED
+    value: float = 0.0
+
+    def set_fixed(self):
+        self.type = BCType.FIXED
+        self.value = 0.0
+
+    def set_free(self):
+        self.type = BCType.FREE
+        self.value = 0.0
+
+    def set_velocity(self, value: float):
+        self.type = BCType.VELOCITY
+        self.value = value
+
+    def set_traction(self, value: float):
+        self.type = BCType.TRACTION
+        self.value = value
+
+@dataclass
+class BoundaryFace:
+
+    ux: DirectionBC = field(default_factory=DirectionBC)
+    uy: DirectionBC = field(default_factory=DirectionBC)
+
+    def set_fixed(self):
+        self.ux.set_fixed()
+        self.uy.set_fixed()
+
+    def set_free(self):
+        self.ux.set_free()
+        self.uy.set_free()
+
+    def set_velocity_x(self, value: float):
+        self.ux.set_velocity(value)
+
+    def set_velocity_y(self, value: float):
+        self.uy.set_velocity(value)
+
+    def set_traction_x(self, value: float):
+        self.ux.set_traction(value)
+
+    def set_traction_y(self, value: float):
+        self.uy.set_traction(value)
 
 @dataclass
 class BoundaryConditions:
-    """Boundary conditions for the model. Edit the defaults here 
-    or pass keyword arguments to the constructor."""
-    left: BCType = BCType.FIXED
-    right: BCType = BCType.VELOCITY
-    top: BCType = BCType.FIXED
-    bottom: BCType = BCType.FIXED
+
+    left: BoundaryFace = field(default_factory=BoundaryFace)
+    right: BoundaryFace = field(default_factory=BoundaryFace)
+    top: BoundaryFace = field(default_factory=BoundaryFace)
+    bottom: BoundaryFace = field(default_factory=BoundaryFace)
+
+    def set_all_fixed(self):
+        self.left.set_fixed()
+        self.right.set_fixed()
+        self.top.set_fixed()
+        self.bottom.set_fixed()
+
+    def set_all_free(self):
+        self.left.set_free()
+        self.right.set_free()
+        self.top.set_free()
+        self.bottom.set_free()
 
 @dataclass
 class LoadingConditions:
@@ -52,8 +108,7 @@ class LoadingConditions:
     dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]
     dPdt_post: float = -0.0127  # Pressure rate after depletion starts [Pa/s]
 
-    region: LoadingRegion = (LoadingRegion.RIGHT_BLOCK)
-    loading_velocity: float = 1e-9
+    #loading_velocity_y: float = 1e-9
 
 @dataclass
 class ModelParameters:
@@ -67,10 +122,10 @@ class ModelParameters:
     alpha: float = 90.0          # Fault dip angle [degrees]
 
     # --- Grid ---
-    xsize: float = 1.0        # Horizontal model size [m]
-    ysize: float = 1.0        # Vertical model size [m]
-    Nx: int = 11                # Horizontal grid points  (must be odd)
-    Ny: int = 11                # Vertical grid points    (must be odd)
+    xsize: float = 1.0           # Horizontal model size [m]
+    ysize: float = 1.0           # Vertical model size [m]
+    Nx: int = 11                 # Horizontal grid points  (must be odd)
+    Ny: int = 11                 # Vertical grid points    (must be odd)
 
     # --- Material ---
     rho: float = 2650            # Rock density [kg/m³]
