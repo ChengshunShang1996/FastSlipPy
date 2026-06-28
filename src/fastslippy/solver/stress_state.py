@@ -29,56 +29,6 @@ class StressState:
         self.Pr = self.Pr0.copy()
         self.P  = np.where(y < 1000, self.Pl, self.Pr)
 
-        #TODO: will be removed after testing        
-        '''
-        fig, axes = plt.subplots(1, 4, figsize=(14, 5))
-        lw = 2
-        # --------------------------------------------------
-        # Effective normal stress
-        # --------------------------------------------------
-        axes[0].plot(self.sigman0 / 1e6, y, linewidth=lw)
-        axes[0].invert_yaxis()
-        axes[0].set_xlabel(r'$\sigma_n$ (MPa)')
-        axes[0].set_ylabel('Depth (m)')
-        axes[0].set_title('Effective Normal Stress')
-        axes[0].set_xlim(10, 25)
-        axes[0].set_ylim(2000, 0)
-        axes[0].grid(True)
-        # --------------------------------------------------
-        # Shear stress
-        # --------------------------------------------------
-        axes[1].plot(self.tau0 / 1e6, y, linewidth=lw)
-        axes[1].invert_yaxis()
-        axes[1].set_xlabel(r'$\tau$ (MPa)')
-        axes[1].set_title('Shear Stress')
-        axes[1].set_ylim(2000, 0)
-        axes[1].grid(True)
-        # --------------------------------------------------
-        # Left pore pressure
-        # --------------------------------------------------
-        axes[2].plot(self.Pl0 / 1e6, y, linewidth=lw)
-        axes[2].invert_yaxis()
-        axes[2].set_xlabel(r'$P_l$ (MPa)')
-        axes[2].set_title('Left Pore Pressure')
-        axes[2].set_ylim(2000, 0)
-        axes[2].set_xlim(20, 50)
-        axes[2].grid(True)
-        # --------------------------------------------------
-        # Right pore pressure
-        # --------------------------------------------------
-        axes[3].plot(self.Pr0 / 1e6, y, linewidth=lw)
-        axes[3].invert_yaxis()
-        axes[3].set_xlabel(r'$P_r$ (MPa)')
-        axes[3].set_title('Right Pore Pressure')
-        axes[3].set_ylim(2000, 0)
-        axes[3].set_xlim(20, 50)
-        axes[3].grid(True)
-        # --------------------------------------------------
-        plt.suptitle('Initial Stress and Pressure Profiles')
-        plt.tight_layout()
-        #plt.show()
-        '''
-
     # TODO: This should be replaced by a more flexible function 
     def _initial_stress(self):
         p, y = self.p, self.y
