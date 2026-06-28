@@ -157,12 +157,12 @@ class MatrixBuilder:
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.top.ux.type}")
                     elif ix == 0:
-                        if p.bc.left.ux.type == BCType.FIXED or p.bc.left.ux.type == BCType.VELOCITY:
+                        if p.bc.left.ux.type == BCType.FIXED or p.bc.left.ux.type == BCType.VELOCITY or p.bc.left.ux.type == BCType.FREE:
                             add(kux, kux, 1)
                         else:
                             raise ValueError(f"BC type: {p.bc.left.ux.type} is not supported for left boundary yet.")
                     elif ix == Nx - 1:
-                        if p.bc.right.ux.type == BCType.FIXED or p.bc.right.ux.type == BCType.VELOCITY:
+                        if p.bc.right.ux.type == BCType.FIXED or p.bc.right.ux.type == BCType.VELOCITY or p.bc.right.ux.type == BCType.FREE:
                             add(kux, kux, 1)
                         else:
                             raise ValueError(f"BC type: {p.bc.right.ux.type} is not supported for right boundary yet.")
