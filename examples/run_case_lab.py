@@ -51,7 +51,7 @@ if __name__ == "__main__":
     params.bc.top.ux.set_fixed()
     params.bc.top.uy.set_fixed()
 
-    params.layers.set_homogeneous(a=params.a0, b=params.b0)
+    params.layers.set_homogeneous(top = 1, bottom = 2, a=params.a0, b=params.b0)
 
     #params = ModelParameters()
     model = RunFastSlipPy(params=params, output_dir="output")

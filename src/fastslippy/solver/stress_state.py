@@ -12,7 +12,7 @@ __license__     = "MIT License"
 import matplotlib.pyplot as plt
 import numpy as np
 
-from fastslippy.pre_processing.model_parameters import CaseType, ModelParameters
+from fastslippy.pre_processing.model_parameters import  ModelParameters
 from fastslippy.utilities.math_util import MathUtil
 
 class StressState:
@@ -33,7 +33,8 @@ class StressState:
     def _initial_stress(self):
         p, y = self.p, self.y
 
-        if p.case_type == CaseType.GRONINGEN:
+        if p.case_type == "groningen":
+
             sigmatop = p.rho * p.g * 2000 - 4.70e6
             Ptop     = p.rhof * p.g * 2000
             sigmav = p.rho * p.g * y + sigmatop
@@ -47,8 +48,9 @@ class StressState:
                     + (1 - p.K0) / 2 * MathUtil.cosd(2 * p.alpha) * sigmav
                     - np.where(y < 1000, Pl0, Pr0))
             tau0 = (1 - p.K0) / 2 * MathUtil.sind(2 * p.alpha) * sigmav
-        
-        elif p.case_type == CaseType.LAB:
+
+        elif p.case_type == "lab":
+
             sigman0 = 0.0 * y + 15e6
             tau0 = 0.0 * y  + 1e-30
             Pl0 = 0.0 * y + 1e-30

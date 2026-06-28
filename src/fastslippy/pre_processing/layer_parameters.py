@@ -78,6 +78,6 @@ class LayerParameters:
             0.02347,
         )
 
-    def set_homogeneous(self, a, b, top=-1e30, bottom=1e30):
+    def set_homogeneous(self, top, bottom, a, b, ):
         self.clear()
         self.add("Homogeneous", top, bottom, a, b)

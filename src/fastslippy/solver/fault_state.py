@@ -33,16 +33,16 @@ class FaultState:
         Ny = p.Ny
         self.U     = np.zeros(Ny)
         self.V     = np.full(Ny, p.Vi)
-        logarg = 2 * p.V0 / p.Vi * np.sinh((stress.tau0 - p.eta * p.Vi) / fric.a / stress.sigman0)
-        #safe_logarg = np.maximum(logarg, 1e-30)
-        # if np.any(logarg <= 0):
-        #     print(logarg)
-        #     print("Warning: logarg has non-positive values, which may cause issues in the solver.")
-        #self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.log(safe_logarg)- p.mu0 / fric.b))
-        #hold_time = 1e-40
-        #self.theta = np.full(Ny, hold_time)
-        self.theta = np.full(p.Ny, p.L / p.V0)
-        #self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.emath.log(logarg)- p.mu0 / fric.b))
+        if p.case_type == "groningen":
+            logarg = 2 * p.V0 / p.Vi * np.sinh((stress.tau0 - p.eta * p.Vi) / fric.a / stress.sigman0)
+            safe_logarg = np.maximum(logarg, 1e-30)
+            if np.any(logarg <= 0):
+                print(logarg)
+                print("Warning: logarg has non-positive values, which may cause issues in the solver.")
+            self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.log(safe_logarg)- p.mu0 / fric.b))
+            #self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.emath.log(logarg)- p.mu0 / fric.b))
+        elif p.case_type == "lab":
+            self.theta = np.full(p.Ny, p.L / p.V0)
         self.sigma = stress.sigman0.copy()
         self.tau   = stress.tau0 - p.eta * self.V
 

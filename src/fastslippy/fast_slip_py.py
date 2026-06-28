@@ -69,7 +69,7 @@ class FastSlipPy:
         self.figure_creator = FigureCreator(self.output, self.grid)
 
     def _build_and_factor_LH(self, dPdt: float):
-        if self.p.case_type == CaseType.LAB:
+        if self.p.case_type == "lab":
             builder = MatrixBuilder(self.p, self.grid)
         else: # "groningen"
             builder = MatrixBuilder(self.p, self.grid)
@@ -160,7 +160,7 @@ class FastSlipPy:
             # ── aging law + fault advance ──
             self.fault.advance(dt, self.tauqs[:, mid], self.stress)
 
-            if p.case_type == CaseType.LAB:
+            if p.case_type == "lab":
                 if it <= 30000:
                     p.bc.right.uy.set_velocity(1e-5)
                 elif it <= 40000:
