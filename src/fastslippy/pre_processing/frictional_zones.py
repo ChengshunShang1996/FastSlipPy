@@ -45,13 +45,15 @@ class FrictionalZones:
         a = np.zeros_like(y)
         b = np.zeros_like(y)
 
-        layers = list(self.LAYERS.items())
+        #layers = list(self.LAYERS.items())
+        layers = self.p.layers.layers
 
-        for i, (name, layer) in enumerate(layers):
+        #for i, (name, layer) in enumerate(layers):
+        for i, layer in enumerate(layers):
 
             # Convert absolute depth [m] to model y-coordinate
-            top_y = layer["top"] - p.ysize
-            bot_y = layer["bot"] - p.ysize
+            top_y = layer.top - p.ysize
+            bot_y = layer.bottom - p.ysize
 
             # First layer
             if i == 0:
@@ -65,7 +67,7 @@ class FrictionalZones:
             else:
                 mask = (y > top_y) & (y <= bot_y)
 
-            a[mask] = layer["a"]
-            b[mask] = layer["b"]
+            a[mask] = layer.a
+            b[mask] = layer.b
 
         return a, b

@@ -13,6 +13,7 @@ import numpy as np
 
 from enum import Enum
 from dataclasses import dataclass, field
+from fastslippy.pre_processing.layer_parameters import Layer, LayerParameters
 
 class CaseType(Enum):
     GRONINGEN = "groningen"
@@ -97,6 +98,14 @@ class BoundaryConditions:
         self.bottom.set_free()
 
 @dataclass
+class Layer:
+    name: str
+    top: float
+    bottom: float
+    a: float
+    b: float
+
+@dataclass
 class LoadingConditions:
     """Loading conditions for the model. Edit the defaults here 
     or pass keyword arguments to the constructor."""
@@ -164,6 +173,7 @@ class ModelParameters:
 
     bc: BoundaryConditions = field(default_factory=BoundaryConditions)
     loading: LoadingConditions = field(default_factory=LoadingConditions)
+    layers: LayerParameters = field(default_factory=LayerParameters)
 
     def __post_init__(self):
         
