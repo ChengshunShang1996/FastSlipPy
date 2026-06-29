@@ -9,7 +9,115 @@ __date__        = "May 5, 2026"
 __license__     = "MIT License"
 #/////////////////////////////////////////////////
 
+import numpy as np
+
+from enum import Enum
 from dataclasses import dataclass, field
+from fastslippy.pre_processing.layer_parameters import Layer, LayerParameters
+
+class CaseType(Enum):
+    GRONINGEN = "groningen"
+    LAB = "lab"
+
+class FrictionLaw(Enum):
+    RATE_STATE = "rate_state"
+    SLIP_WEAKENING = "slip_weakening"
+
+class BCType(str, Enum):
+    FIXED = "fixed"
+    FREE = "free"
+    VELOCITY = "velocity"
+    TRACTION = "traction"
+
+@dataclass
+class DirectionBC:
+
+    type: BCType = BCType.FIXED
+    value: float = 0.0
+
+    def set_fixed(self):
+        self.type = BCType.FIXED
+        self.value = 0.0
+
+    def set_free(self):
+        self.type = BCType.FREE
+        self.value = 0.0
+
+    def set_velocity(self, value: float):
+        self.type = BCType.VELOCITY
+        self.value = value
+
+    def set_traction(self, value: float):
+        self.type = BCType.TRACTION
+        self.value = value
+
+@dataclass
+class BoundaryFace:
+
+    ux: DirectionBC = field(default_factory=DirectionBC)
+    uy: DirectionBC = field(default_factory=DirectionBC)
+
+    def set_fixed(self):
+        self.ux.set_fixed()
+        self.uy.set_fixed()
+
+    def set_free(self):
+        self.ux.set_free()
+        self.uy.set_free()
+
+    def set_velocity_x(self, value: float):
+        self.ux.set_velocity(value)
+
+    def set_velocity_y(self, value: float):
+        self.uy.set_velocity(value)
+
+    def set_traction_x(self, value: float):
+        self.ux.set_traction(value)
+
+    def set_traction_y(self, value: float):
+        self.uy.set_traction(value)
+
+@dataclass
+class BoundaryConditions:
+
+    left: BoundaryFace = field(default_factory=BoundaryFace)
+    right: BoundaryFace = field(default_factory=BoundaryFace)
+    top: BoundaryFace = field(default_factory=BoundaryFace)
+    bottom: BoundaryFace = field(default_factory=BoundaryFace)
+
+    def set_all_fixed(self):
+        self.left.set_fixed()
+        self.right.set_fixed()
+        self.top.set_fixed()
+        self.bottom.set_fixed()
+
+    def set_all_free(self):
+        self.left.set_free()
+        self.right.set_free()
+        self.top.set_free()
+        self.bottom.set_free()
+
+@dataclass
+class Layer:
+    name: str
+    top: float
+    bottom: float
+    a: float
+    b: float
+
+@dataclass
+class LoadingConditions:
+    """Loading conditions for the model. Edit the defaults here 
+    or pass keyword arguments to the constructor."""
+
+    yr = 365 * 24 * 3600.0      # Seconds in a year
+    tload: float = 0.0 * yr     # Time to apply pressure rate change [s]
+
+    # --- Pressure rate ---
+    dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]
+    dPdt_post: float = -0.0127  # Pressure rate after depletion starts [Pa/s]
+
+    #loading_velocity_y: float = 1e-9
 
 @dataclass
 class ModelParameters:
@@ -17,44 +125,42 @@ class ModelParameters:
     All physical and numerical parameters for the fault-slip model.
     Edit the defaults here or pass keyword arguments to the constructor.
     """
+    case_type: CaseType = CaseType.LAB
+    
     # --- Fault geometry ---
-    alpha: float = 70.0          # Fault dip angle [degrees]
+    alpha: float = 90.0          # Fault dip angle [degrees]
 
     # --- Grid ---
-    xsize: float = 2000.0        # Horizontal model size [m]
-    ysize: float = 2000.0        # Vertical model size [m]
-    Nx: int = 51                # Horizontal grid points  (must be odd)
-    Ny: int = 51                # Vertical grid points    (must be odd)
+    xsize: float = 1.0           # Horizontal model size [m]
+    ysize: float = 1.0           # Vertical model size [m]
+    Nx: int = 11                 # Horizontal grid points  (must be odd)
+    Ny: int = 11                 # Vertical grid points    (must be odd)
 
     # --- Material ---
-    rho: float = 2400.0          # Rock density [kg/m³]
+    rho: float = 2650            # Rock density [kg/m³]
     rhof: float = 1150.0         # Fluid density [kg/m³]
     rhog: float = 200.0          # Gas density [kg/m³]
     Vp: float = 0.0              # Far-field loading rate [m/s]
     cs: float = 1645.0           # Shear-wave speed [m/s]
-    nu: float = 0.15             # Poisson's ratio
+    nu: float = 0.25             # Poisson's ratio
     g: float = 9.81              # Gravitational acceleration [m/s²]
     K0: float = 0.75             # Ratio σ_min / σ_max
+    E: float = 0.0               # Young's modulus [Pa] 
 
     # --- Rate-and-state defaults (used when heterogeneous profile is off) ---
-    mu0: float = 0.3             # Reference friction coefficient
+    friction_law: FrictionLaw = FrictionLaw.RATE_STATE
+    mu0: float = 0.72             # Reference friction coefficient
     V0: float = 1e-6             # Reference slip rate [m/s]
-    a0: float = 0.01             # Direct effect (homogeneous fallback)
-    b0: float = 0.015            # Evolution effect (homogeneous fallback)
-    L: float = 0.5               # Characteristic slip distance [m]
+    a0: float = 0.0012             # Direct effect (homogeneous fallback)
+    b0: float = 0.00135            # Evolution effect (homogeneous fallback)
+    L: float = 2.25e-6               # Characteristic slip distance [m]
     Vw: float = 1e90             # Dynamic weakening velocity [m/s]
     Vi: float = 1e-30            # Initial/background slip rate [m/s]
 
     # --- Time stepping ---
     Nt: int = 1000               # Number of time steps
-    dt_init: float = 1.0         # Initial time step [s]
-    dt_max: float = 1e6          # Maximum time step [s]
-    yr = 365 * 24 * 3600.0       # Seconds in a year
-    tload: float = 1000.0 * yr     # Time to apply pressure rate change [s]  #TODO: CHECK
-
-    # --- Pressure rate ---
-    dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]
-    dPdt_post: float = -0.0127  # Pressure rate after depletion starts [Pa/s]
+    dt_init: float = 1e-5         # Initial time step [s]
+    dt_max: float = 0.002          # Maximum time step [s]
 
     # --- Output intervals ---
     output_interval: int = 10
@@ -65,9 +171,18 @@ class ModelParameters:
     lam: float = field(init=False)   # First Lamé parameter (λ)
     eta: float = field(init=False)   # Radiation damping coefficient
 
+    bc: BoundaryConditions = field(default_factory=BoundaryConditions)
+    loading: LoadingConditions = field(default_factory=LoadingConditions)
+    layers: LayerParameters = field(default_factory=LayerParameters)
+
     def __post_init__(self):
         
-        self.G = self.rho * self.cs ** 2
+        #self.G = self.rho * self.cs ** 2
+        if self.E > 0:
+            self.G = self.E / (2 * (1 + self.nu))
+            self.cs = np.sqrt(self.G / self.rho)
+        else:
+            self.G = self.rho * self.cs ** 2
         self.lam = 2 * self.G * (1 + self.nu) / 3 / (1 - 2 * self.nu) - 2 / 3 * self.G
         self.eta = self.G / 2 / self.cs
         assert self.Nx % 2 == 1, "Nx must be odd (fault at centre column)."

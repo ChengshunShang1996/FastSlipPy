@@ -12,11 +12,12 @@ __license__     = "MIT License"
 import numpy as np
 from scipy import sparse
 
-from fastslippy.pre_processing.model_parameters import ModelParameters, BCType
+from fastslippy.pre_processing.model_parameters import ModelParameters
 from fastslippy.pre_processing.grid import Grid
+from fastslippy.solver.matrix_builder import MatrixBuilder
 
 
-class MatrixBuilder:
+class MatrixBuilderShear(MatrixBuilder):
     """
     Assembles the sparse stiffness matrix LH and right-hand-side vector RH
     for the quasi-static elastic equilibrium problem on the staggered grid.
@@ -25,16 +26,7 @@ class MatrixBuilder:
     """
 
     def __init__(self, p: ModelParameters, grid: Grid):
-        self.p    = p
-        self.grid = grid
-
-    # Helper: global DOF indices
-    @staticmethod
-    def _dofs(ix: int, iy: int, Ny: int):
-        """Return (kux, kuy) 0-based DOF indices for node (ix, iy)."""
-        kux = ((ix) * (Ny + 1) + iy) * 2        # ux DOF (0-based)
-        kuy = kux + 1                            # uy DOF (0-based)
-        return kux, kuy
+        super().__init__(p, grid)
 
     def build_LH(self) -> sparse.csr_matrix:
         p, g = self.p, self.grid
@@ -56,30 +48,14 @@ class MatrixBuilder:
 
                 # ── uy equation (iy < Ny) ──────────────────────────────
                 if iy < Ny:
-                    if ix == 0: #left boundary
-                        if p.bc.left.uy.type == BCType.FREE:
-                            add(kuy, kuy, 1);  add(kuy, kuy + (Ny+1)*2, -1)
-                        elif p.bc.left.uy.type == BCType.FIXED or p.bc.left.uy.type == BCType.VELOCITY:
-                            add(kuy, kuy, 1)
-                        else:
-                            raise ValueError(f"Unknown BC type: {p.bc.left.uy.type}")
-                    elif ix == Nx: #right boundary
-                        if p.bc.right.uy.type == BCType.FREE:
-                            add(kuy, kuy, 1);  add(kuy, kuy - (Ny+1)*2, -1)
-                        elif p.bc.right.uy.type == BCType.FIXED or p.bc.right.uy.type == BCType.VELOCITY:
-                            add(kuy, kuy, 1)
-                        else:
-                            raise ValueError(f"Unknown BC type: {p.bc.right.uy.type}")
-                    elif iy == 0: #bottom boundary
-                        if p.bc.bottom.uy.type == BCType.FIXED or p.bc.bottom.uy.type == BCType.VELOCITY:
-                            add(kuy, kuy, 1)
-                        else:
-                            raise ValueError(f"BC type: {p.bc.bottom.uy.type} is not supported for bottom boundary yet.")
-                    elif iy == Ny - 1: #top boundary
-                        if p.bc.top.uy.type == BCType.FIXED or p.bc.top.uy.type == BCType.VELOCITY:
-                            add(kuy, kuy, 1)
-                        else:
-                            raise ValueError(f"BC type: {p.bc.top.uy.type} is not supported for top boundary yet.")
+                    if ix == 0: # Neumann BC
+                        add(kuy, kuy, 1)
+                    elif ix == Nx: # Neumann BC Velocity
+                        add(kuy, kuy, 1)
+                    elif iy == 0:
+                        add(kuy, kuy, 1)
+                    elif iy == Ny - 1:
+                        add(kuy, kuy, 1)
                     elif ix == mid:
                         # Fault left side
                         add(kuy, kuy, -1); add(kuy, kuy + (Ny+1)*2, 1)
@@ -142,30 +118,14 @@ class MatrixBuilder:
                 if ix < Nx:
                     r2 = dx*dx / dy/dy
                     r_lam = (lam + 2*G) / G
-                    if iy == 0: #bottom boundary
-                        if p.bc.bottom.ux.type == BCType.FIXED or p.bc.bottom.ux.type == BCType.VELOCITY:
-                            add(kux, kux, 1)
-                        elif p.bc.bottom.ux.type == BCType.FREE:
-                            add(kux, kux, 1); add(kux, kux + 2, -1)
-                        else:
-                            raise ValueError(f"Unknown BC type: {p.bc.bottom.ux.type}")
+                    if iy == 0:
+                        add(kux, kux, 1)
                     elif iy == Ny:
-                        if p.bc.top.ux.type == BCType.FIXED or p.bc.top.ux.type == BCType.VELOCITY:
-                            add(kux, kux, 1)
-                        elif p.bc.top.ux.type == BCType.FREE:
-                            add(kux, kux, 1); add(kux, kux - 2, -1)
-                        else:
-                            raise ValueError(f"Unknown BC type: {p.bc.top.ux.type}")
+                        add(kux, kux, 1)
                     elif ix == 0:
-                        if p.bc.left.ux.type == BCType.FIXED or p.bc.left.ux.type == BCType.VELOCITY or p.bc.left.ux.type == BCType.FREE:
-                            add(kux, kux, 1)
-                        else:
-                            raise ValueError(f"BC type: {p.bc.left.ux.type} is not supported for left boundary yet.")
+                        add(kux, kux, 1)
                     elif ix == Nx - 1:
-                        if p.bc.right.ux.type == BCType.FIXED or p.bc.right.ux.type == BCType.VELOCITY or p.bc.right.ux.type == BCType.FREE:
-                            add(kux, kux, 1)
-                        else:
-                            raise ValueError(f"BC type: {p.bc.right.ux.type} is not supported for right boundary yet.")
+                        add(kux, kux, 1)
                     elif ix == mid:
                         # Fault column – normal stress jump condition
                         add(kux, kux,              -2*r_lam)
@@ -232,65 +192,13 @@ class MatrixBuilder:
                     if ix == 0:
                         pass
                     elif ix == Nx:
-                        if p.bc.right.uy.type == BCType.VELOCITY:
-                            RH[kuy] = p.bc.right.uy.value
-                        else:
-                            pass
-                    elif iy == 0:
-                        if p.case_type == "lab":
-                            if ix > mid:
-                                RH[kuy] = p.bc.right.uy.value
-                        else:
-                            pass
-                    elif iy == Ny - 1:
-                        if p.case_type == "lab":
-                            if ix > mid:
-                                RH[kuy] = p.bc.right.uy.value
-                        else:
-                            pass
+                        RH[kuy] = self.p.loading.loading_velocity
+                    elif iy == 0 or iy == Ny - 1:
+                        if ix > mid:
+                            RH[kuy] = self.p.loading.loading_velocity
                     elif ix == mid:
                         RH[kuy] = V[iy]
-                    elif ix == mid + 1:
-                        pass
-                    else:
-                        if p.case_type == "groningen":
-                            yv = y[iy]
-                            #TODO: make this more general, not hard-coded
-                            if yv == 850 and ix >= mid + 1:
-                                RH[kuy] =  dPdt / dy * dx*dx / G * sina
-                            if yv == 1050 and ix >= mid + 1:
-                                RH[kuy] = -dPdt / dy * dx*dx / G * sina
-                            if yv == 800 and ix <= mid:
-                                RH[kuy] =  dPdt / dy * dx*dx / G * sina
-                            if yv == 1000 and ix <= mid:
-                                RH[kuy] = -dPdt / dy * dx*dx / G * sina
 
                 # ── ux block ──
-                if ix < Nx:
-                    if iy == 0:
-                        pass
-                    elif iy == Ny:
-                        pass
-                    elif ix == 0:
-                        pass
-                    elif ix == Nx - 1:
-                        pass
-                    elif ix == mid:
-                        if p.case_type == "groningen":
-                            yv = y[iy]
-                            if 800 < yv <= 850:
-                                RH[kux] = -dPdt * dx / G
-                            if 1000 < yv <= 1050:
-                                RH[kux] =  dPdt * dx / G
-                    else:
-                        if p.case_type == "groningen":
-                            yv = y[iy]
-                            if yv == 1050 and ix > mid + 1:
-                                RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
-                            if yv == 1000 and ix < mid + 1:
-                                RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
-                            if yv == 850 and ix > mid + 1:
-                                RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
-                            if yv == 800 and ix < mid + 1:
-                                RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
+                # pass
         return RH

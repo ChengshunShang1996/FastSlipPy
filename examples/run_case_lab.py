@@ -23,12 +23,35 @@ if __name__ == "__main__":
     # Customise parameters here or leave all defaults
 
     params = ModelParameters(
-        Nx=401, Ny=401,
-        Nt=1000,
-        output_interval=10,
-        checkpoint_interval=1000
-        #dPdt_post = -0.1
+        case_type = "lab",
+        alpha = 90.0,
+        xsize = 1.0,
+        ysize = 1.0,
+        Nx=21, Ny=21,
+        Nt=50000,
+        output_interval=1000,
+        checkpoint_interval=10000,
+        Vi=1e-40,
+        dt_init=0.0001,
+        dt_max = 0.01,
+        mu0=0.72,
+        nu=0.25,
+        E=0.55e10, #according to k_critical = sigam * (b-a) / d_c, E = 1e10
+        V0 = 1e-6,
+        a0 = 0.012,
+        b0 = 0.0135
     )
+
+    params.bc.left.ux.set_fixed()
+    params.bc.left.uy.set_fixed()
+    params.bc.right.ux.set_fixed()
+    params.bc.right.uy.set_velocity(1e-5)
+    params.bc.bottom.ux.set_fixed()
+    params.bc.bottom.uy.set_fixed()
+    params.bc.top.ux.set_fixed()
+    params.bc.top.uy.set_fixed()
+
+    params.layers.set_homogeneous(top = 1, bottom = 2, a=params.a0, b=params.b0)
 
     model = RunFastSlipPy(params=params, output_dir="output")
     model.run()

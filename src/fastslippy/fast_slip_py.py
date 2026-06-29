@@ -21,12 +21,13 @@ from pathlib import Path
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from fastslippy.pre_processing.model_parameters import ModelParameters
+from fastslippy.pre_processing.model_parameters import ModelParameters, CaseType
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.pre_processing.frictional_zones import FrictionalZones
 from fastslippy.solver.stress_state import StressState
 from fastslippy.solver.fault_state import FaultState
 from fastslippy.solver.matrix_builder import MatrixBuilder
+from fastslippy.solver.matrix_builder_shear import MatrixBuilderShear
 from fastslippy.utilities.stress_cal_util import StressCalUtil
 from fastslippy.post_processing.output_manager import OutputManager
 from fastslippy.post_processing.figure_creator import FigureCreator
@@ -68,7 +69,10 @@ class FastSlipPy:
         self.figure_creator = FigureCreator(self.output, self.grid)
 
     def _build_and_factor_LH(self, dPdt: float):
-        builder = MatrixBuilder(self.p, self.grid)
+        if self.p.case_type == "lab":
+            builder = MatrixBuilder(self.p, self.grid)
+        else: # "groningen"
+            builder = MatrixBuilder(self.p, self.grid)
         LH = builder.build_LH()
         self.RH_builder = builder
         self.dPdt = dPdt
@@ -99,7 +103,7 @@ class FastSlipPy:
 
         # ── initialise / load checkpoint ──
         if not self.checkpointer:
-            dPdt = p.dPdt_pre
+            dPdt = p.loading.dPdt_pre
             self._build_and_factor_LH(dPdt)
         else:
             ckpt = self.output.load_checkpoint(self.checkpointer)
@@ -129,7 +133,7 @@ class FastSlipPy:
 
             # Phase transition: pre → post depletion
             if phase == 1:
-                dPdt  = p.dPdt_post
+                dPdt  = p.loading.dPdt_post
                 self._build_and_factor_LH(dPdt)
                 dt    = p.dt_init
                 dt_max = p.dt_max
@@ -149,18 +153,26 @@ class FastSlipPy:
             dt      = min(min(1.2 * dt, dt_cand), dt_max)
 
             # Clamp dt so we hit tload exactly
-            if phase == 0 and t + dt >= p.tload:
-                dt    = p.tload - t
+            if phase == 0 and t + dt >= p.loading.tload:
+                dt    = p.loading.tload - t
                 phase = 1
 
             # ── aging law + fault advance ──
             self.fault.advance(dt, self.tauqs[:, mid], self.stress)
 
+            if p.case_type == "lab":
+                if it <= 30000:
+                    p.bc.right.uy.set_velocity(1e-5)
+                elif it <= 40000:
+                    p.bc.right.uy.set_velocity(1e-4)
+                else:
+                    p.bc.right.uy.set_velocity(1e-5)
+
             # ── update RH with current slip velocities ──
             RH = self.RH_builder.build_RH(dPdt, self.fault.V)
             # Inject velocity BC at fault column
-            fault_rows = (np.arange(1, Ny - 1) + (Nx // 2) * (Ny + 1)) * 2 + 1
-            RH[fault_rows] = self.fault.V[1: Ny - 1]
+            #fault_rows = (np.arange(1, Ny - 1) + (Nx // 2) * (Ny + 1)) * 2 + 1
+            #RH[fault_rows] = self.fault.V[1: Ny - 1]
 
             # ── elastic solve ──
             S   = self._solve(RH)
@@ -191,7 +203,7 @@ class FastSlipPy:
             self.fault.sigma = self.stress.sigman0 - np.minimum(sigmal, sigmar)
 
             # ── pressure update ──
-            self.stress.update_pressure(dt, dPdt)
+            #self.stress.update_pressure(dt, dPdt)
 
             # ── logging ──
             self.output.log(it, t2 if phase == 2 else t, dt,
@@ -203,6 +215,12 @@ class FastSlipPy:
                     self.fault.sigma, self.stress.P, self.fault.theta,
                     dt, t, self.tauqs, self.sigmaqs,
                     self.uy, self.vy, self.ux, self.vx, self.stress.tau0)
+                
+                # self.output.write_vtk(
+                #     it, self.grid,
+                #     self.ux, self.uy, self.vx, self.vy,
+                #     self.tauqs, self.sigmaqs,
+                #     self.fault, t)
 
             if it % p.checkpoint_interval == 0:
                 self.output.save_checkpoint(
@@ -216,10 +234,23 @@ class FastSlipPy:
             if phase == 2:
                 t2 += dt
 
+        mid = Nx//2
+        print(
+            "tauqs min/max",
+            np.min(self.tauqs[:, mid]),
+            np.max(self.tauqs[:, mid])
+        )
+
+        print(
+            "sigma min/max",
+            np.min(self.sigmaqs[:, mid]),
+            np.max(self.sigmaqs[:, mid])
+        )
+
         # ── wrap up ──
         self.output.save_all()
         self.output.close()
-        self.figure_creator.plot_results(Nx)
+        self.figure_creator.plot_results_shear(Nx)
         print(f"Done.  Total running time: {time.perf_counter()-t0_wall:.1f}s")
     
     def after_run(self):

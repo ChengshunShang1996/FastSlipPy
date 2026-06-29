@@ -55,15 +55,17 @@ class Grid:
         # Total DOF count
         self.N = (Nx + 1) * (Ny + 1) * 2
 
+        self.plot_grid()
+
     def plot_mesh(self):
-        X0, Y0 = np.meshgrid(self.x, self.y+2000)
+        X0, Y0 = np.meshgrid(self.x, self.y)
         X = Y0 * self.cosa + X0
         Y = Y0 * self.sina
         fig, ax = plt.subplots()
         ax.plot(X, Y, 'k', linewidth=0.4)
         ax.plot(X.T, Y.T, 'k', linewidth=0.4)
 
-        y_line = self.y + 2000
+        y_line = self.y
         x_line = np.zeros_like(self.y)   # fault 在 x = 0
         X_fault = y_line * self.cosa + x_line
         Y_fault = y_line * self.sina
@@ -124,4 +126,4 @@ class Grid:
         ax.legend(loc='upper right', fontsize=8)
 
         plt.tight_layout()
-        plt.show()
+        fig.savefig(f"grid.png", dpi=150)
