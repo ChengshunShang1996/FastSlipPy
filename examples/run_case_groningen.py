@@ -27,19 +27,26 @@ if __name__ == "__main__":
         alpha = 70.0,
         xsize = 2000.0,
         ysize = 2000.0,
-        Nx=51, Ny=51,
-        Nt=100,
-        output_interval=10,
-        checkpoint_interval=1000,
-        Vi=1e-30,
-        dt_init=1.0,
-        dt_max = 1e6,
-        mu0=0.3,
-        nu=0.15,
+        Nx = 201, Ny = 201,
+        Nt = 10000,
+        output_interval = 1000,
+        checkpoint_interval = 10000,
+        rho = 2400.0,
+        rhof = 1150.0,
+        rhog = 200.0,
+        Vp = 0.0,
+        cs = 1650,
+        mu0 = 0.3,
+        nu = 0.15,
         #E=0.55e10, #according to k_critical = sigam * (b-a) / d_c, E = 1e10
         V0 = 1e-6,
         a0 = 0.01,
-        b0 = 0.015
+        b0 = 0.015,
+        L = 0.5,
+        dt_init = 1.0,
+        dt_max = 1e6,
+        Vw = 1e90,
+        Vi = 1e-30
     )
 
     yr = 365 * 24 * 3600.0
@@ -51,13 +58,12 @@ if __name__ == "__main__":
     params.bc.left.uy.set_free()
     params.bc.right.ux.set_free()
     params.bc.right.uy.set_free()
-    params.bc.bottom.ux.set_fixed()
+    params.bc.bottom.ux.set_free()
     params.bc.bottom.uy.set_fixed()
-    params.bc.top.ux.set_fixed()
+    params.bc.top.ux.set_free()
     params.bc.top.uy.set_fixed()
 
-    params.layers.set_homogeneous(a=params.a0, b=params.b0)
+    params.layers.set_groningen()
 
-    #params = ModelParameters()
     model = RunFastSlipPy(params=params, output_dir="output")
     model.run()

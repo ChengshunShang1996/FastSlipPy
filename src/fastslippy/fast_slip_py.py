@@ -141,8 +141,7 @@ class FastSlipPy:
 
             # ── velocity solve (rate-and-state) ──
             mid = Nx // 2
-            self.fault.solve_slip_rate(self.tauqs[:, mid],
-                                       self.stress, self.fric)
+            self.fault.solve_slip_rate(self.tauqs[:, mid], self.stress, self.fric)
 
             # ── adaptive time step ──
             V_inner = self.fault.V[1: Ny - 1]
@@ -202,7 +201,8 @@ class FastSlipPy:
             self.fault.sigma = self.stress.sigman0 - np.minimum(sigmal, sigmar)
 
             # ── pressure update ──
-            #self.stress.update_pressure(dt, dPdt)
+            if p.case_type == "groningen":
+                self.stress.update_pressure(dt, dPdt)
 
             # ── logging ──
             self.output.log(it, t2 if phase == 2 else t, dt,
@@ -215,11 +215,11 @@ class FastSlipPy:
                     dt, t, self.tauqs, self.sigmaqs,
                     self.uy, self.vy, self.ux, self.vx, self.stress.tau0)
                 
-                # self.output.write_vtk(
-                #     it, self.grid,
-                #     self.ux, self.uy, self.vx, self.vy,
-                #     self.tauqs, self.sigmaqs,
-                #     self.fault, t)
+                self.output.write_vtk(
+                    it, self.grid,
+                    self.ux, self.uy, self.vx, self.vy,
+                    self.tauqs, self.sigmaqs,
+                    self.fault, t)
 
             if it % p.checkpoint_interval == 0:
                 self.output.save_checkpoint(
@@ -233,42 +233,27 @@ class FastSlipPy:
             if phase == 2:
                 t2 += dt
 
-        mid = Nx//2
-        print(
-            "tauqs min/max",
-            np.min(self.tauqs[:, mid]),
-            np.max(self.tauqs[:, mid])
-        )
-
-        print(
-            "sigma min/max",
-            np.min(self.sigmaqs[:, mid]),
-            np.max(self.sigmaqs[:, mid])
-        )
+        if p.run_mode == "debug":
+            mid = Nx//2
+            print("tauqs min/max",  np.min(self.tauqs[:, mid]), np.max(self.tauqs[:, mid]))
+            print("sigma min/max", np.min(self.sigmaqs[:, mid]), np.max(self.sigmaqs[:, mid]))
 
         # ── wrap up ──
         self.output.save_all()
         self.output.close()
-        self.figure_creator.plot_results_shear(Nx)
+        if p.case_type == "groningen":
+            self.figure_creator.plot_results(Nx)
+        elif p.case_type == "lab":
+            self.figure_creator.plot_results_shear(Nx)
         print(f"Done.  Total running time: {time.perf_counter()-t0_wall:.1f}s")
     
     def after_run(self):
         pass
 
 if __name__ == "__main__":
+    
     # Customise parameters here or leave all defaults
-    '''
-    params = ModelParameters(
-        Nx=21, Ny=21,
-        Nt=1000,
-        output_interval=10,
-        checkpoint_interval=1000,
-    )'''
-
     params = ModelParameters()
 
     model = FastSlipPy(params=params, output_dir="output")
     model.run()
-    fig = model.grid.plot_mesh()
-    fig.show()
-    #fig = model.grid.plot_grid()
