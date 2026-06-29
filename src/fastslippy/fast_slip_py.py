@@ -27,7 +27,6 @@ from fastslippy.pre_processing.frictional_zones import FrictionalZones
 from fastslippy.solver.stress_state import StressState
 from fastslippy.solver.fault_state import FaultState
 from fastslippy.solver.matrix_builder import MatrixBuilder
-from fastslippy.solver.matrix_builder_shear import MatrixBuilderShear
 from fastslippy.utilities.stress_cal_util import StressCalUtil
 from fastslippy.post_processing.output_manager import OutputManager
 from fastslippy.post_processing.figure_creator import FigureCreator

@@ -126,6 +126,7 @@ class ModelParameters:
     Edit the defaults here or pass keyword arguments to the constructor.
     """
     case_type: CaseType = CaseType.LAB
+    run_mode: str = "release"  # "debug" or "release"
     
     # --- Fault geometry ---
     alpha: float = 90.0          # Fault dip angle [degrees]

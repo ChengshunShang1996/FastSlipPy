@@ -157,32 +157,34 @@ class FaultState:
                 if flag > 0:
                     self.V[iy] = x
                 else:              
-                    print(
-                            iy,
-                            f"theta={th:.3e}",
-                            f"arg={arg:.3e}",
-                            f"exp_arg={exp_arg:.3e}",
-                            f"rhs={rhs:.3e}",
-                            f"sig={sig:.3e}",
-                            f"f(lo)={equation(lo):.3e}",
-                            f"f(hi)={equation(hi):.3e}",
-                            f"eta = {p.eta:.3e}",
-                            f"flag={flag}"
-                        )
-                    print(
-                            "tauqs =", tauqs_col[iy],
-                            "tau0  =", stress.tau0[iy],
-                            "rhs   =", rhs
-                        ) 
-                    print("root failed", iy, flag)
+                    if p.run_mode == "debug":
+                        print(
+                                iy,
+                                f"theta={th:.3e}",
+                                f"arg={arg:.3e}",
+                                f"exp_arg={exp_arg:.3e}",
+                                f"rhs={rhs:.3e}",
+                                f"sig={sig:.3e}",
+                                f"f(lo)={equation(lo):.3e}",
+                                f"f(hi)={equation(hi):.3e}",
+                                f"eta = {p.eta:.3e}",
+                                f"flag={flag}"
+                            )
+                        print(
+                                "tauqs =", tauqs_col[iy],
+                                "tau0  =", stress.tau0[iy],
+                                "rhs   =", rhs
+                            ) 
+                        print("root failed", iy, flag)
 
             except Exception as e:
 
-                print(
-                    f"[iy={iy}] solver failed: {e} "
-                    f"f(lo)={equation(lo):.3e} "
-                    f"f(hi)={equation(hi):.3e}"
-                )
+                if p.run_mode == "debug":
+                    print(
+                        f"[iy={iy}] solver failed: {e} "
+                        f"f(lo)={equation(lo):.3e} "
+                        f"f(hi)={equation(hi):.3e}"
+                    )
         
         self.V = np.maximum(self.V, 1e-40)
 

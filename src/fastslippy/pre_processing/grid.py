@@ -55,7 +55,8 @@ class Grid:
         # Total DOF count
         self.N = (Nx + 1) * (Ny + 1) * 2
 
-        self.plot_grid()
+        if self.p.run_mode == "debug":
+            self.plot_grid()
 
     def plot_mesh(self):
         X0, Y0 = np.meshgrid(self.x, self.y)
