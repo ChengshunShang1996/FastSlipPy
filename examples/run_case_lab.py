@@ -29,7 +29,7 @@ if __name__ == "__main__":
         ysize = 1.0,
         Nx=21, Ny=21,
         Nt=50000,
-        output_interval=1000,
+        output_interval=10,
         checkpoint_interval=10000,
         Vi=1e-40,
         dt_init=0.0001,
