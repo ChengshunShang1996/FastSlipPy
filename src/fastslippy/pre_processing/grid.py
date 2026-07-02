@@ -76,6 +76,7 @@ class Grid:
         ax.invert_yaxis()
         ax.set_title('2-D Mesh Grid')
         plt.tight_layout()
+        fig.savefig(f"mesh.png", dpi=150)
         return fig
     
     def plot_grid(self):

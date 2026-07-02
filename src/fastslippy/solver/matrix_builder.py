@@ -78,6 +78,8 @@ class MatrixBuilder:
                     elif iy == Ny - 1: #top boundary
                         if p.bc.top.uy.type == BCType.FIXED or p.bc.top.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
+                        elif p.bc.top.uy.type == BCType.FREE:
+                            add(kuy, kuy, 1);  add(kuy, kuy - (Ny+1)*2, -1)
                         else:
                             raise ValueError(f"BC type: {p.bc.top.uy.type} is not supported for top boundary yet.")
                     elif ix == mid:

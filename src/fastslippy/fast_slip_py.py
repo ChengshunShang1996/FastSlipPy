@@ -174,8 +174,13 @@ class FastSlipPy:
 
             # ── elastic solve ──
             S   = self._solve(RH)
+            # vpx = np.reshape(S[0::2], (p.Nx+1, p.Ny+1), order='C').T
+            # vpy = np.reshape(S[1::2], (p.Ny+1, p.Nx+1), order='C').T
+            # self.vy = vpy[:Ny, :]
+            # self.vx = vpx[:, :Nx]
+
             vpx = np.reshape(S[0::2], (p.Nx+1, p.Ny+1), order='C').T
-            vpy = np.reshape(S[1::2], (p.Ny+1, p.Nx+1), order='C').T
+            vpy = np.reshape(S[1::2], (p.Nx+1, p.Ny+1), order='C').T
             self.vy = vpy[:Ny, :]
             self.vx = vpx[:, :Nx]
 
