@@ -68,10 +68,7 @@ class FastSlipPy:
         self.figure_creator = FigureCreator(self.output, self.grid)
 
     def _build_and_factor_LH(self, dPdt: float):
-        if self.p.case_type == "lab":
-            builder = MatrixBuilder(self.p, self.grid)
-        else: # "groningen"
-            builder = MatrixBuilder(self.p, self.grid)
+        builder = MatrixBuilder(self.p, self.grid)
         LH = builder.build_LH()
         self.RH_builder = builder
         self.dPdt = dPdt
@@ -246,7 +243,7 @@ class FastSlipPy:
         # ── wrap up ──
         self.output.save_all()
         self.output.close()
-        if p.case_type == "groningen":
+        if p.case_type == "groningen" or p.case_type == "california":
             self.figure_creator.plot_results(Nx)
         elif p.case_type == "lab":
             self.figure_creator.plot_results_shear(Nx)

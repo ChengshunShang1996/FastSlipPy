@@ -39,7 +39,8 @@ if __name__ == "__main__":
         E=0.55e10, #according to k_critical = sigam * (b-a) / d_c, E = 1e10
         V0 = 1e-6,
         a0 = 0.012,
-        b0 = 0.0135
+        b0 = 0.0135,
+        flash_heating_option = False
     )
 
     params.bc.left.ux.set_fixed()

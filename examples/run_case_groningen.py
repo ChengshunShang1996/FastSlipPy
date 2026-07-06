@@ -46,7 +46,8 @@ if __name__ == "__main__":
         dt_init = 1.0,
         dt_max = 1e6,
         Vw = 1e90,
-        Vi = 1e-30
+        Vi = 1e-30,
+        flash_heating_option = True,
     )
 
     yr = 365 * 24 * 3600.0

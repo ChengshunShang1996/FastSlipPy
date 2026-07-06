@@ -33,7 +33,7 @@ class FaultState:
         Ny = p.Ny
         self.U     = np.zeros(Ny)
         self.V     = np.full(Ny, p.Vi)
-        if p.case_type == "groningen":
+        if p.case_type == "groningen" or p.case_type == "california":
             logarg = 2 * p.V0 / p.Vi * np.sinh((stress.tau0 - p.eta * p.Vi) / fric.a / stress.sigman0)
             safe_logarg = np.maximum(logarg, 1e-30)
             if np.any(logarg <= 0):
@@ -118,7 +118,7 @@ class FaultState:
 
             arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
 
-            if p.case_type == "groningen": #TODO: should be more general
+            if p.flash_heating_option:
                 flash_denom = 1.0 + p.L/(p.Vw*th)
             else:
                 flash_denom = 1.0

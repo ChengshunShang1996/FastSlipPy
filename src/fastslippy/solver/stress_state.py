@@ -56,6 +56,13 @@ class StressState:
             Pl0 = 0.0 * y + 1e-30
             Pr0 = 0.0 * y + 1e-30
 
+        elif p.case_type == "california":
+
+            sigman0 = 0.0 * y + 50e6
+            tau0 = sigman0 * p.a_max * np.arcsinh(p.Vi / (2 * p.V0) * np.exp((p.mu0 + p.b * np.log(p.V0 / np.abs(p.Vi))) / p.a_max))
+            Pl0 = 0.0 * y + 1e-30
+            Pr0 = 0.0 * y + 1e-30
+
         return sigman0, tau0, Pl0, Pr0
 
     def update_pressure(self, dt: float, dPdt: float):
