@@ -67,7 +67,12 @@ class FrictionalZones:
             else:
                 mask = (y > top_y) & (y <= bot_y)
 
-            a[mask] = layer.a
-            b[mask] = layer.b
+            if p.case_type == "california":
+                # Linear interpolation of a(y)
+                a[mask] = p.a0 + (p.a_max - p.a0) * (y[mask] - p.H) / p.h
+                b[mask] = layer.b
+            else:
+                a[mask] = layer.a
+                b[mask] = layer.b
 
         return a, b

@@ -160,6 +160,9 @@ class ModelParameters:
     Vw: float = 1e90             # Dynamic weakening velocity [m/s]
     Vi: float = 1e-30            # Initial/background slip rate [m/s]
     flash_heating_option: bool = False  # Whether to include flash heating in the friction law
+    H: float = 0.0               # California case parameter [m]
+    h: float = 0.0               # California case parameter [m]
+    W_f: float = 0.0               # California case parameter [m]
 
     # --- Time stepping ---
     Nt: int = 1000               # Number of time steps
