@@ -251,7 +251,10 @@ class MatrixBuilder:
                         else:
                             pass
                     elif ix == mid:
-                        RH[kuy] = V[iy]
+                        if p.case_type == "california" and y[iy] >= p.W_f:
+                            RH[kuy] = p.loading.V_p
+                        else:
+                            RH[kuy] = V[iy]
                     elif ix == mid + 1:
                         pass
                     else:

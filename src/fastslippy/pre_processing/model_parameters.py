@@ -118,7 +118,8 @@ class LoadingConditions:
     dPdt_pre: float = 0.0       # Pressure rate before depletion [Pa/s]
     dPdt_post: float = -0.0127  # Pressure rate after depletion starts [Pa/s]
 
-    #loading_velocity_y: float = 1e-9
+    V_p: float = 0.0            # Plate velocity [m/s] for the california case
+    V_L: float = 0.0            # Imposed fault slip velocity [m/s] for the california case
 
 @dataclass
 class ModelParameters:
@@ -142,7 +143,6 @@ class ModelParameters:
     rho: float = 2650            # Rock density [kg/m³]
     rhof: float = 1150.0         # Fluid density [kg/m³]
     rhog: float = 200.0          # Gas density [kg/m³]
-    Vp: float = 0.0              # Far-field loading rate [m/s]
     cs: float = 1645.0           # Shear-wave speed [m/s]
     nu: float = 0.25             # Poisson's ratio
     g: float = 9.81              # Gravitational acceleration [m/s²]
@@ -172,6 +172,7 @@ class ModelParameters:
     # --- Output intervals ---
     output_interval: int = 10
     checkpoint_interval: int = 1000
+    output_vtk_option: bool = False
 
     # --- Derived (computed in __post_init__) ---
     G: float = field(init=False)
