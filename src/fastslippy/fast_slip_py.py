@@ -93,7 +93,7 @@ class FastSlipPy:
         pass
     
     def run(self):
-        t0_wall = time.perf_counter()
+        t0_all = time.perf_counter()
         p = self.p
         Nx, Ny = p.Nx, p.Ny
 
@@ -121,7 +121,7 @@ class FastSlipPy:
         t2     = 0.0
         phase  = 0        # 0 = pre-depletion, 1 = transition, 2 = post-depletion
 
-        print(f"Setup complete in {time.perf_counter()-t0_wall:.1f}s.  "
+        print(f"Setup complete in {time.perf_counter()-t0_all:.1f}s.  "
               f"Starting {p.Nt} time steps …")
 
         # ── time loop ────────────────────────────────────────────────
@@ -229,7 +229,7 @@ class FastSlipPy:
                     self.tauqs, self.sigmaqs,
                     self.uy, self.vy, self.ux, self.vx, dt, t)
                 self.output.save_all()
-                print(f"  Checkpoint it={it}, elapsed {time.perf_counter()-t0_wall:.1f}s")
+                print(f"  Checkpoint it={it}, elapsed {time.perf_counter()-t0_all:.1f}s")
 
             t += dt
             if phase == 2:
@@ -243,11 +243,13 @@ class FastSlipPy:
         # ── wrap up ──
         self.output.save_all()
         self.output.close()
-        if p.case_type == "groningen" or p.case_type == "california":
-            self.figure_creator.plot_results(Nx)
+        if p.case_type == "groningen":
+            self.figure_creator.plot_results(Nx, shift_y=2000)
         elif p.case_type == "lab":
             self.figure_creator.plot_results_shear(Nx)
-        print(f"Done.  Total running time: {time.perf_counter()-t0_wall:.1f}s")
+        elif p.case_type == "california":
+            self.figure_creator.plot_results(Nx, shift_y=0)
+        print(f"Done.  Total running time: {time.perf_counter()-t0_all:.1f}s")
     
     def after_run(self):
         pass

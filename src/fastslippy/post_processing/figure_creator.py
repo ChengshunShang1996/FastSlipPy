@@ -23,7 +23,7 @@ class FigureCreator:
         self.output = OutputData
         self.grid = GridData
 
-    def plot_results(self, Nx, it: int = -1):
+    def plot_results(self, Nx, shift_y, it: int = -1):
         """
         Enhanced plotting:
         - τ/σ vs depth
@@ -50,7 +50,7 @@ class FigureCreator:
         ratio = tau / (sigma + 1e-12)
 
         fig = plt.figure(figsize=(8, 5))
-        plt.plot(grid.y+2000, ratio, 'o-', lw=1)
+        plt.plot(grid.y+shift_y, ratio, 'o-', lw=1)
         plt.ylabel(r"$\tau / \sigma_n$")
         plt.xlabel("Depth [m]")
         plt.title("Ratio shear / normal stress")
@@ -59,7 +59,7 @@ class FigureCreator:
         fig.savefig(self.output.out / f"tau_sigma_ratio_it{it}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
-        plt.plot(grid.y+2000, om.taum[:, it] / 1e6, 'o-', lw=1)
+        plt.plot(grid.y+shift_y, om.taum[:, it] / 1e6, 'o-', lw=1)
         plt.ylabel(r"Shear stress $\tau$ [MPa]")
         plt.xlabel("Depth [m]")
         plt.grid(True)
@@ -67,7 +67,7 @@ class FigureCreator:
         fig.savefig(self.output.out / f"tau_it{it}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
-        plt.plot(grid.y+2000, om.sigmam[:, it] / 1e6, 'o-', lw=1)
+        plt.plot(grid.y+shift_y, om.sigmam[:, it] / 1e6, 'o-', lw=1)
         plt.ylabel(r"Normal stress $\sigma_n$ [MPa]")
         plt.xlabel("Depth [m]")
         plt.grid(True)
@@ -75,7 +75,7 @@ class FigureCreator:
         fig.savefig(self.output.out / f"sigma_it{it}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
-        plt.plot(grid.y+2000, om.tau0[:, it] / 1e6, 'o-', lw=1)
+        plt.plot(grid.y+shift_y, om.tau0[:, it] / 1e6, 'o-', lw=1)
         plt.ylabel(r"$\tau_0$ [MPa]")
         plt.xlabel("Depth [m]")
         plt.grid(True)
@@ -83,7 +83,7 @@ class FigureCreator:
         fig.savefig(self.output.out / f"tau0_it{it}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
-        plt.plot(grid.y+2000, om.Vm[:, it], 'o-', lw=1)
+        plt.plot(grid.y+shift_y, om.Vm[:, it], 'o-', lw=1)
         plt.ylabel(r"Slip velocity $V$ [m/s]")
         plt.xlabel("Depth [m]")
         plt.grid(True)
@@ -94,7 +94,7 @@ class FigureCreator:
         mid = Nx // 2
         plt.figure(figsize=(8,6))
         plt.plot(
-            grid.y+2000,
+            grid.y+shift_y,
             om.taum[:,it],
             'k',
             lw=3,
@@ -102,14 +102,14 @@ class FigureCreator:
         )
 
         for k in [mid-2, mid-1, mid, mid+1, mid+2]:
-            plt.plot(grid.y+2000, om.taumall[:,k,it], '--', label=f'col {k}')
+            plt.plot(grid.y+shift_y, om.taumall[:,k,it], '--', label=f'col {k}')
 
         plt.legend()
         plt.grid(True)
 
         plt.figure(figsize=(8,6))
         plt.plot(
-            grid.y+2000,
+            grid.y+shift_y,
             om.taum[:,it] - om.tau0[:, it],
             'k',
             lw=3,
@@ -118,7 +118,7 @@ class FigureCreator:
 
         for k in [mid-2, mid-1, mid, mid+1, mid+2]:
             plt.plot(
-                grid.y+2000,
+                grid.y+shift_y,
                 om.taumall[:,k,it],
                 '--',
                 label=f'col {k}'

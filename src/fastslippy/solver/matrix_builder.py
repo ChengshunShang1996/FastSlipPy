@@ -232,27 +232,41 @@ class MatrixBuilder:
                 # ── uy block ──
                 if iy < Ny:
                     if ix == 0:
-                        pass
+                        if p.bc.left.uy.type == BCType.VELOCITY:
+                            RH[kuy] = p.bc.left.uy.value
+                        else:
+                            pass
                     elif ix == Nx:
                         if p.bc.right.uy.type == BCType.VELOCITY:
                             RH[kuy] = p.bc.right.uy.value
                         else:
                             pass
                     elif iy == 0:
-                        if p.case_type == "lab":
-                            if ix > mid:
-                                RH[kuy] = p.bc.right.uy.value
+                        if p.bc.bottom.uy.type == BCType.VELOCITY:
+                            if p.case_type == "lab":
+                                if ix > mid:
+                                    RH[kuy] = p.bc.right.uy.value
+                            else:
+                                RH[kuy] = p.bc.bottom.uy.value
                         else:
                             pass
-                    elif iy == Ny - 1:
-                        if p.case_type == "lab":
-                            if ix > mid:
-                                RH[kuy] = p.bc.right.uy.value
+                    elif iy == Ny - 1: #top boundary
+                        if p.bc.top.uy.type == BCType.VELOCITY:
+                            if p.case_type == "lab":
+                                if ix > mid:
+                                    RH[kuy] = p.bc.right.uy.value
+                            elif p.case_type == "california":
+                                if ix < mid:
+                                    RH[kuy] = -1 * p.bc.bottom.uy.value
+                                elif ix > mid:
+                                    RH[kuy] = p.bc.bottom.uy.value
+                            else:
+                                RH[kuy] = p.bc.top.uy.value
                         else:
                             pass
                     elif ix == mid:
                         if p.case_type == "california" and y[iy] >= p.W_f:
-                            RH[kuy] = p.loading.V_p
+                            RH[kuy] = p.loading.V_L
                         else:
                             RH[kuy] = V[iy]
                     elif ix == mid + 1:
@@ -272,14 +286,32 @@ class MatrixBuilder:
 
                 # ── ux block ──
                 if ix < Nx:
-                    if iy == 0:
-                        pass
-                    elif iy == Ny:
-                        pass
+                    if iy == 0: #bottom boundary
+                        if p.bc.bottom.ux.type == BCType.VELOCITY:
+                            RH[kux] = p.bc.bottom.ux.value
+                        else:
+                            pass
+                    elif iy == Ny: #top boundary
+                        if p.bc.top.ux.type == BCType.VELOCITY:
+                            if p.case_type == "california":
+                                if ix < mid:
+                                    RH[kux] = -1 * p.bc.top.ux.value
+                                elif ix > mid:
+                                    RH[kux] = p.bc.top.ux.value
+                            else:
+                                RH[kux] = p.bc.top.ux.value
+                        else:
+                            pass
                     elif ix == 0:
-                        pass
+                        if p.bc.left.ux.type == BCType.VELOCITY:
+                            RH[kux] = p.bc.left.ux.value
+                        else:
+                            pass
                     elif ix == Nx - 1:
-                        pass
+                        if p.bc.right.ux.type == BCType.VELOCITY:
+                            RH[kux] = p.bc.right.ux.value
+                        else:
+                            pass
                     elif ix == mid:
                         if p.case_type == "groningen":
                             yv = y[iy]

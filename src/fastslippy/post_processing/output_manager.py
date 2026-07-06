@@ -51,7 +51,7 @@ class OutputManager:
     def log(self, it: int, t: float, dt: float, V: np.ndarray, U: np.ndarray,
             checkpointer: int = 0):
         yr = 365 * 24 * 3600
-        line = (f"it={checkpointer+it}, t={t:.6f} yr, dt={dt:.3e}, "
+        line = (f"it={checkpointer+it}, t={t/yr:.6f} yr, dt={dt:.3e}, "
                 f"maxV={V.max():.3e}, minV={V.min():.3e}, maxU={U.max():.6f}\n")
         self._logfile.write(line)
         self._logfile.flush()
