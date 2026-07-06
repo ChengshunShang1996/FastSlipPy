@@ -69,7 +69,12 @@ class FrictionalZones:
 
             if p.case_type == "california":
                 # Linear interpolation of a(y)
-                a[mask] = p.a0 + (p.a_max - p.a0) * (y[mask] - p.H) / p.h
+                mask_zone1 = (y >= 0) & (y < p.H)
+                mask_zone2 = (y >= p.H) & (y < p.H + p.h)
+                mask_zone3 = (y >= p.H + p.h)
+                a[mask_zone1] = p.a0
+                a[mask_zone2] = p.a0 + (p.a_max - p.a0) * (y[mask_zone2] - p.H) / p.h
+                a[mask_zone3] = p.a_max
                 b[mask] = layer.b
             else:
                 a[mask] = layer.a

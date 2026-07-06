@@ -71,7 +71,9 @@ class MatrixBuilder:
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.right.uy.type}")
                     elif iy == 0: #bottom boundary
-                        if p.bc.bottom.uy.type == BCType.FIXED or p.bc.bottom.uy.type == BCType.VELOCITY:
+                        if p.bc.bottom.uy.type == BCType.FREE:
+                            add(kuy, kuy, 1);  add(kuy, kuy + (Ny+1)*2, -1)
+                        elif p.bc.bottom.uy.type == BCType.FIXED or p.bc.bottom.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
                         else:
                             raise ValueError(f"BC type: {p.bc.bottom.uy.type} is not supported for bottom boundary yet.")
@@ -257,9 +259,9 @@ class MatrixBuilder:
                                     RH[kuy] = p.bc.right.uy.value
                             elif p.case_type == "california":
                                 if ix < mid:
-                                    RH[kuy] = -1 * p.bc.bottom.uy.value
+                                    RH[kuy] = -1 * p.bc.top.uy.value
                                 elif ix > mid:
-                                    RH[kuy] = p.bc.bottom.uy.value
+                                    RH[kuy] = p.bc.top.uy.value
                             else:
                                 RH[kuy] = p.bc.top.uy.value
                         else:
