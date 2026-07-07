@@ -13,7 +13,7 @@ version = "0.1.0"
 description = "Induced Seismic Fault Slip Modeling"
 readme = "README.md"
 
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 
 license = { text = "MIT" }
 
