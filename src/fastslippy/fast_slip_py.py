@@ -141,8 +141,12 @@ class FastSlipPy:
             self.fault.solve_slip_rate(self.tauqs[:, mid], self.stress, self.fric)
 
             # ── adaptive time step ──
-            V_inner = self.fault.V[1: Ny - 1]
-            ksi_inner = self.ksi[1: Ny - 1]
+            if p.case_type == "california":
+                V_inner = self.fault.V[1: (Ny - 1)//2]
+                ksi_inner = self.ksi[1: (Ny - 1)//2]
+            else:
+                V_inner = self.fault.V[1: Ny - 1]
+                ksi_inner = self.ksi[1: Ny - 1]
             dt_cand = np.min(ksi_inner * p.L / V_inner)
             dt_cand = max(dt_cand, 1e-150)
             dt      = min(min(1.2 * dt, dt_cand), dt_max)

@@ -188,6 +188,9 @@ class FaultState:
                         f"f(hi)={equation(hi):.3e}"
                     )
         
+        if p.case_type == "california":
+            self.V[(p.Ny - 1)//2 : p.Ny] =  p.loading.V_L
+
         self.V = np.maximum(self.V, 1e-40)
 
         self.V[0]  = self.V[1]
