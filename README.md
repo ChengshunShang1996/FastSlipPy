@@ -61,6 +61,11 @@ Download this software or use Git:
 
 > git clone https://github.com/ChengshunShang1996/FastSlipPy.git
 
+(Windows users can jump this step) For Linux users, the virtual environment is suggested to be used:
+
+> python3 -m venv ~/my_env
+> source ~/my_env/bin/activate
+
 Then, in the project folder, run cmd command:
 
 > pip install -e .
@@ -68,6 +73,10 @@ Then, in the project folder, run cmd command:
 Test it:
 
 > from fastslippy import FastSlipPy
+
+For Linux or HPC users:
+
+> python3 -c "from fastslippy import FastSlipPy; print('Success')"
 
 If you see the logo, you have successfully installed it.
 
