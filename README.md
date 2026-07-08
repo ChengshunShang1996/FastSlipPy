@@ -64,6 +64,7 @@ Download this software or use Git:
 (Windows users can jump this step) For Linux users, the virtual environment is suggested to be used:
 
 > python3 -m venv ~/my_env
+
 > source ~/my_env/bin/activate
 
 Then, in the project folder, run cmd command:
