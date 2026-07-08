@@ -220,13 +220,6 @@ class FastSlipPy:
                     self.fault.sigma, self.stress.P, self.fault.theta,
                     dt, t, self.tauqs, self.sigmaqs,
                     self.uy, self.vy, self.ux, self.vx, self.stress.tau0)
-                
-                if p.output_vtk_option:
-                    self.output.write_vtk(
-                        it, self.grid,
-                        self.ux, self.uy, self.vx, self.vy,
-                        self.tauqs, self.sigmaqs,
-                        self.fault, t)
 
             if it % p.checkpoint_interval == 0:
                 self.output.save_checkpoint(
@@ -235,6 +228,13 @@ class FastSlipPy:
                     self.uy, self.vy, self.ux, self.vx, dt, t)
                 self.output.save_all()
                 print(f"  Checkpoint it={it}, elapsed {time.perf_counter()-t0_all:.1f}s")
+                
+                if p.output_vtk_option:
+                    self.output.write_vtk(
+                        it, self.grid,
+                        self.ux, self.uy, self.vx, self.vy,
+                        self.tauqs, self.sigmaqs,
+                        self.fault, t)
 
             t += dt
             if phase == 2:
