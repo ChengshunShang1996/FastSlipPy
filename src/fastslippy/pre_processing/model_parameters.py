@@ -172,7 +172,7 @@ class ModelParameters:
     # --- Output intervals ---
     output_interval: int = 10
     checkpoint_interval: int = 1000
-    output_vtk_option: bool = False
+    output_vtk_option: bool = True
 
     # --- Derived (computed in __post_init__) ---
     G: float = field(init=False)
