@@ -247,7 +247,7 @@ class MatrixBuilder:
                         if p.bc.bottom.uy.type == BCType.VELOCITY:
                             if p.case_type == "lab":
                                 if ix > mid:
-                                    RH[kuy] = p.bc.right.uy.value
+                                    RH[kuy] = p.bc.bottom.uy.value
                             else:
                                 RH[kuy] = p.bc.bottom.uy.value
                         else:
@@ -256,7 +256,7 @@ class MatrixBuilder:
                         if p.bc.top.uy.type == BCType.VELOCITY:
                             if p.case_type == "lab":
                                 if ix > mid:
-                                    RH[kuy] = p.bc.right.uy.value
+                                    RH[kuy] = p.bc.top.uy.value
                             elif p.case_type == "california":
                                 if ix < mid:
                                     RH[kuy] = -1 * p.bc.top.uy.value

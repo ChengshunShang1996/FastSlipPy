@@ -48,9 +48,9 @@ if __name__ == "__main__":
     params.bc.right.ux.set_fixed()
     params.bc.right.uy.set_velocity(1e-5)
     params.bc.bottom.ux.set_fixed()
-    params.bc.bottom.uy.set_fixed()
+    params.bc.bottom.uy.set_velocity(1e-5) #only act on the right half of the bottom boundary
     params.bc.top.ux.set_fixed()
-    params.bc.top.uy.set_fixed()
+    params.bc.top.uy.set_velocity(1e-5) #only act on the right half of the top boundary
 
     params.layers.set_homogeneous(top = 1, bottom = 2, a=params.a0, b=params.b0)
 

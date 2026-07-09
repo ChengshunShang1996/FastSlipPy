@@ -38,12 +38,13 @@ class OutputManager:
         self.thetam  = np.zeros((Ny, n))
         self.dtm     = np.zeros(n)
         self.tm      = np.zeros(n)
-        self.taumall    = np.zeros((Ny, Nx, n))
-        self.sigmamall  = np.zeros((Ny-1, Nx-1, n))
-        self.uymall     = np.zeros((Ny, Nx+1, n))
-        self.vymall     = np.zeros((Ny, Nx+1, n))
-        self.uxmall     = np.zeros((Ny+1, Nx, n))
-        self.vxmall     = np.zeros((Ny+1, Nx, n))
+        # They require a lot of memory, so we don't store them in memory by default.
+        # self.taumall    = np.zeros((Ny, Nx, n))
+        # self.sigmamall  = np.zeros((Ny-1, Nx-1, n))
+        # self.uymall     = np.zeros((Ny, Nx+1, n))
+        # self.vymall     = np.zeros((Ny, Nx+1, n))
+        # self.uxmall     = np.zeros((Ny+1, Nx, n))
+        # self.vxmall     = np.zeros((Ny+1, Nx, n))
         self.tau0   = np.zeros((Ny, n))
 
         self._logfile = open(self.out / "output.txt", "w")
@@ -69,12 +70,19 @@ class OutputManager:
         self.thetam[:, idx] = theta
         self.dtm[idx]       = dt
         self.tm[idx]        = t
-        self.taumall[:, :, idx]   = tauqs
-        self.sigmamall[:, :, idx] = sigmaqs
-        self.uymall[:, :, idx]    = uy
-        self.vymall[:, :, idx]    = vy
-        self.uxmall[:, :, idx]    = ux
-        self.vxmall[:, :, idx]    = vx
+        # self.taumall[:, :, idx]   = tauqs
+        # self.sigmamall[:, :, idx] = sigmaqs
+        # self.uymall[:, :, idx]    = uy
+        # self.vymall[:, :, idx]    = vy
+        # self.uxmall[:, :, idx]    = ux
+        # self.vxmall[:, :, idx]    = vx
+
+        # field_fname = self.fields_dir / f"fields_it_{it}.npz"
+        # np.savez_compressed(
+        #     field_fname,
+        #     tauqs=tauqs, sigmaqs=sigmaqs,
+        #     uy=uy, vy=vy, ux=ux, vx=vx
+        # )
 
     def save_checkpoint(self, it: int, checkpointer: int,
                         fault: "FaultState", tauqs, sigmaqs,

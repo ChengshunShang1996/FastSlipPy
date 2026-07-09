@@ -162,10 +162,16 @@ class FastSlipPy:
             if p.case_type == "lab":
                 if it <= 30000:
                     p.bc.right.uy.set_velocity(1e-5)
+                    p.bc.top.uy.set_velocity(1e-5)
+                    p.bc.bottom.uy.set_velocity(1e-5)
                 elif it <= 40000:
                     p.bc.right.uy.set_velocity(1e-4)
+                    p.bc.top.uy.set_velocity(1e-4)
+                    p.bc.bottom.uy.set_velocity(1e-4)
                 else:
                     p.bc.right.uy.set_velocity(1e-5)
+                    p.bc.top.uy.set_velocity(1e-5)
+                    p.bc.bottom.uy.set_velocity(1e-5)
 
             # ── update RH with current slip velocities ──
             RH = self.RH_builder.build_RH(dPdt, self.fault.V)
@@ -246,6 +252,10 @@ class FastSlipPy:
             print("sigma min/max", np.min(self.sigmaqs[:, mid]), np.max(self.sigmaqs[:, mid]))
 
         # ── wrap up ──
+        self.output.save_checkpoint(
+                    it, self.checkpointer, self.fault,
+                    self.tauqs, self.sigmaqs,
+                    self.uy, self.vy, self.ux, self.vx, dt, t)
         self.output.save_all()
         self.output.close()
         if p.case_type == "groningen":

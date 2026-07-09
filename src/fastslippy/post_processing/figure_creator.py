@@ -11,6 +11,7 @@ __license__     = "MIT License"
 
 import matplotlib
 matplotlib.use("Agg")
+import numpy as np
 
 import matplotlib.pyplot as plt
 
@@ -204,6 +205,8 @@ class FigureCreator:
         if it < 0:
             it = om.Um.shape[1] - 1  # last stored snapshot
 
+        actual_it = (it + 1) * om.p.output_interval
+
         # ─────────────────────────────────────────────
         # 1. Ratio τ/σ vs depth
         # ─────────────────────────────────────────────
@@ -218,7 +221,7 @@ class FigureCreator:
         plt.title("Ratio shear / normal stress")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"tau_sigma_ratio_it{it}.png", dpi=150)
+        fig.savefig(self.output.out / f"tau_sigma_ratio_it{it+1}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y, om.taum[:, it] / 1e6, 'o-', lw=1)
@@ -226,7 +229,7 @@ class FigureCreator:
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"tau_it{it}.png", dpi=150)
+        fig.savefig(self.output.out / f"tau_it{it+1}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y, om.sigmam[:, it] / 1e6, 'o-', lw=1)
@@ -234,7 +237,7 @@ class FigureCreator:
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"sigma_it{it}.png", dpi=150)
+        fig.savefig(self.output.out / f"sigma_it{it+1}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y, om.tau0[:, it] / 1e6, 'o-', lw=1)
@@ -242,7 +245,7 @@ class FigureCreator:
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"tau0_it{it}.png", dpi=150)
+        fig.savefig(self.output.out / f"tau0_it{it+1}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y, om.Vm[:, it], 'o-', lw=1)
@@ -250,54 +253,50 @@ class FigureCreator:
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"slip_velocity_it{it}.png", dpi=150)
+        fig.savefig(self.output.out / f"slip_velocity_it{it+1}.png", dpi=150)
 
+        field_fname = om.out / f"data_{actual_it}.npz"
+        
+        if not field_fname.exists():
+            print(f"Warning: Data file {field_fname} does not exist. Skipping 2D plots.")
+            return
+        
+        with np.load(field_fname) as data:
+            tauqs = data["tauqs"]
+            sigmaqs = data["sigmaqs"]
+            uy = data["uy"]
+            vy = data["vy"]
+            ux = data["ux"]
+            vx = data["vx"]
 
         mid = Nx // 2
-        plt.figure(figsize=(8,6))
-        plt.plot(
-            grid.y,
-            om.taum[:,it],
-            'k',
-            lw=3,
-            label='stored tau'
-        )
-
+        fig_verify1 = plt.figure(figsize=(8,6))
+        plt.plot(grid.y, om.taum[:, it], 'k', lw=3, label='stored tau')
         for k in [mid-2, mid-1, mid, mid+1, mid+2]:
-            plt.plot(grid.y, om.taumall[:,k,it], '--', label=f'col {k}')
-
+            plt.plot(grid.y, tauqs[:, k], '--', label=f'col {k}')
         plt.legend()
         plt.grid(True)
+        fig_verify1.savefig(self.output.out / f"verify_tau_it{it + 1}.png", dpi=150)
+        plt.close(fig_verify1)
 
-        plt.figure(figsize=(8,6))
-        plt.plot(
-            grid.y,
-            om.taum[:,it] - om.tau0[:, it],
-            'k',
-            lw=3,
-            label='recovered tauqs'
-        )
-
+        fig_verify2 = plt.figure(figsize=(8,6))
+        plt.plot(grid.y, om.taum[:, it] - om.tau0[:, it], 'k', lw=3, label='recovered tauqs')
         for k in [mid-2, mid-1, mid, mid+1, mid+2]:
-            plt.plot(
-                grid.y,
-                om.taumall[:,k,it],
-                '--',
-                label=f'col {k}'
-            )
-
+            plt.plot(grid.y, tauqs[:, k], '--', label=f'col {k}')
         plt.legend()
         plt.grid(True)
+        fig_verify2.savefig(self.output.out / f"verify_tauqs_it{it + 1}.png", dpi=150)
+        plt.close(fig_verify2)
 
         # ─────────────────────────────────────────────
         # 2. Extract 2D fields
         # ─────────────────────────────────────────────
-        ux = om.uxmall[:, :, it]
-        uy = om.uymall[:, :, it]
-        vx = om.vxmall[:, :, it]
-        vy = om.vymall[:, :, it]
-        tauqs = om.taumall[:, :, it]
-        sigmaqs = om.sigmamall[:, :, it]
+        # ux = om.uxmall[:, :, it]
+        # uy = om.uymall[:, :, it]
+        # vx = om.vxmall[:, :, it]
+        # vy = om.vymall[:, :, it]
+        # tauqs = om.taumall[:, :, it]
+        # sigmaqs = om.sigmamall[:, :, it]
 
         # ─────────────────────────────────────────────
         # 3. 2D plots (match your layout)
@@ -340,10 +339,7 @@ class FigureCreator:
             ax.set_aspect('equal')
 
         plt.tight_layout()
-        fig.savefig(self.output.out / f"fields_it{it}.png", dpi=150)
-
-        ux = om.uxmall[:, :, it]
-        uy = om.uymall[:, :, it]
+        fig.savefig(self.output.out / f"fields_it{it + 1}.png", dpi=150)
 
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
         im = axes[0].pcolormesh(
@@ -364,7 +360,7 @@ class FigureCreator:
             ax.set_aspect('equal')
 
         plt.tight_layout()
-        fig.savefig(self.output.out / f"displacement_fields_it{it}.png", dpi=150)
+        fig.savefig(self.output.out / f"displacement_fields_it{it + 1}.png", dpi=150)
 
         #plt.show()
 
