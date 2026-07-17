@@ -113,11 +113,14 @@ class MathUtil:
         flb = g(lb)
         fub = g(ub)
 
-        if flb == 0:
-            return lb, target, 3
-
-        if fub == 0:
-            return ub, target, 3
+        # if flb == 0:
+        #     return lb, target, 3
+        # if fub == 0:
+        #     return ub, target, 3
+        if abs(flb) <= tolFun:
+            return lb, flb + target, 3
+        if abs(fub) <= tolFun:
+            return ub, fub + target, 3
 
         # root must be bracketed
         # if flb * fub > 0:
@@ -129,44 +132,41 @@ class MathUtil:
         # -------------------------------------------------
 
         expand_iter = 0
-        max_expand = 20
+        max_expand = 30
 
         while flb * fub > 0:
-
             ub *= 10.0
             fub = g(ub)
-
             expand_iter += 1
-
             if expand_iter > max_expand:
                 return np.nan, np.nan, -2
                 #raise ValueError("Root is not bracketed: f(lb) and f(ub) must have opposite signs.")
 
+        ubSign = np.sign(fub)
+
         for _ in range(maxiter):
-
             x = 0.5 * (lb + ub)
-
             fx = g(x)
 
             outsideTolX = abs(ub - x) > tolX
             outsideTolFun = abs(fx) > tolFun
 
             # convergence
-            if (not outsideTolX) and (not outsideTolFun):
+            if not (outsideTolX and outsideTolFun):
                 return x, fx + target, 3
 
-            if not outsideTolX:
-                return x, fx + target, 1
+            # if not outsideTolX:
+            #     return x, fx + target, 1
 
-            if not outsideTolFun:
-                return x, fx + target, 2
+            # if not outsideTolFun:
+            #     return x, fx + target, 2
 
             # keep bracket
-            if np.sign(fx) != np.sign(fub):
+            if np.sign(fx) != ubSign:
                 lb = x
-                flb = fx
+                #flb = fx
             else:
                 ub = x
-                fub = fx
+                #fub = fx
 
         return x, fx + target, -1

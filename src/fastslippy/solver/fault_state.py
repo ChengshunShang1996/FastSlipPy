@@ -140,8 +140,8 @@ class FaultState:
 
             #hi = max(2.0 * rhs / p.eta, float(np.max(self.V))) 
             #hi = np.max(self.V)*2
-            #hi = max(1e-20, np.max(self.V)*2)
-            hi = self.V[iy]*2
+            hi = max(1e-20, np.max(self.V)*2)
+            #hi = self.V[iy]*2
 
             try:
 
@@ -152,7 +152,7 @@ class FaultState:
                     target=0.0,
                     tolX=0.0, #1e-14,
                     tolFun=5,
-                    maxiter=100)
+                    maxiter=1000)
 
                 # if np.isfinite(x):
                 #     self.V[iy] = x
