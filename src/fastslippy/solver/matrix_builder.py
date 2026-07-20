@@ -72,7 +72,8 @@ class MatrixBuilder:
                             raise ValueError(f"Unknown BC type: {p.bc.right.uy.type}")
                     elif iy == 0: #bottom boundary
                         if p.bc.bottom.uy.type == BCType.FREE:
-                            add(kuy, kuy, 1);  add(kuy, kuy + (Ny+1)*2, -1)
+                            #add(kuy, kuy, 1);  add(kuy, kuy + (Ny+1)*2, -1)
+                            add(kuy, kuy, 1);  add(kuy, kuy -2, -1)
                         elif p.bc.bottom.uy.type == BCType.FIXED or p.bc.bottom.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
                         else:
@@ -81,7 +82,8 @@ class MatrixBuilder:
                         if p.bc.top.uy.type == BCType.FIXED or p.bc.top.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
                         elif p.bc.top.uy.type == BCType.FREE:
-                            add(kuy, kuy, 1);  add(kuy, kuy - (Ny+1)*2, -1)
+                            #add(kuy, kuy, 1);  add(kuy, kuy - (Ny+1)*2, -1)
+                            add(kuy, kuy, 1);  add(kuy, kuy - 2, -1)
                         else:
                             raise ValueError(f"BC type: {p.bc.top.uy.type} is not supported for top boundary yet.")
                     elif ix == mid:
@@ -161,13 +163,17 @@ class MatrixBuilder:
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.top.ux.type}")
                     elif ix == 0:
-                        if p.bc.left.ux.type == BCType.FIXED or p.bc.left.ux.type == BCType.VELOCITY or p.bc.left.ux.type == BCType.FREE:
+                        if p.bc.left.ux.type == BCType.FIXED or p.bc.left.ux.type == BCType.VELOCITY:
                             add(kux, kux, 1)
+                        elif p.bc.left.ux.type == BCType.FREE:
+                            add(kux, kux, 1); add(kux, kux + (Ny+1)*2, -1)
                         else:
                             raise ValueError(f"BC type: {p.bc.left.ux.type} is not supported for left boundary yet.")
                     elif ix == Nx - 1:
-                        if p.bc.right.ux.type == BCType.FIXED or p.bc.right.ux.type == BCType.VELOCITY or p.bc.right.ux.type == BCType.FREE:
+                        if p.bc.right.ux.type == BCType.FIXED or p.bc.right.ux.type == BCType.VELOCITY:
                             add(kux, kux, 1)
+                        elif p.bc.right.ux.type == BCType.FREE:
+                            add(kux, kux, 1); add(kux, kux - (Ny+1)*2, -1)
                         else:
                             raise ValueError(f"BC type: {p.bc.right.ux.type} is not supported for right boundary yet.")
                     elif ix == mid:

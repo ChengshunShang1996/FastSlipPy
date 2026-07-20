@@ -54,9 +54,9 @@ if __name__ == "__main__":
     params.loading.dPdt_pre = 0.0
     params.loading.dPdt_post = -0.0127
 
-    params.bc.left.ux.set_free()
+    params.bc.left.ux.set_fixed()
     params.bc.left.uy.set_free()
-    params.bc.right.ux.set_free()
+    params.bc.right.ux.set_fixed()
     params.bc.right.uy.set_free()
     params.bc.bottom.ux.set_free()
     params.bc.bottom.uy.set_fixed()
