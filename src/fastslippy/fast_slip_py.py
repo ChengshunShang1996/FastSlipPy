@@ -161,9 +161,9 @@ class FastSlipPy:
 
             if p.case_type == "lab":
                 if it <= 30000:
-                    p.bc.right.uy.set_velocity(1e-5)
-                    p.bc.top.uy.set_velocity(1e-5)
-                    p.bc.bottom.uy.set_velocity(1e-5)
+                    p.bc.right.uy.set_velocity(1e-4)
+                    p.bc.top.uy.set_velocity(1e-4)
+                    p.bc.bottom.uy.set_velocity(1e-4)
                 elif it <= 40000:
                     p.bc.right.uy.set_velocity(1e-4)
                     p.bc.top.uy.set_velocity(1e-4)
