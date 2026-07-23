@@ -61,9 +61,17 @@ All the required Python libraries will be added automatically. Some of them are:
 
 ### Install
 
-Download this software or use Git:
+#### Install for users
+
+> pip install fastslippy
+
+#### Install for developers
+
+Step 1: Download this software or use Git:
 
 > git clone https://github.com/ChengshunShang1996/FastSlipPy.git
+
+Step 2: Installation.
 
 (Windows users can jump this step) For Linux users, the virtual environment is suggested to be used:
 
@@ -71,9 +79,11 @@ Download this software or use Git:
 
 > source ~/my_env/bin/activate
 
-Then, in the project folder, run cmd command:
+In the project folder, run cmd command:
 
 > pip install -e .
+
+#### Successful installation?
 
 Test it:
 
