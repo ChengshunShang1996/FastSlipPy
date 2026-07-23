@@ -165,7 +165,7 @@ No liability and warranty are provided.
 
 [src_folder]: .src/
 [IndNuc_link]: https://github.com/USustSub/IndNuc
-[release-image]: https://img.shields.io/badge/release-0.1.0-green.svg?style=flat
+[release-image]: https://img.shields.io/badge/release-0.1.1-green.svg?style=flat
 [license-image]: https://img.shields.io/badge/license-MIT-green.svg?style=flat
 [contributing-image]: https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg
 [json_link]: https://www.json.org/
