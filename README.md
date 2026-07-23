@@ -1,6 +1,6 @@
 # FastSlipPy: Induced Seismic Fault Slip Modeling
 
-<p align=center><img height="80.0%" width="80.0%" src="docs/images/logo.png"></p>
+<p align=center><img height="80.0%" width="80.0%" src="https://raw.githubusercontent.com/ChengshunShang1996/FastSlipPy/master/docs/images/logo.png"></p>
 
 ![Release][release-image]
 ![License][license-image]
@@ -120,13 +120,13 @@ There are two examples in the [examples][examples_link] folder. Here are the exa
 * **Groningen case**
 
 <p float="left">
-<img src="./docs/images/example_results_groningen_fields.png" height="500"/>
+<img src="https://raw.githubusercontent.com/ChengshunShang1996/FastSlipPy/master/docs/images/example_results_groningen_fields.png" height="500"/>
 </p>
 
 * **Lab-scale shear case**
 
 <p float="left">
-<img src="./docs/images/example_results_lab_shear.png" height="500"/>
+<img src="https://raw.githubusercontent.com/ChengshunShang1996/FastSlipPy/master/docs/images/example_results_lab_shear.png" height="500"/>
 </p>
 
 *A high Young's modulus is used in the lab-scale shear case to generate the above figure.*
@@ -150,7 +150,7 @@ To cite this repository, you can use the metadata from [this file][citation_link
 <sup>1</sup> Utrecht University ([UU][uu_website])
 
 <p float="left">
-<img src="./docs/images/uu.png" height="100"/>
+<img src="https://raw.githubusercontent.com/ChengshunShang1996/FastSlipPy/master/docs/images/uu.png" height="100"/>
 </p>
 
 ## Acknowledgement
