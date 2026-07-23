@@ -1,9 +1,8 @@
 # FastSlipPy: Induced Seismic Fault Slip Modeling
 
-
 <p align=center><img height="80.0%" width="80.0%" src="docs/images/logo.png"></p>
 
-![Release][release-image] 
+![Release][release-image]
 ![License][license-image]
 ![Contributing][contributing-image]
 
@@ -11,25 +10,23 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16282499.svg)](https://doi.org/10.5281/zenodo.16282499)
 -->
 
-[release-image]: https://img.shields.io/badge/release-0.0.1-green.svg?style=flat 
+FastSlipPy is a scientific software package for modeling dynamic fault slip in induced seismicity. It is designed to simulate the behavior of faults under various stress conditions, providing insights into the mechanisms driving induced earthquakes. The software is based on the Finite Difference Method (FDM).
 
-[license-image]: https://img.shields.io/badge/license-MIT-green.svg?style=flat
+The initial version of this software is based on the open-source code [IndNuc][IndNuc_link], which is a Matlab-based code specifically developed for modeling induced seismicity in Groningen area. FastSlipPy has been rewritten in Python to enhance its accessibility and usability, allowing for easier integration with other scientific tools and libraries.
 
-[contributing-image]: https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg
+The ambitious goal of FastSlipPy is to provide an easy-to-use, efficient, and flexible platform for the multi-scale and multi-physics modeling of induced seismicity, which may include the following features in the future:
 
-
-Dynamic fault slip modeling software in induced seismicity. This code aims to ...
-
-The initial version of this software is based on the open-source code [IndNuc][IndNuc_link].
-
+- Multiscale modeling: coupling with Discrete Element Method (DEM) for the simulation of fault gouge.
+- Multiphysics modeling: supporting the coupling of fluid, thermal, and mechanical processes.
 
 ## Table of Contents
+
 - [Main Features](#main-features)
 - [Dependencies](#demgen-dependencies)
 - [Instructions](#instructions)
-    - [Input and Output Files](#input-and-output-files)
-    - [Running Simulations](#running-simulations)
-    - [Checking Results](#checking-results)
+  - [Input and Output Files](#input-and-output-files)
+  - [Running Simulations](#running-simulations)
+  - [Checking Results](#checking-results)
 - [Examples](#examples)
 - [Documentation](#documentation)
 - [How to Contribute](#how-to-contribute)
@@ -39,19 +36,26 @@ The initial version of this software is based on the open-source code [IndNuc][I
 
 ## Main Features
 
-This program can be used for ...
+This program can be used for modeling induced seismicity in a fault system. The main features of this program include:
 
-- It provides a ...
+- Easy-to-install and run on different platforms (Windows or Linux).
+- Adaptive time stepping for efficient simulation of dynamic fault slip.
+- Support different friction models, such as rate-and-state friction and others (under development).
+- Support different fault angles.
+- Post-processing in the format of both Paraview and Matplotlib for visualization of results.
+- Modular design for easy integration with other scientific tools and libraries.
 
 ## Dependencies
 
-FastSlipPy is fully written in the [Python][python_website] programming language and adopts the Object Oriented Programming (OOP) paradigm to offer modularity and extensibility. Due to the nature of Python, this program can be run on different platforms (Windows or Linux)
+FastSlipPy is fully written in the [Python][python_website] programming language and adopts the Object Oriented Programming (OOP) paradigm to offer modularity and extensibility.
 
 Please make sure you have installed Python3.X.X on your PC. Currently, [Python3.10.X][python310_website] is recommended, as other versions haven't been tested.
 
-Required Python Pakage:
+All the required Python libraries will be added automatically. Some of them are:
+
 - numpy
 - matplotlib
+- meshio
 
 ## Instructions
 
@@ -79,23 +83,43 @@ For Linux or HPC users:
 
 > python3 -c "from fastslippy import FastSlipPy; print('Success')"
 
-If you see the logo, you have successfully installed it.
+If you see the logo of FastSlipPy, you have successfully installed it. To run an example, please check the [examples](#examples) section.
 
 ### Input and Output Files
 
-* **Input Parameters (_.json_)**: 
+* **Input Parameters**:
 
-This [JSON][json_link] file is used as input for the program. For generating particle packings, at least one input file is needed: [ParametersDEMGen.json][ParametersDEMGen_link]. 
+All the default parameters are defined in the file [model_parameters.py][model_parameters]. You can modify the parameters in the running script.
+
+* **Output files**:
+
+The output files are generated in the specified output directory [output] and can be visualized using Paraview or Matplotlib. The Matplotlib visualization is used by default, and the Paraview visualization can be enabled by setting the parameter `output_vtk_option` to `True`.
 
 ### Running Simulations
 
-To run a simulation, launch the ...
+To run a simulation, you can use the provided example scripts in the [examples][examples_link] folder. As running other Python scripts, you can run the example script in the command line:
 
+> python run_case_groningen.py
+
+or with your preferred way to run Python scripts. The simulation will start, and the output files will be generated in the specified output directory.
 
 ## Examples
 
-Examples are available inside the folder [examples][examples_link].
+There are two examples in the [examples][examples_link] folder. Here are the example results:
 
+* **Groningen case**
+
+<p float="left">
+<img src="./docs/images/example_results_groningen_fields.png" height="500"/>
+</p>
+
+* **Lab-scale shear case**
+
+<p float="left">
+<img src="./docs/images/example_results_lab_shear.png" height="500"/>
+</p>
+
+*A high Young's modulus is used in the lab-scale shear case to generate the above figure.*
 
 ## Documentation
 
@@ -121,7 +145,7 @@ To cite this repository, you can use the metadata from [this file][citation_link
 
 ## Acknowledgement
 
-The program was initially developed under the context of the FastSlip project.
+The program was initially developed under the context of the FastSlip project. The author would like to thank the project team (Dr. [André Niemeijer][andreniemeijer_link] et al.) for their support and guidance. The author also acknowledges the contributions of the open-source community, particularly the developer of [IndNuc][IndNuc_link], Dr. [Meng Li][mengli_link], whose work served as a foundation for this software.
 
 ## License
 
@@ -129,14 +153,19 @@ FastSlipPy is licensed under the [MIT license][bsd_license_link],
 which allows the program to be freely used by anyone for modification, private use, commercial use, and distribution, only requiring the preservation of copyright and license notices.
 No liability and warranty are provided.
 
-[json_link]:            https://www.json.org/
-[contribute_link]:      https://github.com/ChengshunShang1996/DEMGen/blob/main/CONTRIBUTING.md
-[citation_link]:        https://github.com/ChengshunShang1996/DEMGen/blob/main/CITATION.cff
-[uu_website]:           https://www.uu.nl/en
-[bsd_license_link]:     https://choosealicense.com/licenses/bsd-2-clause/
-[python_website]:       https://www.python.org/
-[python310_website]:    https://www.python.org/downloads/release/python-3100/
-[examples_link]:        ./example/
-[DEMGen_framework_main]: ./src/DEMGen_framework_main.py
-[src_folder]:           .src/ 
-[IndNuc_link]:          https://github.com/USustSub/IndNuc 
+[src_folder]: .src/
+[IndNuc_link]: https://github.com/USustSub/IndNuc
+[release-image]: https://img.shields.io/badge/release-0.0.1-green.svg?style=flat
+[license-image]: https://img.shields.io/badge/license-MIT-green.svg?style=flat
+[contributing-image]: https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg
+[json_link]: https://www.json.org/
+[contribute_link]: https://github.com/ChengshunShang1996/DEMGen/blob/main/CONTRIBUTING.md
+[citation_link]: https://github.com/ChengshunShang1996/DEMGen/blob/main/CITATION.cff
+[uu_website]: https://www.uu.nl/en
+[bsd_license_link]: https://choosealicense.com/licenses/bsd-2-clause/
+[python_website]: https://www.python.org/
+[python310_website]: https://www.python.org/downloads/release/python-3100/
+[examples_link]: ./examples/
+[model_parameters]: ./src/fastslippy/pre_processing/model_parameters.py
+[mengli_link]: https://github.com/limeng-uni
+[andreniemeijer_link]: https://www.uu.nl/medewerkers/ARNiemeijer
