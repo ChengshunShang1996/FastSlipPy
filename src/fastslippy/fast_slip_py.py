@@ -142,8 +142,9 @@ class FastSlipPy:
 
             # ── adaptive time step ──
             if p.case_type == "california":
-                V_inner = self.fault.V[1: (Ny - 1)//2]
-                ksi_inner = self.ksi[1: (Ny - 1)//2]
+                mid_idx = int(p.W_f // (p.ysize / (p.Ny - 1)))
+                V_inner = self.fault.V[1: mid_idx]
+                ksi_inner = self.ksi[1: mid_idx]
             else:
                 V_inner = self.fault.V[1: Ny - 1]
                 ksi_inner = self.ksi[1: Ny - 1]
