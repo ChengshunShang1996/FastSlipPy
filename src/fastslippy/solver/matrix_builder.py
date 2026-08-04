@@ -73,7 +73,7 @@ class MatrixBuilder:
                     elif iy == 0: #bottom boundary
                         if p.bc.bottom.uy.type == BCType.FREE:
                             #add(kuy, kuy, 1);  add(kuy, kuy + (Ny+1)*2, -1)
-                            add(kuy, kuy, 1);  add(kuy, kuy -2, -1)
+                            add(kuy, kuy, 1);  add(kuy, kuy + 2, -1)
                         elif p.bc.bottom.uy.type == BCType.FIXED or p.bc.bottom.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
                         else:
