@@ -29,6 +29,7 @@ class MatrixBuilder:
         self.grid = grid
         self._is_uniform = not (grid.is_nonuniform_x or grid.is_nonuniform_y)
         self._precompute_local_steps()
+        self._precompute_rhs_layout()
 
     # Helper: global DOF indices
     @staticmethod
@@ -63,6 +64,35 @@ class MatrixBuilder:
         self._dy_yuy = np.array([self._local_step(g.y, iy) for iy in range(Ny)], dtype=float)
         self._dx_xux = np.array([self._local_step(g.x, ix) for ix in range(Nx)], dtype=float)
         self._dy_yux = np.array([self._local_step(g.yp, iy) for iy in range(Ny + 1)], dtype=float)
+
+    def _precompute_rhs_layout(self):
+        p = self.p
+        Nx, Ny = p.Nx, p.Ny
+
+        self._mid = Nx // 2
+        self._iy_int = np.arange(1, Ny - 1)  # interior iy for uy rows and ux interior rows
+
+        self._ix_uy_bottom_top = np.arange(1, Nx)  # exclude left/right boundaries by precedence
+        self._ix_uy_left = np.arange(1, self._mid)  # effective else branch ix <= mid with ix==mid excluded
+        self._ix_uy_right = np.arange(self._mid + 2, Nx)  # effective else branch ix >= mid+2
+
+        self._ix_ux_all = np.arange(Nx)
+        self._ix_ux_left = np.arange(1, self._mid)  # effective else branch ix < mid+1 with ix==mid excluded
+        self._ix_ux_right = np.arange(self._mid + 2, Nx - 1)  # effective else branch ix > mid+1
+
+        self._kuy = np.empty((Ny, Nx + 1), dtype=int)
+        self._kux = np.empty((Ny + 1, Nx), dtype=int)
+        for ix in range(Nx + 1):
+            for iy in range(Ny + 1):
+                kux, kuy = self._dofs(ix, iy, Ny)
+                if iy < Ny:
+                    self._kuy[iy, ix] = kux + 1
+                if ix < Nx:
+                    self._kux[iy, ix] = kux
+
+        case_type = p.case_type.value if hasattr(p.case_type, "value") else str(p.case_type)
+        self._case_type = case_type.lower()
+        self._rh = np.zeros(self.grid.N, dtype=float)
 
     def build_LH(self) -> sparse.csr_matrix:
         p, g = self.p, self.grid
@@ -259,136 +289,119 @@ class MatrixBuilder:
 
     def build_RH(self, dPdt: float, V: np.ndarray) -> np.ndarray:
         p, g = self.p, self.grid
-        Nx, Ny, N = p.Nx, p.Ny, g.N
-        G        = p.G
+        Nx, Ny = p.Nx, p.Ny
+        G = p.G
         sina, cosa = g.sina, g.cosa
-        y        = g.y
-        mid      = Nx // 2    # fault column 0-based
+        y = g.y
+        mid = self._mid
         dx_xuy = self._dx_xuy
         dy_yuy = self._dy_yuy
         dx_xux = self._dx_xux
         dy_yux = self._dy_yux
-        uniform = self._is_uniform
-        dx_uniform = float(g.dx)
-        dy_uniform = float(g.dy)
+        RH = self._rh
+        RH.fill(0.0)
 
-        RH = np.zeros(N)
+        is_lab = self._case_type == "lab"
+        is_california = self._case_type == "california"
+        is_groningen = self._case_type == "groningen"
 
-        for ix in range(Nx+1):
-            for iy in range(Ny+1):
-                kux, kuy = self._dofs(ix, iy, Ny)
+        # --- uy block (exact branch priority) ---
+        if p.bc.left.uy.type == BCType.VELOCITY:
+            RH[self._kuy[:, 0]] = p.bc.left.uy.value
+        if p.bc.right.uy.type == BCType.VELOCITY:
+            RH[self._kuy[:, Nx]] = p.bc.right.uy.value
 
-                # ── uy block ──
-                if iy < Ny:
-                    if uniform:
-                        dx_loc = dx_uniform
-                        dy_loc = dy_uniform
-                    else:
-                        dx_loc = dx_xuy[ix]
-                        dy_loc = dy_yuy[iy]
-                    if ix == 0:
-                        if p.bc.left.uy.type == BCType.VELOCITY:
-                            RH[kuy] = p.bc.left.uy.value
-                        else:
-                            pass
-                    elif ix == Nx:
-                        if p.bc.right.uy.type == BCType.VELOCITY:
-                            RH[kuy] = p.bc.right.uy.value
-                        else:
-                            pass
-                    elif iy == 0:
-                        if p.bc.bottom.uy.type == BCType.VELOCITY:
-                            if p.case_type == "lab":
-                                if ix > mid:
-                                    RH[kuy] = p.bc.bottom.uy.value
-                            else:
-                                RH[kuy] = p.bc.bottom.uy.value
-                        else:
-                            pass
-                    elif iy == Ny - 1: #top boundary
-                        if p.bc.top.uy.type == BCType.VELOCITY:
-                            if p.case_type == "lab":
-                                if ix > mid:
-                                    RH[kuy] = p.bc.top.uy.value
-                            elif p.case_type == "california":
-                                if ix < mid:
-                                    RH[kuy] = -1 * p.bc.top.uy.value
-                                elif ix > mid:
-                                    RH[kuy] = p.bc.top.uy.value
-                            else:
-                                RH[kuy] = p.bc.top.uy.value
-                        else:
-                            pass
-                    elif ix == mid:
-                        if p.case_type == "california" and y[iy] >= p.W_f:
-                            RH[kuy] = p.loading.V_L
-                        else:
-                            RH[kuy] = V[iy]
-                    elif ix == mid + 1:
-                        pass
-                    else:
-                        if p.case_type == "groningen":
-                            yv = y[iy]
-                            #TODO: make this more general, not hard-coded
-                            if yv == 850 and ix >= mid + 1:
-                                RH[kuy] =  dPdt / dy_loc * dx_loc*dx_loc / G * sina
-                            if yv == 1050 and ix >= mid + 1:
-                                RH[kuy] = -dPdt / dy_loc * dx_loc*dx_loc / G * sina
-                            if yv == 800 and ix <= mid:
-                                RH[kuy] =  dPdt / dy_loc * dx_loc*dx_loc / G * sina
-                            if yv == 1000 and ix <= mid:
-                                RH[kuy] = -dPdt / dy_loc * dx_loc*dx_loc / G * sina
+        if p.bc.bottom.uy.type == BCType.VELOCITY:
+            if is_lab:
+                RH[self._kuy[0, mid + 1:Nx]] = p.bc.bottom.uy.value
+            else:
+                RH[self._kuy[0, self._ix_uy_bottom_top]] = p.bc.bottom.uy.value
 
-                # ── ux block ──
-                if ix < Nx:
-                    if uniform:
-                        dx_loc = dx_uniform
-                        dy_loc = dy_uniform
-                    else:
-                        dx_loc = dx_xux[ix]
-                        dy_loc = dy_yux[iy]
-                    if iy == 0: #bottom boundary
-                        if p.bc.bottom.ux.type == BCType.VELOCITY:
-                            RH[kux] = p.bc.bottom.ux.value
-                        else:
-                            pass
-                    elif iy == Ny: #top boundary
-                        if p.bc.top.ux.type == BCType.VELOCITY:
-                            if p.case_type == "california":
-                                if ix < mid:
-                                    RH[kux] = -1 * p.bc.top.ux.value
-                                elif ix > mid:
-                                    RH[kux] = p.bc.top.ux.value
-                            else:
-                                RH[kux] = p.bc.top.ux.value
-                        else:
-                            pass
-                    elif ix == 0:
-                        if p.bc.left.ux.type == BCType.VELOCITY:
-                            RH[kux] = p.bc.left.ux.value
-                        else:
-                            pass
-                    elif ix == Nx - 1:
-                        if p.bc.right.ux.type == BCType.VELOCITY:
-                            RH[kux] = p.bc.right.ux.value
-                        else:
-                            pass
-                    elif ix == mid:
-                        if p.case_type == "groningen":
-                            yv = y[iy]
-                            if 800 < yv <= 850:
-                                RH[kux] = -dPdt * dx_loc / G
-                            if 1000 < yv <= 1050:
-                                RH[kux] =  dPdt * dx_loc / G
-                    else:
-                        if p.case_type == "groningen":
-                            yv = y[iy]
-                            if yv == 1050 and ix > mid + 1:
-                                RH[kux] =  dPdt / dy_loc * dx_loc*dx_loc / G * sina * cosa
-                            if yv == 1000 and ix < mid + 1:
-                                RH[kux] =  dPdt / dy_loc * dx_loc*dx_loc / G * sina * cosa
-                            if yv == 850 and ix > mid + 1:
-                                RH[kux] = -dPdt / dy_loc * dx_loc*dx_loc / G * sina * cosa
-                            if yv == 800 and ix < mid + 1:
-                                RH[kux] = -dPdt / dy_loc * dx_loc*dx_loc / G * sina * cosa
+        if p.bc.top.uy.type == BCType.VELOCITY:
+            if is_lab:
+                RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.top.uy.value
+            elif is_california:
+                RH[self._kuy[Ny - 1, 1:mid]] = -p.bc.top.uy.value
+                RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.top.uy.value
+            else:
+                RH[self._kuy[Ny - 1, self._ix_uy_bottom_top]] = p.bc.top.uy.value
+
+        iy_int = self._iy_int
+        if is_california:
+            cal_mask = y[iy_int] >= p.W_f
+            fault_idx = self._kuy[iy_int, mid]
+            RH[fault_idx[~cal_mask]] = V[iy_int[~cal_mask]]
+            RH[fault_idx[cal_mask]] = p.loading.V_L
+        else:
+            RH[self._kuy[iy_int, mid]] = V[iy_int]
+
+        if is_groningen:
+            y_int = y[iy_int]
+            dy_uy_int = dy_yuy[iy_int]
+
+            mask_850 = y_int == 850
+            mask_1050 = y_int == 1050
+            mask_800 = y_int == 800
+            mask_1000 = y_int == 1000
+
+            if np.any(mask_850):
+                for iy, dy_loc in zip(iy_int[mask_850], dy_uy_int[mask_850]):
+                    ix = self._ix_uy_right
+                    RH[self._kuy[iy, ix]] = dPdt / dy_loc * dx_xuy[ix] * dx_xuy[ix] / G * sina
+            if np.any(mask_1050):
+                for iy, dy_loc in zip(iy_int[mask_1050], dy_uy_int[mask_1050]):
+                    ix = self._ix_uy_right
+                    RH[self._kuy[iy, ix]] = -dPdt / dy_loc * dx_xuy[ix] * dx_xuy[ix] / G * sina
+            if np.any(mask_800):
+                for iy, dy_loc in zip(iy_int[mask_800], dy_uy_int[mask_800]):
+                    ix = self._ix_uy_left
+                    RH[self._kuy[iy, ix]] = dPdt / dy_loc * dx_xuy[ix] * dx_xuy[ix] / G * sina
+            if np.any(mask_1000):
+                for iy, dy_loc in zip(iy_int[mask_1000], dy_uy_int[mask_1000]):
+                    ix = self._ix_uy_left
+                    RH[self._kuy[iy, ix]] = -dPdt / dy_loc * dx_xuy[ix] * dx_xuy[ix] / G * sina
+
+        # --- ux block (exact branch priority) ---
+        if p.bc.bottom.ux.type == BCType.VELOCITY:
+            RH[self._kux[0, self._ix_ux_all]] = p.bc.bottom.ux.value
+        if p.bc.top.ux.type == BCType.VELOCITY:
+            if is_california:
+                RH[self._kux[Ny, :mid]] = -p.bc.top.ux.value
+                RH[self._kux[Ny, mid + 1:]] = p.bc.top.ux.value
+            else:
+                RH[self._kux[Ny, self._ix_ux_all]] = p.bc.top.ux.value
+
+        if p.bc.left.ux.type == BCType.VELOCITY:
+            RH[self._kux[1:Ny, 0]] = p.bc.left.ux.value
+        if p.bc.right.ux.type == BCType.VELOCITY:
+            RH[self._kux[1:Ny, Nx - 1]] = p.bc.right.ux.value
+
+        if is_groningen:
+            y_int = y[iy_int]
+            dx_mid = dx_xux[mid]
+            RH[self._kux[iy_int[(y_int > 800) & (y_int <= 850)], mid]] = -dPdt * dx_mid / G
+            RH[self._kux[iy_int[(y_int > 1000) & (y_int <= 1050)], mid]] = dPdt * dx_mid / G
+
+            dy_ux_int = dy_yux[iy_int]
+            mask_1050 = y_int == 1050
+            mask_1000 = y_int == 1000
+            mask_850 = y_int == 850
+            mask_800 = y_int == 800
+
+            if np.any(mask_1050):
+                for iy, dy_loc in zip(iy_int[mask_1050], dy_ux_int[mask_1050]):
+                    ix = self._ix_ux_right
+                    RH[self._kux[iy, ix]] = dPdt / dy_loc * dx_xux[ix] * dx_xux[ix] / G * sina * cosa
+            if np.any(mask_1000):
+                for iy, dy_loc in zip(iy_int[mask_1000], dy_ux_int[mask_1000]):
+                    ix = self._ix_ux_left
+                    RH[self._kux[iy, ix]] = dPdt / dy_loc * dx_xux[ix] * dx_xux[ix] / G * sina * cosa
+            if np.any(mask_850):
+                for iy, dy_loc in zip(iy_int[mask_850], dy_ux_int[mask_850]):
+                    ix = self._ix_ux_right
+                    RH[self._kux[iy, ix]] = -dPdt / dy_loc * dx_xux[ix] * dx_xux[ix] / G * sina * cosa
+            if np.any(mask_800):
+                for iy, dy_loc in zip(iy_int[mask_800], dy_ux_int[mask_800]):
+                    ix = self._ix_ux_left
+                    RH[self._kux[iy, ix]] = -dPdt / dy_loc * dx_xux[ix] * dx_xux[ix] / G * sina * cosa
         return RH
