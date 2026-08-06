@@ -27,6 +27,8 @@ class MatrixBuilder:
     def __init__(self, p: ModelParameters, grid: Grid):
         self.p    = p
         self.grid = grid
+        self._is_uniform = not (grid.is_nonuniform_x or grid.is_nonuniform_y)
+        self._precompute_local_steps()
 
     # Helper: global DOF indices
     @staticmethod
@@ -44,13 +46,33 @@ class MatrixBuilder:
             return float(coords[-1] - coords[-2])
         return float(0.5 * (coords[idx + 1] - coords[idx - 1]))
 
+    def _precompute_local_steps(self):
+        p, g = self.p, self.grid
+        Nx, Ny = p.Nx, p.Ny
+
+        if self._is_uniform:
+            dx = float(g.dx)
+            dy = float(g.dy)
+            self._dx_xuy = np.full(Nx + 1, dx)
+            self._dy_yuy = np.full(Ny, dy)
+            self._dx_xux = np.full(Nx, dx)
+            self._dy_yux = np.full(Ny + 1, dy)
+            return
+
+        self._dx_xuy = np.array([self._local_step(g.xp, ix) for ix in range(Nx + 1)], dtype=float)
+        self._dy_yuy = np.array([self._local_step(g.y, iy) for iy in range(Ny)], dtype=float)
+        self._dx_xux = np.array([self._local_step(g.x, ix) for ix in range(Nx)], dtype=float)
+        self._dy_yux = np.array([self._local_step(g.yp, iy) for iy in range(Ny + 1)], dtype=float)
+
     def build_LH(self) -> sparse.csr_matrix:
         p, g = self.p, self.grid
         Nx, Ny, N = p.Nx, p.Ny, g.N
         lam, G   = p.lam, p.G
         sina, cosa = g.sina, g.cosa
-        xux, yux = g.x, g.yp
-        xuy, yuy = g.xp, g.y
+        dx_xuy = self._dx_xuy
+        dy_yuy = self._dy_yuy
+        dx_xux = self._dx_xux
+        dy_yux = self._dy_yux
 
         rows, cols, vals = [], [], []
 
@@ -65,8 +87,8 @@ class MatrixBuilder:
 
                 # ── uy equation (iy < Ny) ──────────────────────────────
                 if iy < Ny:
-                    dx_loc = self._local_step(xuy, ix)
-                    dy_loc = self._local_step(yuy, iy)
+                    dx_loc = dx_xuy[ix]
+                    dy_loc = dy_yuy[iy]
                     if ix == 0: #left boundary
                         if p.bc.left.uy.type == BCType.FREE:
                             add(kuy, kuy, 1);  add(kuy, kuy + (Ny+1)*2, -1)
@@ -157,8 +179,8 @@ class MatrixBuilder:
 
                 # ── ux equation (ix < Nx) ──────────────────────────────
                 if ix < Nx:
-                    dx_loc = self._local_step(xux, ix)
-                    dy_loc = self._local_step(yux, iy)
+                    dx_loc = dx_xux[ix]
+                    dy_loc = dy_yux[iy]
                     r2 = dx_loc*dx_loc / dy_loc/dy_loc
                     r_lam = (lam + 2*G) / G
                     if iy == 0: #bottom boundary
@@ -242,6 +264,13 @@ class MatrixBuilder:
         sina, cosa = g.sina, g.cosa
         y        = g.y
         mid      = Nx // 2    # fault column 0-based
+        dx_xuy = self._dx_xuy
+        dy_yuy = self._dy_yuy
+        dx_xux = self._dx_xux
+        dy_yux = self._dy_yux
+        uniform = self._is_uniform
+        dx_uniform = float(g.dx)
+        dy_uniform = float(g.dy)
 
         RH = np.zeros(N)
 
@@ -251,8 +280,12 @@ class MatrixBuilder:
 
                 # ── uy block ──
                 if iy < Ny:
-                    dx_loc = self._local_step(g.xp, ix)
-                    dy_loc = self._local_step(g.y, iy)
+                    if uniform:
+                        dx_loc = dx_uniform
+                        dy_loc = dy_uniform
+                    else:
+                        dx_loc = dx_xuy[ix]
+                        dy_loc = dy_yuy[iy]
                     if ix == 0:
                         if p.bc.left.uy.type == BCType.VELOCITY:
                             RH[kuy] = p.bc.left.uy.value
@@ -308,8 +341,12 @@ class MatrixBuilder:
 
                 # ── ux block ──
                 if ix < Nx:
-                    dx_loc = self._local_step(g.x, ix)
-                    dy_loc = self._local_step(g.yp, iy)
+                    if uniform:
+                        dx_loc = dx_uniform
+                        dy_loc = dy_uniform
+                    else:
+                        dx_loc = dx_xux[ix]
+                        dy_loc = dy_yux[iy]
                     if iy == 0: #bottom boundary
                         if p.bc.bottom.ux.type == BCType.VELOCITY:
                             RH[kux] = p.bc.bottom.ux.value

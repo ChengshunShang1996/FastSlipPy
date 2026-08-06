@@ -67,25 +67,32 @@ class StressCalUtil:
                     - 2G*cosa*movmean(movmean(diff(ux,1,1)/dy,2,2,'discard'),2,1,'discard')
         """
         # ── Term 1: diff(uy, axis=1) / dx  →  shape (Ny, Nx) ──────────────
-        dx_uy = self._edge_divisor(np.diff(xp) if xp is not None else dx, Nx)
-        dy_ux = self._edge_divisor(np.diff(yp) if yp is not None else dy, Ny)
-        dx_ux = self._edge_divisor(np.diff(x) if x is not None else dx, Nx - 1)
-        dy_uy = self._edge_divisor(np.diff(y) if y is not None else dy, Ny - 1)
-        x_ux = self._coord_or_uniform(x, Nx, dx)
-        y_uy = self._coord_or_uniform(y, Ny, dy)
+        use_uniform_fast_path = (
+            x is None and y is None and xp is None and yp is None
+            and np.isscalar(dx) and np.isscalar(dy)
+        )
 
-        term1 = np.diff(uy, axis=1) / dx_uy[None, :]                    # (Ny, Nx)
+        if use_uniform_fast_path:
+            term1 = np.diff(uy, axis=1) / dx                    # (Ny, Nx)
+            term2 = (1 - 2 * cosa**2) * np.diff(ux, axis=0) / dy   # (Ny, Nx)
+            duxdx = np.gradient(ux, dx, axis=1)                 # (Ny+1, Nx)
+            mm_duxdx = self._movmean_discard(duxdx, axis=0)     # (Ny, Nx)
+            duydy = np.gradient(uy, dy, axis=0)                 # (Ny, Nx+1)
+            mm_duydy = self._movmean_discard(duydy, axis=1)     # (Ny, Nx)
+        else:
+            dx_uy = self._edge_divisor(np.diff(xp) if xp is not None else dx, Nx)
+            dy_ux = self._edge_divisor(np.diff(yp) if yp is not None else dy, Ny)
+            dx_ux = self._edge_divisor(np.diff(x) if x is not None else dx, Nx - 1)
+            dy_uy = self._edge_divisor(np.diff(y) if y is not None else dy, Ny - 1)
+            x_ux = self._coord_or_uniform(x, Nx, dx)
+            y_uy = self._coord_or_uniform(y, Ny, dy)
 
-        # ── Term 2: (1-2cos²α) * diff(ux, axis=0) / dy  →  shape (Ny, Nx) ─
-        term2 = (1 - 2 * cosa**2) * np.diff(ux, axis=0) / dy_ux[:, None]   # (Ny, Nx)
-
-        # ── Term 3a: movmean(duxdx, 2, axis=0, 'discard')  →  (Ny, Nx) ────
-        duxdx = np.gradient(ux, x_ux, axis=1)                 # (Ny+1, Nx)
-        mm_duxdx = self._movmean_discard(duxdx, axis=0)          # (Ny,   Nx)  ✓
-
-        # ── Term 3b: movmean(duydy, 2, axis=1, 'discard')  →  (Ny, Nx) ────
-        duydy = np.gradient(uy, y_uy, axis=0)                 # (Ny, Nx+1)
-        mm_duydy = self._movmean_discard(duydy, axis=1)          # (Ny, Nx) 
+            term1 = np.diff(uy, axis=1) / dx_uy[None, :]                    # (Ny, Nx)
+            term2 = (1 - 2 * cosa**2) * np.diff(ux, axis=0) / dy_ux[:, None]   # (Ny, Nx)
+            duxdx = np.gradient(ux, x_ux, axis=1)                 # (Ny+1, Nx)
+            mm_duxdx = self._movmean_discard(duxdx, axis=0)          # (Ny,   Nx)  ✓
+            duydy = np.gradient(uy, y_uy, axis=0)                 # (Ny, Nx+1)
+            mm_duydy = self._movmean_discard(duydy, axis=1)          # (Ny, Nx)
 
         # ── Assemble tauqs ──────────────────────────────────────────────────
         tauqs = G / sina * (term1 + term2 + cosa * (mm_duxdx - mm_duydy))  # (Ny, Nx)
@@ -95,10 +102,14 @@ class StressCalUtil:
         tauqs[:, mid] = (tauqs[:, mid - 1] + tauqs[:, mid + 1]) / 2
 
         # ══ sigmaqs  (Ny-1, Nx-1) ═══════════════════════════════════════════
-        s_term1 = np.diff(ux[1:Ny, :], axis=1) / dx_ux[None, :]         # (Ny-1, Nx-1)
-        s_term2 = np.diff(uy[:, 1:Nx], axis=0) / dy_uy[:, None]         # (Ny-1, Nx-1)
-
-        dux_dy     = np.diff(ux, axis=0) / dy_ux[:, None]                # (Ny,   Nx)
+        if use_uniform_fast_path:
+            s_term1 = np.diff(ux[1:Ny, :], axis=1) / dx         # (Ny-1, Nx-1)
+            s_term2 = np.diff(uy[:, 1:Nx], axis=0) / dy         # (Ny-1, Nx-1)
+            dux_dy = np.diff(ux, axis=0) / dy                   # (Ny, Nx)
+        else:
+            s_term1 = np.diff(ux[1:Ny, :], axis=1) / dx_ux[None, :]         # (Ny-1, Nx-1)
+            s_term2 = np.diff(uy[:, 1:Nx], axis=0) / dy_uy[:, None]         # (Ny-1, Nx-1)
+            dux_dy = np.diff(ux, axis=0) / dy_ux[:, None]                   # (Ny, Nx)
         mm_inner   = self._movmean_discard(dux_dy, axis=1)        # (Ny,   Nx-1)
         mm_outer   = self._movmean_discard(mm_inner, axis=0)      # (Ny-1, Nx-1)
 

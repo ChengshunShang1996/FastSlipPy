@@ -203,10 +203,15 @@ class FastSlipPy:
 
             # ── compute stress ──
             StressCalculator = StressCalUtil()
-            self.tauqs, self.sigmaqs = StressCalculator.compute_stress_fields(
-                self.uy, self.ux, self.grid.dx, self.grid.dy,
-                p.lam, p.G, self.grid.cosa, self.grid.sina, Ny, Nx,
-                x=self.grid.x, y=self.grid.y, xp=self.grid.xp, yp=self.grid.yp)
+            if self.grid.is_nonuniform:
+                self.tauqs, self.sigmaqs = StressCalculator.compute_stress_fields(
+                    self.uy, self.ux, self.grid.dx, self.grid.dy,
+                    p.lam, p.G, self.grid.cosa, self.grid.sina, Ny, Nx,
+                    x=self.grid.x, y=self.grid.y, xp=self.grid.xp, yp=self.grid.yp)
+            else:
+                self.tauqs, self.sigmaqs = StressCalculator.compute_stress_fields(
+                    self.uy, self.ux, self.grid.dx, self.grid.dy,
+                    p.lam, p.G, self.grid.cosa, self.grid.sina, Ny, Nx)
 
             # Update effective normal stress from sigmaqs
             mid_l = (Nx - 1) // 2 - 1
