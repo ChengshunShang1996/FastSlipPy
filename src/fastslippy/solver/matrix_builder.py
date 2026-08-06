@@ -36,12 +36,21 @@ class MatrixBuilder:
         kuy = kux + 1                            # uy DOF (0-based)
         return kux, kuy
 
+    @staticmethod
+    def _local_step(coords: np.ndarray, idx: int) -> float:
+        if idx <= 0:
+            return float(coords[1] - coords[0])
+        if idx >= coords.size - 1:
+            return float(coords[-1] - coords[-2])
+        return float(0.5 * (coords[idx + 1] - coords[idx - 1]))
+
     def build_LH(self) -> sparse.csr_matrix:
         p, g = self.p, self.grid
         Nx, Ny, N = p.Nx, p.Ny, g.N
-        dx, dy   = g.dx, g.dy
         lam, G   = p.lam, p.G
         sina, cosa = g.sina, g.cosa
+        xux, yux = g.x, g.yp
+        xuy, yuy = g.xp, g.y
 
         rows, cols, vals = [], [], []
 
@@ -56,6 +65,8 @@ class MatrixBuilder:
 
                 # ── uy equation (iy < Ny) ──────────────────────────────
                 if iy < Ny:
+                    dx_loc = self._local_step(xuy, ix)
+                    dy_loc = self._local_step(yuy, iy)
                     if ix == 0: #left boundary
                         if p.bc.left.uy.type == BCType.FREE:
                             add(kuy, kuy, 1);  add(kuy, kuy + (Ny+1)*2, -1)
@@ -103,28 +114,28 @@ class MatrixBuilder:
                         add(kuy, kux - (Ny+1)*2 + 2,   -cosa/2)
                         add(kuy, kux - 3*(Ny+1)*2,     cosa/4)
                         add(kuy, kux - 3*(Ny+1)*2 + 2, cosa/4)
-                        add(kuy, kuy + (Ny+1)*2 - 2,   cosa/4/dy*dx)
-                        add(kuy, kuy + (Ny+1)*2 + 2,  -cosa/4/dy*dx)
-                        add(kuy, kuy - 2,               cosa/4/dy*dx)
-                        add(kuy, kuy + 2,              -cosa/4/dy*dx)
-                        add(kuy, kuy - (Ny+1)*2 - 2,  -cosa/4/dy*dx)
-                        add(kuy, kuy - (Ny+1)*2 + 2,   cosa/4/dy*dx)
-                        add(kuy, kuy - 2*(Ny+1)*2 - 2,  -cosa/4/dy*dx)
-                        add(kuy, kuy - 2*(Ny+1)*2 + 2,   cosa/4/dy*dx)
+                        add(kuy, kuy + (Ny+1)*2 - 2,   cosa/4/dy_loc*dx_loc)
+                        add(kuy, kuy + (Ny+1)*2 + 2,  -cosa/4/dy_loc*dx_loc)
+                        add(kuy, kuy - 2,               cosa/4/dy_loc*dx_loc)
+                        add(kuy, kuy + 2,              -cosa/4/dy_loc*dx_loc)
+                        add(kuy, kuy - (Ny+1)*2 - 2,  -cosa/4/dy_loc*dx_loc)
+                        add(kuy, kuy - (Ny+1)*2 + 2,   cosa/4/dy_loc*dx_loc)
+                        add(kuy, kuy - 2*(Ny+1)*2 - 2,  -cosa/4/dy_loc*dx_loc)
+                        add(kuy, kuy - 2*(Ny+1)*2 + 2,   cosa/4/dy_loc*dx_loc)
                     else:
                         # Interior bulk
-                        r2 = dx*dx / dy/dy * (lam + 2*G) / G
+                        r2 = dx_loc*dx_loc / dy_loc/dy_loc * (lam + 2*G) / G
                         add(kuy, kuy, -2 - 2*r2)
                         add(kuy, kuy - (Ny+1)*2, 1)
                         add(kuy, kuy + (Ny+1)*2, 1)
                         add(kuy, kuy - 2,  r2)
                         add(kuy, kuy + 2,  r2)
-                        c_val = cosa/dy*dx*(lam + 3*G)/G/4
+                        c_val = cosa/dy_loc*dx_loc*(lam + 3*G)/G/4
                         add(kuy, kuy + (Ny+1)*2 - 2,   c_val)
                         add(kuy, kuy + (Ny+1)*2 + 2,  -c_val)
                         add(kuy, kuy - (Ny+1)*2 - 2,  -c_val)
                         add(kuy, kuy - (Ny+1)*2 + 2,   c_val)
-                        fac = 1/dy*dx*(lam + G)/G
+                        fac = 1/dy_loc*dx_loc*(lam + G)/G
                         if ix == 1 or ix == Nx - 1:
                             add(kuy, kux - (Ny+1)*2,      fac)
                             add(kuy, kux - (Ny+1)*2 + 2, -fac)
@@ -146,7 +157,9 @@ class MatrixBuilder:
 
                 # ── ux equation (ix < Nx) ──────────────────────────────
                 if ix < Nx:
-                    r2 = dx*dx / dy/dy
+                    dx_loc = self._local_step(xux, ix)
+                    dy_loc = self._local_step(yux, iy)
+                    r2 = dx_loc*dx_loc / dy_loc/dy_loc
                     r_lam = (lam + 2*G) / G
                     if iy == 0: #bottom boundary
                         if p.bc.bottom.ux.type == BCType.FIXED or p.bc.bottom.ux.type == BCType.VELOCITY:
@@ -181,7 +194,7 @@ class MatrixBuilder:
                         add(kux, kux,              -2*r_lam)
                         add(kux, kux + (Ny+1)*2,   r_lam)
                         add(kux, kux - (Ny+1)*2,   r_lam)
-                        fac = lam/G/dy*dx
+                        fac = lam/G/dy_loc*dx_loc
                         add(kux, kuy,                    -fac)
                         add(kux, kuy + (Ny+1)*2,          fac)
                         add(kux, kuy - 2,                 fac)
@@ -193,19 +206,19 @@ class MatrixBuilder:
                         add(kux, kux + (Ny+1)*2, r_lam)
                         add(kux, kux - 2, r2)
                         add(kux, kux + 2, r2)
-                        c_val = cosa/dy*dx*(lam + 3*G)/G/4
+                        c_val = cosa/dy_loc*dx_loc*(lam + 3*G)/G/4
                         add(kux, kux + (Ny+1)*2 - 2,   c_val)
                         add(kux, kux + (Ny+1)*2 + 2,  -c_val)
                         add(kux, kux - (Ny+1)*2 - 2,  -c_val)
                         add(kux, kux - (Ny+1)*2 + 2,   c_val)
-                        fac = 1/dy*dx*(lam + G)/G
+                        fac = 1/dy_loc*dx_loc*(lam + G)/G
                         if iy == 1 or iy == Ny - 1:
                             add(kux, kuy + (Ny+1)*2,      fac)
                             add(kux, kuy + (Ny+1)*2 - 2, -fac)
                             add(kux, kuy,                 -fac)
                             add(kux, kuy - 2,              fac)
                         else:
-                            cf = cosa/dy/dy*dx*dx*(lam + G)/G/4
+                            cf = cosa/dy_loc/dy_loc*dx_loc*dx_loc*(lam + G)/G/4
                             add(kux, kuy + (Ny+1)*2,        fac + cf)
                             add(kux, kuy + (Ny+1)*2 - 2,   -fac + cf)
                             add(kux, kuy,                   -fac + cf)
@@ -225,7 +238,6 @@ class MatrixBuilder:
     def build_RH(self, dPdt: float, V: np.ndarray) -> np.ndarray:
         p, g = self.p, self.grid
         Nx, Ny, N = p.Nx, p.Ny, g.N
-        dx, dy   = g.dx, g.dy
         G        = p.G
         sina, cosa = g.sina, g.cosa
         y        = g.y
@@ -239,6 +251,8 @@ class MatrixBuilder:
 
                 # ── uy block ──
                 if iy < Ny:
+                    dx_loc = self._local_step(g.xp, ix)
+                    dy_loc = self._local_step(g.y, iy)
                     if ix == 0:
                         if p.bc.left.uy.type == BCType.VELOCITY:
                             RH[kuy] = p.bc.left.uy.value
@@ -284,16 +298,18 @@ class MatrixBuilder:
                             yv = y[iy]
                             #TODO: make this more general, not hard-coded
                             if yv == 850 and ix >= mid + 1:
-                                RH[kuy] =  dPdt / dy * dx*dx / G * sina
+                                RH[kuy] =  dPdt / dy_loc * dx_loc*dx_loc / G * sina
                             if yv == 1050 and ix >= mid + 1:
-                                RH[kuy] = -dPdt / dy * dx*dx / G * sina
+                                RH[kuy] = -dPdt / dy_loc * dx_loc*dx_loc / G * sina
                             if yv == 800 and ix <= mid:
-                                RH[kuy] =  dPdt / dy * dx*dx / G * sina
+                                RH[kuy] =  dPdt / dy_loc * dx_loc*dx_loc / G * sina
                             if yv == 1000 and ix <= mid:
-                                RH[kuy] = -dPdt / dy * dx*dx / G * sina
+                                RH[kuy] = -dPdt / dy_loc * dx_loc*dx_loc / G * sina
 
                 # ── ux block ──
                 if ix < Nx:
+                    dx_loc = self._local_step(g.x, ix)
+                    dy_loc = self._local_step(g.yp, iy)
                     if iy == 0: #bottom boundary
                         if p.bc.bottom.ux.type == BCType.VELOCITY:
                             RH[kux] = p.bc.bottom.ux.value
@@ -324,18 +340,18 @@ class MatrixBuilder:
                         if p.case_type == "groningen":
                             yv = y[iy]
                             if 800 < yv <= 850:
-                                RH[kux] = -dPdt * dx / G
+                                RH[kux] = -dPdt * dx_loc / G
                             if 1000 < yv <= 1050:
-                                RH[kux] =  dPdt * dx / G
+                                RH[kux] =  dPdt * dx_loc / G
                     else:
                         if p.case_type == "groningen":
                             yv = y[iy]
                             if yv == 1050 and ix > mid + 1:
-                                RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
+                                RH[kux] =  dPdt / dy_loc * dx_loc*dx_loc / G * sina * cosa
                             if yv == 1000 and ix < mid + 1:
-                                RH[kux] =  dPdt / dy * dx*dx / G * sina * cosa
+                                RH[kux] =  dPdt / dy_loc * dx_loc*dx_loc / G * sina * cosa
                             if yv == 850 and ix > mid + 1:
-                                RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
+                                RH[kux] = -dPdt / dy_loc * dx_loc*dx_loc / G * sina * cosa
                             if yv == 800 and ix < mid + 1:
-                                RH[kux] = -dPdt / dy * dx*dx / G * sina * cosa
+                                RH[kux] = -dPdt / dy_loc * dx_loc*dx_loc / G * sina * cosa
         return RH

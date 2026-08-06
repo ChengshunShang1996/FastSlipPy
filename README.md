@@ -101,6 +101,15 @@ If you see the logo of FastSlipPy, you have successfully installed it. To run an
 
 All the default parameters are defined in the file [model_parameters.py][model_parameters]. You can modify the parameters in the running script.
 
+Grid stretching options are also available in [model_parameters.py][model_parameters]:
+
+- `x_stretch_enabled`, `y_stretch_enabled`
+- `x_stretch_inner_size`, `y_stretch_inner_size`
+- `x_stretch_inner_points`, `y_stretch_inner_points`
+- `x_stretch_power`, `y_stretch_power`
+
+By default, FastSlipPy uses a uniform grid. Solver/stress operators now use local spacing from the generated mesh so stretched coordinates can be used directly.
+
 * **Output files**:
 
 The output files are generated in the specified output directory [output] and can be visualized using Paraview or Matplotlib. The Matplotlib visualization is used by default, and the Paraview visualization can be enabled by setting the parameter `output_vtk_option` to `True`.

@@ -53,7 +53,7 @@ class FastSlipPy:
         # Fault state
         self.fault  = FaultState(self.p, self.stress, self.fric)
         # ksi for adaptive dt
-        self.ksi    = self._build_ksi(self.p, self.fric, self.stress.sigman0, self.grid.dy)
+        self.ksi    = self._build_ksi(self.p, self.fric, self.stress.sigman0, self.grid.dy_fault)
 
         # Displacement / velocity fields
         p  = self.p
@@ -75,13 +75,18 @@ class FastSlipPy:
         self._solve = factorized(LH.tocsc())   # sparse LU decomposition
 
     def _build_ksi(self, p: ModelParameters, fric: FrictionalZones,
-              sigman0: np.ndarray, dy: float) -> np.ndarray:
+              sigman0: np.ndarray, dy) -> np.ndarray:
         """
         Stability factor ksi used for adaptive time stepping:
         """
+        dy_arr = np.asarray(dy, dtype=float)
+        if dy_arr.ndim == 0:
+            dy_arr = np.full_like(sigman0, float(dy_arr), dtype=float)
+        if dy_arr.shape != sigman0.shape:
+            raise ValueError(f"dy shape {dy_arr.shape} does not match sigma shape {sigman0.shape}.")
         a = fric.a
         b = fric.b
-        k1 = (np.pi / 4.0) * p.G / dy * p.L / a / sigman0
+        k1 = (np.pi / 4.0) * p.G / dy_arr * p.L / a / sigman0
         k2 = (b - a) / a
         k3 = (k1 - k2)**2 / 4.0 - k1
         k4 = np.minimum(1.0 / (k1 - k2), 0.2)
@@ -200,7 +205,8 @@ class FastSlipPy:
             StressCalculator = StressCalUtil()
             self.tauqs, self.sigmaqs = StressCalculator.compute_stress_fields(
                 self.uy, self.ux, self.grid.dx, self.grid.dy,
-                p.lam, p.G, self.grid.cosa, self.grid.sina, Ny, Nx)
+                p.lam, p.G, self.grid.cosa, self.grid.sina, Ny, Nx,
+                x=self.grid.x, y=self.grid.y, xp=self.grid.xp, yp=self.grid.yp)
 
             # Update effective normal stress from sigmaqs
             mid_l = (Nx - 1) // 2 - 1

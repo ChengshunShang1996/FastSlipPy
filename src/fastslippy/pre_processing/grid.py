@@ -20,6 +20,60 @@ class Grid:
     Builds and stores all spatial coordinate arrays needed by the model.
     """
 
+    @staticmethod
+    def _piecewise_stretch_axis(length: float, n_points: int, inner_length: float,
+                                inner_points: int, power: int) -> np.ndarray:
+        """
+        One-sided piecewise-stretched axis on [0, length].
+        """
+        n_total = n_points - 1
+        n_inner = inner_points - 1
+
+        s = np.linspace(0.0, 1.0, n_points)
+        if n_inner >= n_total:
+            return length * s
+
+        sb = n_inner / n_total
+        b = n_total * inner_length / n_inner
+
+        out = b * s
+        outer = s > sb
+        if np.any(outer):
+            chi = (s[outer] - sb) / (1.0 - sb)
+            out[outer] = b * s[outer] + (length - b) * np.power(chi, power)
+        return out
+
+    @classmethod
+    def _symmetric_piecewise_stretch_axis(cls, length: float, n_points: int, inner_length: float,
+                                          inner_points: int, power: int) -> np.ndarray:
+        """
+        Symmetric piecewise-stretched axis on [-length/2, length/2].
+        """
+        half_intervals = (n_points - 1) // 2
+        half_points = half_intervals + 1
+        inner_half_length = inner_length / 2.0
+        inner_half_points = (inner_points + 1) // 2
+
+        positive = cls._piecewise_stretch_axis(
+            length=length / 2.0,
+            n_points=half_points,
+            inner_length=inner_half_length,
+            inner_points=inner_half_points,
+            power=power,
+        )
+        return np.concatenate((-positive[:0:-1], positive))
+
+    @staticmethod
+    def _staggered_from_centers(nodes: np.ndarray) -> np.ndarray:
+        """
+        Build staggered coordinates from nodal coordinates (supports nonuniform spacing).
+        """
+        staggered = np.empty(nodes.size + 1, dtype=float)
+        staggered[1:-1] = 0.5 * (nodes[:-1] + nodes[1:])
+        staggered[0] = nodes[0] - 0.5 * (nodes[1] - nodes[0])
+        staggered[-1] = nodes[-1] + 0.5 * (nodes[-1] - nodes[-2])
+        return staggered
+
     def __init__(self, p: ModelParameters):
         
         self.p = p
@@ -27,19 +81,41 @@ class Grid:
         self.cosa = MathUtil.cosd(p.alpha)
 
         Nx, Ny = p.Nx, p.Ny
-        dx = p.xsize / (Nx - 1)
-        dy = p.ysize / (Ny - 1)
-        self.dx = dx
-        self.dy = dy
 
-        # Basic (τ / σ) nodes
-        self.x = np.linspace(-p.xsize / 2, p.xsize / 2, Nx)          # (Nx,)
-        self.y = np.linspace(0, p.ysize, Ny)                           # (Ny,)
+        if p.x_stretch_enabled:
+            self.x = self._symmetric_piecewise_stretch_axis(
+                length=p.xsize,
+                n_points=Nx,
+                inner_length=p.x_stretch_inner_size,
+                inner_points=p.x_stretch_inner_points,
+                power=p.x_stretch_power,
+            )
+        else:
+            self.x = np.linspace(-p.xsize / 2, p.xsize / 2, Nx)
+
+        if p.y_stretch_enabled:
+            self.y = self._piecewise_stretch_axis(
+                length=p.ysize,
+                n_points=Ny,
+                inner_length=p.y_stretch_inner_size,
+                inner_points=p.y_stretch_inner_points,
+                power=p.y_stretch_power,
+            )
+        else:
+            self.y = np.linspace(0, p.ysize, Ny)
+
+        self.dx_edges = np.diff(self.x)
+        self.dy_edges = np.diff(self.y)
+        self.dx = float(np.mean(self.dx_edges))
+        self.dy = float(np.mean(self.dy_edges))
+        self.dy_fault = np.gradient(self.y)
+        self.is_nonuniform_x = not np.allclose(self.dx_edges, self.dx_edges[0])
+        self.is_nonuniform_y = not np.allclose(self.dy_edges, self.dy_edges[0])
+        self.is_nonuniform = self.is_nonuniform_x or self.is_nonuniform_y
 
         # Pressure / staggered nodes
-        self.xp = np.linspace(-p.xsize / 2 - dx / 2,
-                             p.xsize / 2 + dx / 2, Nx+1)       # (Nx+1,)
-        self.yp = np.linspace(-dy / 2, p.ysize + dy / 2, Ny+1)                # (Ny+1,)
+        self.xp = self._staggered_from_centers(self.x)
+        self.yp = self._staggered_from_centers(self.y)
 
 
         # Rotated coordinate helpers (kept for post-processing / plotting)

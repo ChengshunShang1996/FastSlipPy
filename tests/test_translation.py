@@ -44,3 +44,44 @@ def test_rigid_translation():
     assert np.max(np.abs(tauqs)) < 1e-12
 
     assert np.max(np.abs(sigmaqs)) < 1e-12
+
+
+def test_rigid_translation_nonuniform_grid():
+
+    params = ModelParameters(
+        xsize=1200.0,
+        ysize=1000.0,
+        Nx=51,
+        Ny=51,
+        x_stretch_enabled=True,
+        x_stretch_inner_size=300.0,
+        x_stretch_inner_points=21,
+        y_stretch_enabled=True,
+        y_stretch_inner_size=200.0,
+        y_stretch_inner_points=13,
+    )
+
+    grid = Grid(params)
+
+    ux = np.ones((params.Ny + 1, params.Nx)) * 1.234
+    uy = np.ones((params.Ny, params.Nx + 1)) * 2.345
+
+    tauqs, sigmaqs = StressCalUtil().compute_stress_fields(
+        uy=uy,
+        ux=ux,
+        dx=grid.dx,
+        dy=grid.dy,
+        lam=params.lam,
+        G=params.G,
+        cosa=grid.cosa,
+        sina=grid.sina,
+        Ny=params.Ny,
+        Nx=params.Nx,
+        x=grid.x,
+        y=grid.y,
+        xp=grid.xp,
+        yp=grid.yp,
+    )
+
+    assert np.max(np.abs(tauqs)) < 1e-12
+    assert np.max(np.abs(sigmaqs)) < 1e-12

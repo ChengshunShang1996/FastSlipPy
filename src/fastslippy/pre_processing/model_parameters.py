@@ -138,6 +138,15 @@ class ModelParameters:
     ysize: float = 1.0           # Vertical model size [m]
     Nx: int = 11                 # Horizontal grid points  (must be odd)
     Ny: int = 11                 # Vertical grid points    (must be odd)
+    x_stretch_enabled: bool = False
+    y_stretch_enabled: bool = False
+    x_stretch_inner_size: float = 0.0
+    y_stretch_inner_size: float = 0.0
+    x_stretch_inner_points: int = 0
+    y_stretch_inner_points: int = 0
+    x_stretch_power: int = 2
+    y_stretch_power: int = 2
+    allow_nonuniform_solver: bool = False
 
     # --- Material ---
     rho: float = 2650            # Rock density [kg/m³]
@@ -195,3 +204,33 @@ class ModelParameters:
         self.eta = self.G / 2 / self.cs
         assert self.Nx % 2 == 1, "Nx must be odd (fault at centre column)."
         assert self.Ny % 2 == 1, "Ny must be odd."
+        if self.x_stretch_enabled:
+            if not (0.0 < self.x_stretch_inner_size < self.xsize):
+                raise ValueError("x_stretch_inner_size must be in (0, xsize).")
+            if self.x_stretch_inner_points < 3 or self.x_stretch_inner_points >= self.Nx:
+                raise ValueError("x_stretch_inner_points must be in [3, Nx-1].")
+            if self.x_stretch_inner_points % 2 == 0:
+                raise ValueError("x_stretch_inner_points must be odd for symmetric x-stretch.")
+            if self.x_stretch_power < 1:
+                raise ValueError("x_stretch_power must be >= 1.")
+            dx_inner = self.x_stretch_inner_size / (self.x_stretch_inner_points - 1)
+            dx_mean = self.xsize / (self.Nx - 1)
+            if dx_inner > dx_mean:
+                raise ValueError(
+                    "x_stretch_inner_size/x_stretch_inner_points produces a coarser inner zone "
+                    "than the domain-average spacing."
+                )
+        if self.y_stretch_enabled:
+            if not (0.0 < self.y_stretch_inner_size < self.ysize):
+                raise ValueError("y_stretch_inner_size must be in (0, ysize).")
+            if self.y_stretch_inner_points < 2 or self.y_stretch_inner_points >= self.Ny:
+                raise ValueError("y_stretch_inner_points must be in [2, Ny-1].")
+            if self.y_stretch_power < 1:
+                raise ValueError("y_stretch_power must be >= 1.")
+            dy_inner = self.y_stretch_inner_size / (self.y_stretch_inner_points - 1)
+            dy_mean = self.ysize / (self.Ny - 1)
+            if dy_inner > dy_mean:
+                raise ValueError(
+                    "y_stretch_inner_size/y_stretch_inner_points produces a coarser inner zone "
+                    "than the domain-average spacing."
+                )
