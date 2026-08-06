@@ -64,6 +64,7 @@ class FastSlipPy:
         self.vy = np.zeros((Ny, Nx + 1))
         self.tauqs   = np.zeros((Ny, Nx))
         self.sigmaqs = np.zeros((Ny - 1, Nx - 1))
+        self.stress_calculator = StressCalUtil(prefer_numba=True)
 
         self.figure_creator = FigureCreator(self.output, self.grid)
 
@@ -202,14 +203,13 @@ class FastSlipPy:
             self.ux += self.vx * dt
 
             # ── compute stress ──
-            StressCalculator = StressCalUtil()
             if self.grid.is_nonuniform:
-                self.tauqs, self.sigmaqs = StressCalculator.compute_stress_fields(
+                self.tauqs, self.sigmaqs = self.stress_calculator.compute_stress_fields(
                     self.uy, self.ux, self.grid.dx, self.grid.dy,
                     p.lam, p.G, self.grid.cosa, self.grid.sina, Ny, Nx,
                     x=self.grid.x, y=self.grid.y, xp=self.grid.xp, yp=self.grid.yp)
             else:
-                self.tauqs, self.sigmaqs = StressCalculator.compute_stress_fields(
+                self.tauqs, self.sigmaqs = self.stress_calculator.compute_stress_fields(
                     self.uy, self.ux, self.grid.dx, self.grid.dy,
                     p.lam, p.G, self.grid.cosa, self.grid.sina, Ny, Nx)
 
@@ -217,10 +217,10 @@ class FastSlipPy:
             mid_l = (Nx - 1) // 2 - 1
             mid_r = (Nx - 1) // 2
             sigmal = np.concatenate([[self.sigmaqs[0, mid_l]],
-                                     StressCalculator._movmean_discard(self.sigmaqs[:, mid_l], 0),
+                                     self.stress_calculator._movmean_discard(self.sigmaqs[:, mid_l], 0),
                                      [self.sigmaqs[-1, mid_l]]])
             sigmar = np.concatenate([[self.sigmaqs[0, mid_r]],
-                                     StressCalculator._movmean_discard(self.sigmaqs[:, mid_r], 0),
+                                     self.stress_calculator._movmean_discard(self.sigmaqs[:, mid_r], 0),
                                      [self.sigmaqs[-1, mid_r]]])
             self.fault.sigma = self.stress.sigman0 - np.minimum(sigmal, sigmar)
 
