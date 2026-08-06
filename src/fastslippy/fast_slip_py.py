@@ -144,7 +144,7 @@ class FastSlipPy:
 
             # ── velocity solve (rate-and-state) ──
             mid = Nx // 2
-            self.fault.solve_slip_rate(self.tauqs[:, mid], self.stress, self.fric)
+            self.fault.solve_slip_rate_newton(self.tauqs[:, mid], self.stress, self.fric)
 
             # ── adaptive time step ──
             if p.case_type == "california":
