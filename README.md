@@ -108,7 +108,13 @@ Grid stretching options are also available in [model_parameters.py][model_parame
 - `x_stretch_inner_points`, `y_stretch_inner_points`
 - `x_stretch_power`, `y_stretch_power`
 
-By default, FastSlipPy uses a uniform grid. Solver/stress operators now use local spacing from the generated mesh so stretched coordinates can be used directly.
+By default, FastSlipPy uses a uniform grid.
+
+Stretched mesh support in the elastic solver is currently experimental and not yet fully equivalent to the C++ metric-form implementation. To run with stretched mesh anyway, set:
+
+- `allow_nonuniform_solver=True`
+
+If stretched mesh is enabled without this explicit opt-in, FastSlipPy now raises an error to prevent silently unreliable results.
 
 * **Output files**:
 

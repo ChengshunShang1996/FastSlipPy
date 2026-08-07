@@ -112,3 +112,53 @@ def test_constant_strain_interior_equilibrium():
     max_residual = np.max(np.abs(residual[interior_dofs]))
 
     assert max_residual < 1e-12
+
+
+def test_constant_strain_interior_equilibrium_nonuniform_mesh():
+
+    params = ModelParameters(
+        Nx=51,
+        Ny=51,
+        alpha=90.0,
+        xsize=1200.0,
+        ysize=1000.0,
+        x_stretch_enabled=True,
+        x_stretch_inner_size=300.0,
+        x_stretch_inner_points=21,
+        y_stretch_enabled=True,
+        y_stretch_inner_size=200.0,
+        y_stretch_inner_points=13,
+        allow_nonuniform_solver=True,
+    )
+
+    grid = Grid(params)
+    builder = MatrixBuilder(params, grid)
+    LH = builder.build_LH()
+
+    a = 1e-6
+    ux = a * grid.Xux
+    uy = np.zeros_like(grid.Xuy)
+
+    U = np.zeros(grid.N)
+    for ix in range(params.Nx + 1):
+        for iy in range(params.Ny + 1):
+            kux, kuy = builder._dofs(ix, iy, params.Ny)
+            if ix < params.Nx:
+                U[kux] = ux[iy, ix]
+            if iy < params.Ny:
+                U[kuy] = uy[iy, ix]
+
+    residual = LH @ U
+    interior_dofs = []
+    for ix in range(1, params.Nx - 1):
+        for iy in range(1, params.Ny - 1):
+            kux, kuy = builder._dofs(ix, iy, params.Ny)
+            if ix < params.Nx:
+                interior_dofs.append(kux)
+            if iy < params.Ny:
+                interior_dofs.append(kuy)
+
+    interior_dofs = np.array(interior_dofs)
+    max_residual = np.max(np.abs(residual[interior_dofs]))
+
+    assert max_residual < 1e-12

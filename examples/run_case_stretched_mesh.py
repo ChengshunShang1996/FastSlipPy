@@ -15,7 +15,8 @@ from fastslippy.pre_processing.model_parameters import ModelParameters
 
 class RunFastSlipPy(FastSlipPy):
     """
-    Example run with stretched mesh in both x and y directions.
+    Example run with stretched mesh in x direction (fault-normal) only.
+    Keep y uniform for direct visual comparison against uniform-mesh runs.
     """
 
     def run(self):
@@ -28,8 +29,8 @@ if __name__ == "__main__":
         alpha=90.0,
         xsize=1.0,
         ysize=1.0,
-        Nx=51,
-        Ny=51,
+        Nx=41,
+        Ny=41,
         Nt=10000,
         output_interval=50,
         checkpoint_interval=10000,
@@ -45,12 +46,13 @@ if __name__ == "__main__":
         flash_heating_option=False,
         x_stretch_enabled=True,
         y_stretch_enabled=False,
-        x_stretch_inner_size=0.2,
-        y_stretch_inner_size=0.2,
+        x_stretch_inner_size=0.5,
+        y_stretch_inner_size=0.5,
         x_stretch_inner_points=31,
-        y_stretch_inner_points=21,
+        y_stretch_inner_points=31,
         x_stretch_power=2,
         y_stretch_power=2,
+        allow_nonuniform_solver=True,
     )
 
     params.bc.left.ux.set_fixed()
