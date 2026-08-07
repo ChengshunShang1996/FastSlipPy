@@ -31,7 +31,7 @@ __all__         =["pre_processing","post_processing","solver","utilities"]
 
 __author__      = "Chengshun Shang (Utrecht University)"
 __copyright__   = "Copyright (C) 2026-present by Chengshun Shang"
-__version__     = "0.0.1"
+__version__     = "0.1.2"
 __license__     = "MIT License"
 __URL__         = 'https://github.com/ChengshunShang1996/FastSlipPy'
 __logo__        = '''
