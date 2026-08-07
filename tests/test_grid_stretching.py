@@ -14,6 +14,7 @@ import pytest
 
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.pre_processing.model_parameters import ModelParameters
+from fastslippy.solver.matrix_builder import MatrixBuilder
 
 
 def test_uniform_grid_remains_uniform():
@@ -64,3 +65,18 @@ def test_invalid_stretch_inner_zone_is_rejected():
             x_stretch_inner_size=700.0,
             x_stretch_inner_points=7,
         )
+
+
+def test_nonuniform_matrix_builder_requires_explicit_opt_in():
+    params = ModelParameters(
+        xsize=1200.0,
+        ysize=1000.0,
+        Nx=21,
+        Ny=11,
+        x_stretch_enabled=True,
+        x_stretch_inner_size=300.0,
+        x_stretch_inner_points=7,
+    )
+    grid = Grid(params)
+    with pytest.raises(ValueError, match="allow_nonuniform_solver=True"):
+        MatrixBuilder(params, grid)

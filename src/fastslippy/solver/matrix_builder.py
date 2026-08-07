@@ -11,6 +11,7 @@ __license__     = "MIT License"
 
 import numpy as np
 from scipy import sparse
+import warnings
 
 from fastslippy.pre_processing.model_parameters import ModelParameters, BCType
 from fastslippy.pre_processing.grid import Grid
@@ -27,6 +28,19 @@ class MatrixBuilder:
     def __init__(self, p: ModelParameters, grid: Grid):
         self.p    = p
         self.grid = grid
+        if grid.is_nonuniform:
+            if not p.allow_nonuniform_solver:
+                raise ValueError(
+                    "Nonuniform (stretched) mesh is enabled, but the nonuniform elastic operator "
+                    "is still experimental and not yet C++-equivalent. "
+                    "Set allow_nonuniform_solver=True to run it explicitly."
+                )
+            warnings.warn(
+                "allow_nonuniform_solver=True: stretched-mesh operator is experimental and may "
+                "produce inaccurate fields compared with the C++ implementation.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         self._is_uniform = not (grid.is_nonuniform_x or grid.is_nonuniform_y)
         self._precompute_local_steps()
         self._precompute_rhs_layout()
@@ -46,6 +60,21 @@ class MatrixBuilder:
         if idx >= coords.size - 1:
             return float(coords[-1] - coords[-2])
         return float(0.5 * (coords[idx + 1] - coords[idx - 1]))
+
+    @staticmethod
+    def _second_derivative_weights(coords: np.ndarray, idx: int):
+        """
+        Return (left, center, right, scale) for d2/dx2 on a nonuniform 1D grid.
+        The `scale` is the squared local mean spacing and is used to keep the row
+        scaling consistent with the legacy uniform formulation.
+        """
+        h_l = float(coords[idx] - coords[idx - 1])
+        h_r = float(coords[idx + 1] - coords[idx])
+        coeff_l = 2.0 / (h_l * (h_l + h_r))
+        coeff_c = -2.0 / (h_l * h_r)
+        coeff_r = 2.0 / (h_r * (h_l + h_r))
+        h_m = 0.5 * (h_l + h_r)
+        return coeff_l, coeff_c, coeff_r, h_m * h_m
 
     def _precompute_local_steps(self):
         p, g = self.p, self.grid
@@ -176,12 +205,23 @@ class MatrixBuilder:
                         add(kuy, kuy - 2*(Ny+1)*2 + 2,   cosa/4/dy_loc*dx_loc)
                     else:
                         # Interior bulk
-                        r2 = dx_loc*dx_loc / dy_loc/dy_loc * (lam + 2*G) / G
-                        add(kuy, kuy, -2 - 2*r2)
-                        add(kuy, kuy - (Ny+1)*2, 1)
-                        add(kuy, kuy + (Ny+1)*2, 1)
-                        add(kuy, kuy - 2,  r2)
-                        add(kuy, kuy + 2,  r2)
+                        if self._is_uniform:
+                            r2 = dx_loc*dx_loc / dy_loc/dy_loc * (lam + 2*G) / G
+                            add(kuy, kuy, -2 - 2*r2)
+                            add(kuy, kuy - (Ny+1)*2, 1)
+                            add(kuy, kuy + (Ny+1)*2, 1)
+                            add(kuy, kuy - 2,  r2)
+                            add(kuy, kuy + 2,  r2)
+                        else:
+                            cxl, cxc, cxr, sx = self._second_derivative_weights(g.xp, ix)
+                            cyl, cyc, cyr, _ = self._second_derivative_weights(g.y, iy)
+                            a2 = (lam + 2 * G) / G
+                            add(kuy, kuy, sx * (cxc + a2 * cyc))
+                            add(kuy, kuy - (Ny+1)*2, sx * cxl)
+                            add(kuy, kuy + (Ny+1)*2, sx * cxr)
+                            add(kuy, kuy - 2, sx * a2 * cyl)
+                            add(kuy, kuy + 2, sx * a2 * cyr)
+                            dx_loc = np.sqrt(sx)
                         c_val = cosa/dy_loc*dx_loc*(lam + 3*G)/G/4
                         add(kuy, kuy + (Ny+1)*2 - 2,   c_val)
                         add(kuy, kuy + (Ny+1)*2 + 2,  -c_val)
@@ -243,9 +283,16 @@ class MatrixBuilder:
                             raise ValueError(f"BC type: {p.bc.right.ux.type} is not supported for right boundary yet.")
                     elif ix == mid:
                         # Fault column – normal stress jump condition
-                        add(kux, kux,              -2*r_lam)
-                        add(kux, kux + (Ny+1)*2,   r_lam)
-                        add(kux, kux - (Ny+1)*2,   r_lam)
+                        if self._is_uniform:
+                            add(kux, kux,              -2*r_lam)
+                            add(kux, kux + (Ny+1)*2,   r_lam)
+                            add(kux, kux - (Ny+1)*2,   r_lam)
+                        else:
+                            cxl, cxc, cxr, sx = self._second_derivative_weights(g.x, ix)
+                            add(kux, kux, sx * r_lam * cxc)
+                            add(kux, kux + (Ny+1)*2, sx * r_lam * cxr)
+                            add(kux, kux - (Ny+1)*2, sx * r_lam * cxl)
+                            dx_loc = np.sqrt(sx)
                         fac = lam/G/dy_loc*dx_loc
                         add(kux, kuy,                    -fac)
                         add(kux, kuy + (Ny+1)*2,          fac)
@@ -253,11 +300,21 @@ class MatrixBuilder:
                         add(kux, kuy + (Ny+1)*2 - 2,     -fac)
                     else:
                         # Interior bulk
-                        add(kux, kux, -2*r_lam - 2*r2)
-                        add(kux, kux - (Ny+1)*2, r_lam)
-                        add(kux, kux + (Ny+1)*2, r_lam)
-                        add(kux, kux - 2, r2)
-                        add(kux, kux + 2, r2)
+                        if self._is_uniform:
+                            add(kux, kux, -2*r_lam - 2*r2)
+                            add(kux, kux - (Ny+1)*2, r_lam)
+                            add(kux, kux + (Ny+1)*2, r_lam)
+                            add(kux, kux - 2, r2)
+                            add(kux, kux + 2, r2)
+                        else:
+                            cxl, cxc, cxr, sx = self._second_derivative_weights(g.x, ix)
+                            cyl, cyc, cyr, _ = self._second_derivative_weights(g.yp, iy)
+                            add(kux, kux, sx * (r_lam * cxc + cyc))
+                            add(kux, kux - (Ny+1)*2, sx * r_lam * cxl)
+                            add(kux, kux + (Ny+1)*2, sx * r_lam * cxr)
+                            add(kux, kux - 2, sx * cyl)
+                            add(kux, kux + 2, sx * cyr)
+                            dx_loc = np.sqrt(sx)
                         c_val = cosa/dy_loc*dx_loc*(lam + 3*G)/G/4
                         add(kux, kux + (Ny+1)*2 - 2,   c_val)
                         add(kux, kux + (Ny+1)*2 + 2,  -c_val)
