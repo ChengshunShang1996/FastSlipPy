@@ -116,6 +116,16 @@ Stretched mesh support in the elastic solver is currently experimental and not y
 
 If stretched mesh is enabled without this explicit opt-in, FastSlipPy now raises an error to prevent silently unreliable results.
 
+For large-scale runs that hit memory limits during sparse LU factorization, you can switch to the iterative linear solver in [model_parameters.py][model_parameters]:
+
+- `linear_solver="iterative"`
+- `iterative_method="gmres"` (or `"bicgstab"`)
+- `ilu_drop_tol`, `ilu_fill_factor`, `iterative_rtol`, `iterative_maxiter`
+
+By default, `linear_solver="direct"` is kept for backward compatibility. If direct LU runs out of memory, FastSlipPy can automatically fall back to iterative mode with:
+
+- `fallback_to_iterative_on_oom=True`
+
 * **Output files**:
 
 The output files are generated in the specified output directory [output] and can be visualized using Paraview or Matplotlib. The Matplotlib visualization is used by default, and the Paraview visualization can be enabled by setting the parameter `output_vtk_option` to `True`.

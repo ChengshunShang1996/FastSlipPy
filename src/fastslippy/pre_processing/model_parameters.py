@@ -24,6 +24,14 @@ class FrictionLaw(Enum):
     RATE_STATE = "rate_state"
     SLIP_WEAKENING = "slip_weakening"
 
+class LinearSolver(str, Enum):
+    DIRECT = "direct"
+    ITERATIVE = "iterative"
+
+class IterativeMethod(str, Enum):
+    GMRES = "gmres"
+    BICGSTAB = "bicgstab"
+
 class BCType(str, Enum):
     FIXED = "fixed"
     FREE = "free"
@@ -183,6 +191,17 @@ class ModelParameters:
     checkpoint_interval: int = 1000
     output_vtk_option: bool = True
 
+    # --- Linear solver ---
+    linear_solver: LinearSolver = LinearSolver.DIRECT
+    iterative_method: IterativeMethod = IterativeMethod.GMRES
+    iterative_rtol: float = 1e-8
+    iterative_atol: float = 0.0
+    iterative_maxiter: int = 400
+    ilu_drop_tol: float = 1e-3
+    ilu_fill_factor: float = 10.0
+    ilu_permc_spec: str = "COLAMD"
+    fallback_to_iterative_on_oom: bool = True
+
     # --- Derived (computed in __post_init__) ---
     G: float = field(init=False)
     lam: float = field(init=False)   # First Lamé parameter (λ)
@@ -202,6 +221,30 @@ class ModelParameters:
             self.G = self.rho * self.cs ** 2
         self.lam = 2 * self.G * (1 + self.nu) / 3 / (1 - 2 * self.nu) - 2 / 3 * self.G
         self.eta = self.G / 2 / self.cs
+        solver_mode = self.linear_solver.value if isinstance(self.linear_solver, LinearSolver) else str(self.linear_solver).lower()
+        if solver_mode not in (LinearSolver.DIRECT.value, LinearSolver.ITERATIVE.value):
+            raise ValueError(
+                "linear_solver must be 'direct' or 'iterative'."
+            )
+        self.linear_solver = LinearSolver(solver_mode)
+
+        method = self.iterative_method.value if isinstance(self.iterative_method, IterativeMethod) else str(self.iterative_method).lower()
+        if method not in (IterativeMethod.GMRES.value, IterativeMethod.BICGSTAB.value):
+            raise ValueError("iterative_method must be 'gmres' or 'bicgstab'.")
+        self.iterative_method = IterativeMethod(method)
+
+        if self.iterative_rtol <= 0.0:
+            raise ValueError("iterative_rtol must be > 0.")
+        if self.iterative_atol < 0.0:
+            raise ValueError("iterative_atol must be >= 0.")
+        if self.iterative_maxiter < 1:
+            raise ValueError("iterative_maxiter must be >= 1.")
+        if self.ilu_drop_tol < 0.0:
+            raise ValueError("ilu_drop_tol must be >= 0.")
+        if self.ilu_fill_factor <= 0.0:
+            raise ValueError("ilu_fill_factor must be > 0.")
+        if not self.ilu_permc_spec:
+            raise ValueError("ilu_permc_spec must be a non-empty string.")
         assert self.Nx % 2 == 1, "Nx must be odd (fault at centre column)."
         assert self.Ny % 2 == 1, "Ny must be odd."
         if self.x_stretch_enabled:
