@@ -15,7 +15,7 @@ import sys
 import time
 import numpy as np
 
-from scipy.sparse.linalg import factorized
+from scipy.sparse.linalg import LinearOperator, bicgstab, factorized, gmres, spilu
 from typing import Optional
 from pathlib import Path
 
@@ -73,7 +73,57 @@ class FastSlipPy:
         LH = builder.build_LH()
         self.RH_builder = builder
         self.dPdt = dPdt
-        self._solve = factorized(LH.tocsc())   # sparse LU decomposition
+        LH_csc = LH.tocsc()
+        solver_mode = self.p.linear_solver.value
+        if solver_mode == "direct":
+            try:
+                self._solve = factorized(LH_csc)   # sparse LU decomposition
+            except MemoryError:
+                if not self.p.fallback_to_iterative_on_oom:
+                    raise
+                print("Direct sparse LU ran out of memory; falling back to iterative solver.")
+                self._setup_iterative_solver(LH_csc)
+            else:
+                return
+        else:
+            self._setup_iterative_solver(LH_csc)
+
+    def _setup_iterative_solver(self, lhs_matrix):
+        p = self.p
+        ilu = spilu(
+            lhs_matrix,
+            drop_tol=p.ilu_drop_tol,
+            fill_factor=p.ilu_fill_factor,
+            permc_spec=p.ilu_permc_spec,
+        )
+        preconditioner = LinearOperator(lhs_matrix.shape, matvec=ilu.solve)
+
+        def solve(rhs: np.ndarray) -> np.ndarray:
+            if p.iterative_method.value == "gmres":
+                solution, info = gmres(
+                    lhs_matrix,
+                    rhs,
+                    M=preconditioner,
+                    rtol=p.iterative_rtol,
+                    atol=p.iterative_atol,
+                    maxiter=p.iterative_maxiter,
+                )
+            else:
+                solution, info = bicgstab(
+                    lhs_matrix,
+                    rhs,
+                    M=preconditioner,
+                    rtol=p.iterative_rtol,
+                    atol=p.iterative_atol,
+                    maxiter=p.iterative_maxiter,
+                )
+            if info != 0:
+                raise RuntimeError(
+                    f"Iterative solver did not converge (method={p.iterative_method.value}, info={info})."
+                )
+            return solution
+
+        self._solve = solve
 
     def _build_ksi(self, p: ModelParameters, fric: FrictionalZones,
               sigman0: np.ndarray, dy) -> np.ndarray:
