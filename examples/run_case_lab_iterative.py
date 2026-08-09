@@ -46,11 +46,11 @@ if __name__ == "__main__":
         flash_heating_option=False,
         linear_solver="iterative",
         iterative_method="gmres",
-        iterative_rtol=1e-8,
+        iterative_rtol=1e-6,
         iterative_atol=0.0,
-        iterative_maxiter=400,
-        ilu_drop_tol=1e-3,
-        ilu_fill_factor=10.0,
+        iterative_maxiter=200,
+        ilu_drop_tol=1e-2,
+        ilu_fill_factor=8.0,
     )
 
     params.bc.left.ux.set_fixed()
