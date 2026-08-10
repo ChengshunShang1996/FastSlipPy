@@ -107,6 +107,9 @@ Grid stretching options are also available in [model_parameters.py][model_parame
 - `x_stretch_inner_size`, `y_stretch_inner_size`
 - `x_stretch_inner_points`, `y_stretch_inner_points`
 - `x_stretch_power`, `y_stretch_power`
+- `x_stretch_max_cell_size`, `y_stretch_max_cell_size` (optional caps for the largest stretched cells)
+
+If a max-cell-size cap is violated, FastSlipPy raises a `ValueError` and reports a suggested larger odd `Nx`/`Ny` while keeping the inner mesh point count unchanged.
 
 By default, FastSlipPy uses a uniform grid.
 

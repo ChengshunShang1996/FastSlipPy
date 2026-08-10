@@ -80,3 +80,79 @@ def test_nonuniform_matrix_builder_requires_explicit_opt_in():
     grid = Grid(params)
     with pytest.raises(ValueError, match="allow_nonuniform_solver=True"):
         MatrixBuilder(params, grid)
+
+
+def test_stretch_max_cell_size_caps_are_enforced():
+    base_params = ModelParameters(
+        xsize=1200.0,
+        ysize=1000.0,
+        Nx=21,
+        Ny=11,
+        x_stretch_enabled=True,
+        x_stretch_inner_size=300.0,
+        x_stretch_inner_points=7,
+        y_stretch_enabled=True,
+        y_stretch_inner_size=200.0,
+        y_stretch_inner_points=4,
+    )
+    base_grid = Grid(base_params)
+    max_dx = float(np.max(base_grid.dx_edges))
+    max_dy = float(np.max(base_grid.dy_edges))
+
+    capped_params_ok = ModelParameters(
+        xsize=1200.0,
+        ysize=1000.0,
+        Nx=21,
+        Ny=11,
+        x_stretch_enabled=True,
+        x_stretch_inner_size=300.0,
+        x_stretch_inner_points=7,
+        y_stretch_enabled=True,
+        y_stretch_inner_size=200.0,
+        y_stretch_inner_points=4,
+        x_stretch_max_cell_size=max_dx * 1.001,
+        y_stretch_max_cell_size=max_dy * 1.001,
+    )
+    Grid(capped_params_ok)
+
+    capped_params_fail = ModelParameters(
+        xsize=1200.0,
+        ysize=1000.0,
+        Nx=21,
+        Ny=11,
+        x_stretch_enabled=True,
+        x_stretch_inner_size=300.0,
+        x_stretch_inner_points=7,
+        y_stretch_enabled=True,
+        y_stretch_inner_size=200.0,
+        y_stretch_inner_points=4,
+        x_stretch_max_cell_size=max_dx * 0.9,
+    )
+    with pytest.raises(ValueError, match="x-stretch max cell size exceeded"):
+        Grid(capped_params_fail)
+
+
+def test_max_cell_size_error_reports_suggested_mesh_size():
+    base_params = ModelParameters(
+        xsize=1200.0,
+        ysize=1000.0,
+        Nx=21,
+        Ny=11,
+        x_stretch_enabled=True,
+        x_stretch_inner_size=300.0,
+        x_stretch_inner_points=7,
+    )
+    base_grid = Grid(base_params)
+    too_small_cap = float(np.max(base_grid.dx_edges)) * 0.9
+    params = ModelParameters(
+        xsize=1200.0,
+        ysize=1000.0,
+        Nx=21,
+        Ny=11,
+        x_stretch_enabled=True,
+        x_stretch_inner_size=300.0,
+        x_stretch_inner_points=7,
+        x_stretch_max_cell_size=too_small_cap,
+    )
+    with pytest.raises(ValueError, match=r"Suggested Nx=\d+"):
+        Grid(params)
