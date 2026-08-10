@@ -83,6 +83,10 @@ In the project folder, run cmd command:
 
 > pip install -e .
 
+For the future MPI backend, install the optional extra:
+
+> pip install -e .[mpi]
+
 #### Successful installation?
 
 Test it:
@@ -128,6 +132,12 @@ For large-scale runs that hit memory limits during sparse LU factorization, you 
 By default, `linear_solver="direct"` is kept for backward compatibility. If direct LU runs out of memory, FastSlipPy can automatically fall back to iterative mode with:
 
 - `fallback_to_iterative_on_oom=True`
+
+If you have an MPI-enabled PETSc/MUMPS stack, you can also set:
+
+- `solver_backend="mpi_direct"`
+
+This targets a future distributed direct-solve path for HPC runs.
 
 * **Output files**:
 

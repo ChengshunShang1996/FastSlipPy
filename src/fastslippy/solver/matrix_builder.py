@@ -123,7 +123,7 @@ class MatrixBuilder:
         self._case_type = case_type.lower()
         self._rh = np.zeros(self.grid.N, dtype=float)
 
-    def build_LH(self) -> sparse.csr_matrix:
+    def build_LH(self, row_range=None) -> sparse.csr_matrix:
         p, g = self.p, self.grid
         Nx, Ny, N = p.Nx, p.Ny, g.N
         lam, G   = p.lam, p.G
@@ -133,10 +133,16 @@ class MatrixBuilder:
         dx_xux = self._dx_xux
         dy_yux = self._dy_yux
 
+        if row_range is None:
+            row_start, row_end = 0, N
+        else:
+            row_start, row_end = row_range
+
         rows, cols, vals = [], [], []
 
         def add(r, c, v):
-            rows.append(r); cols.append(c); vals.append(v)
+            if row_start <= r < row_end:
+                rows.append(r - row_start); cols.append(c); vals.append(v)
 
         for ix in range(Nx+1):           # 0 … Nx  (MATLAB 1 … Nx+1)
             for iy in range(Ny+1):       # 0 … Ny
@@ -340,11 +346,14 @@ class MatrixBuilder:
                     # Neumann BC for ghost ux nodes at ix=Nx
                     add(kux, kux, 1)
 
-        LH = sparse.csr_matrix((vals, (rows, cols)), shape=(N, N))
+        if row_range is None:
+            LH = sparse.csr_matrix((vals, (rows, cols)), shape=(N, N))
+        else:
+            LH = sparse.csr_matrix((vals, (rows, cols)), shape=(row_end - row_start, N))
 
         return LH
 
-    def build_RH(self, dPdt: float, V: np.ndarray) -> np.ndarray:
+    def build_RH(self, dPdt: float, V: np.ndarray, row_range=None) -> np.ndarray:
         p, g = self.p, self.grid
         Nx, Ny = p.Nx, p.Ny
         G = p.G
@@ -355,8 +364,22 @@ class MatrixBuilder:
         dy_yuy = self._dy_yuy
         dx_xux = self._dx_xux
         dy_yux = self._dy_yux
-        RH = self._rh
-        RH.fill(0.0)
+        if row_range is None:
+            row_start, row_end = 0, self.grid.N
+            RH = self._rh
+            RH.fill(0.0)
+            def set_local(idx, value):
+                RH[idx] = value
+        else:
+            row_start, row_end = row_range
+            RH = np.zeros(row_end - row_start, dtype=float)
+            def set_local(idx, value):
+                if row_start <= idx < row_end:
+                    RH[idx - row_start] = value
+
+        def assign_many(indices, values):
+            for idx, value in zip(indices, values):
+                set_local(int(idx), float(value))
 
         is_lab = self._case_type == "lab"
         is_california = self._case_type == "california"
@@ -364,33 +387,33 @@ class MatrixBuilder:
 
         # --- uy block (exact branch priority) ---
         if p.bc.left.uy.type == BCType.VELOCITY:
-            RH[self._kuy[:, 0]] = p.bc.left.uy.value
+            assign_many(self._kuy[:, 0], np.full(self._kuy.shape[0], p.bc.left.uy.value))
         if p.bc.right.uy.type == BCType.VELOCITY:
-            RH[self._kuy[:, Nx]] = p.bc.right.uy.value
+            assign_many(self._kuy[:, Nx], np.full(self._kuy.shape[0], p.bc.right.uy.value))
 
         if p.bc.bottom.uy.type == BCType.VELOCITY:
             if is_lab:
-                RH[self._kuy[0, mid + 1:Nx]] = p.bc.bottom.uy.value
+                assign_many(self._kuy[0, mid + 1:Nx], np.full(self._kuy[0, mid + 1:Nx].size, p.bc.bottom.uy.value))
             else:
-                RH[self._kuy[0, self._ix_uy_bottom_top]] = p.bc.bottom.uy.value
+                assign_many(self._kuy[0, self._ix_uy_bottom_top], np.full(self._ix_uy_bottom_top.size, p.bc.bottom.uy.value))
 
         if p.bc.top.uy.type == BCType.VELOCITY:
             if is_lab:
-                RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.top.uy.value
+                assign_many(self._kuy[Ny - 1, mid + 1:Nx], np.full(self._kuy[Ny - 1, mid + 1:Nx].size, p.bc.top.uy.value))
             elif is_california:
-                RH[self._kuy[Ny - 1, 1:mid]] = -p.bc.top.uy.value
-                RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.top.uy.value
+                assign_many(self._kuy[Ny - 1, 1:mid], np.full(self._kuy[Ny - 1, 1:mid].size, -p.bc.top.uy.value))
+                assign_many(self._kuy[Ny - 1, mid + 1:Nx], np.full(self._kuy[Ny - 1, mid + 1:Nx].size, p.bc.top.uy.value))
             else:
-                RH[self._kuy[Ny - 1, self._ix_uy_bottom_top]] = p.bc.top.uy.value
+                assign_many(self._kuy[Ny - 1, self._ix_uy_bottom_top], np.full(self._ix_uy_bottom_top.size, p.bc.top.uy.value))
 
         iy_int = self._iy_int
         if is_california:
             cal_mask = y[iy_int] >= p.W_f
             fault_idx = self._kuy[iy_int, mid]
-            RH[fault_idx[~cal_mask]] = V[iy_int[~cal_mask]]
-            RH[fault_idx[cal_mask]] = p.loading.V_L
+            assign_many(fault_idx[~cal_mask], V[iy_int[~cal_mask]])
+            assign_many(fault_idx[cal_mask], np.full(np.count_nonzero(cal_mask), p.loading.V_L))
         else:
-            RH[self._kuy[iy_int, mid]] = V[iy_int]
+            assign_many(self._kuy[iy_int, mid], V[iy_int])
 
         if is_groningen:
             y_int = y[iy_int]
@@ -404,40 +427,40 @@ class MatrixBuilder:
             if np.any(mask_850):
                 for iy, dy_loc in zip(iy_int[mask_850], dy_uy_int[mask_850]):
                     ix = self._ix_uy_right
-                    RH[self._kuy[iy, ix]] = dPdt / dy_loc * dx_xuy[ix] * dx_xuy[ix] / G * sina
+                    assign_many(self._kuy[iy, ix], np.full(self._kuy[iy, ix].size, dPdt / dy_loc * dx_xuy[ix] * dx_xuy[ix] / G * sina))
             if np.any(mask_1050):
                 for iy, dy_loc in zip(iy_int[mask_1050], dy_uy_int[mask_1050]):
                     ix = self._ix_uy_right
-                    RH[self._kuy[iy, ix]] = -dPdt / dy_loc * dx_xuy[ix] * dx_xuy[ix] / G * sina
+                    assign_many(self._kuy[iy, ix], np.full(self._kuy[iy, ix].size, -dPdt / dy_loc * dx_xuy[ix] * dx_xuy[ix] / G * sina))
             if np.any(mask_800):
                 for iy, dy_loc in zip(iy_int[mask_800], dy_uy_int[mask_800]):
                     ix = self._ix_uy_left
-                    RH[self._kuy[iy, ix]] = dPdt / dy_loc * dx_xuy[ix] * dx_xuy[ix] / G * sina
+                    assign_many(self._kuy[iy, ix], np.full(self._kuy[iy, ix].size, dPdt / dy_loc * dx_xuy[ix] * dx_xuy[ix] / G * sina))
             if np.any(mask_1000):
                 for iy, dy_loc in zip(iy_int[mask_1000], dy_uy_int[mask_1000]):
                     ix = self._ix_uy_left
-                    RH[self._kuy[iy, ix]] = -dPdt / dy_loc * dx_xuy[ix] * dx_xuy[ix] / G * sina
+                    assign_many(self._kuy[iy, ix], np.full(self._kuy[iy, ix].size, -dPdt / dy_loc * dx_xuy[ix] * dx_xuy[ix] / G * sina))
 
         # --- ux block (exact branch priority) ---
         if p.bc.bottom.ux.type == BCType.VELOCITY:
-            RH[self._kux[0, self._ix_ux_all]] = p.bc.bottom.ux.value
+            assign_many(self._kux[0, self._ix_ux_all], np.full(self._ix_ux_all.size, p.bc.bottom.ux.value))
         if p.bc.top.ux.type == BCType.VELOCITY:
             if is_california:
-                RH[self._kux[Ny, :mid]] = -p.bc.top.ux.value
-                RH[self._kux[Ny, mid + 1:]] = p.bc.top.ux.value
+                assign_many(self._kux[Ny, :mid], np.full(self._kux[Ny, :mid].size, -p.bc.top.ux.value))
+                assign_many(self._kux[Ny, mid + 1:], np.full(self._kux[Ny, mid + 1:].size, p.bc.top.ux.value))
             else:
-                RH[self._kux[Ny, self._ix_ux_all]] = p.bc.top.ux.value
+                assign_many(self._kux[Ny, self._ix_ux_all], np.full(self._ix_ux_all.size, p.bc.top.ux.value))
 
         if p.bc.left.ux.type == BCType.VELOCITY:
-            RH[self._kux[1:Ny, 0]] = p.bc.left.ux.value
+            assign_many(self._kux[1:Ny, 0], np.full(self._kux[1:Ny, 0].size, p.bc.left.ux.value))
         if p.bc.right.ux.type == BCType.VELOCITY:
-            RH[self._kux[1:Ny, Nx - 1]] = p.bc.right.ux.value
+            assign_many(self._kux[1:Ny, Nx - 1], np.full(self._kux[1:Ny, Nx - 1].size, p.bc.right.ux.value))
 
         if is_groningen:
             y_int = y[iy_int]
             dx_mid = dx_xux[mid]
-            RH[self._kux[iy_int[(y_int > 800) & (y_int <= 850)], mid]] = -dPdt * dx_mid / G
-            RH[self._kux[iy_int[(y_int > 1000) & (y_int <= 1050)], mid]] = dPdt * dx_mid / G
+            assign_many(self._kux[iy_int[(y_int > 800) & (y_int <= 850)], mid], np.full(np.count_nonzero((y_int > 800) & (y_int <= 850)), -dPdt * dx_mid / G))
+            assign_many(self._kux[iy_int[(y_int > 1000) & (y_int <= 1050)], mid], np.full(np.count_nonzero((y_int > 1000) & (y_int <= 1050)), dPdt * dx_mid / G))
 
             dy_ux_int = dy_yux[iy_int]
             mask_1050 = y_int == 1050
@@ -448,17 +471,18 @@ class MatrixBuilder:
             if np.any(mask_1050):
                 for iy, dy_loc in zip(iy_int[mask_1050], dy_ux_int[mask_1050]):
                     ix = self._ix_ux_right
-                    RH[self._kux[iy, ix]] = dPdt / dy_loc * dx_xux[ix] * dx_xux[ix] / G * sina * cosa
+                    assign_many(self._kux[iy, ix], np.full(self._kux[iy, ix].size, dPdt / dy_loc * dx_xux[ix] * dx_xux[ix] / G * sina * cosa))
             if np.any(mask_1000):
                 for iy, dy_loc in zip(iy_int[mask_1000], dy_ux_int[mask_1000]):
                     ix = self._ix_ux_left
-                    RH[self._kux[iy, ix]] = dPdt / dy_loc * dx_xux[ix] * dx_xux[ix] / G * sina * cosa
+                    assign_many(self._kux[iy, ix], np.full(self._kux[iy, ix].size, dPdt / dy_loc * dx_xux[ix] * dx_xux[ix] / G * sina * cosa))
             if np.any(mask_850):
                 for iy, dy_loc in zip(iy_int[mask_850], dy_ux_int[mask_850]):
                     ix = self._ix_ux_right
-                    RH[self._kux[iy, ix]] = -dPdt / dy_loc * dx_xux[ix] * dx_xux[ix] / G * sina * cosa
+                    assign_many(self._kux[iy, ix], np.full(self._kux[iy, ix].size, -dPdt / dy_loc * dx_xux[ix] * dx_xux[ix] / G * sina * cosa))
             if np.any(mask_800):
                 for iy, dy_loc in zip(iy_int[mask_800], dy_ux_int[mask_800]):
                     ix = self._ix_ux_left
-                    RH[self._kux[iy, ix]] = -dPdt / dy_loc * dx_xux[ix] * dx_xux[ix] / G * sina * cosa
+                    assign_many(self._kux[iy, ix], np.full(self._kux[iy, ix].size, -dPdt / dy_loc * dx_xux[ix] * dx_xux[ix] / G * sina * cosa))
+
         return RH

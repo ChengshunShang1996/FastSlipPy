@@ -19,9 +19,18 @@ from scipy.sparse.linalg import LinearOperator, bicgstab, factorized, gmres, spi
 from typing import Optional
 from pathlib import Path
 
+try:
+    from mpi4py import MPI
+    from petsc4py import PETSc
+    MPI_PETSC_AVAILABLE = True
+except Exception:
+    MPI = None
+    PETSc = None
+    MPI_PETSC_AVAILABLE = False
+
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from fastslippy.pre_processing.model_parameters import ModelParameters, CaseType
+from fastslippy.pre_processing.model_parameters import ModelParameters, CaseType, SolverBackend
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.pre_processing.frictional_zones import FrictionalZones
 from fastslippy.solver.stress_state import StressState
@@ -70,9 +79,12 @@ class FastSlipPy:
 
     def _build_and_factor_LH(self, dPdt: float):
         builder = MatrixBuilder(self.p, self.grid)
-        LH = builder.build_LH()
         self.RH_builder = builder
         self.dPdt = dPdt
+        if self.p.solver_backend == SolverBackend.MPI_DIRECT:
+            self._setup_mpi_direct_solver(builder, dPdt)
+            return
+        LH = builder.build_LH()
         LH_csc = LH.tocsc()
         solver_mode = self.p.linear_solver.value
         if solver_mode == "direct":
@@ -122,6 +134,63 @@ class FastSlipPy:
                     f"Iterative solver did not converge (method={p.iterative_method.value}, info={info})."
                 )
             return solution
+
+        self._solve = solve
+
+    def _setup_mpi_direct_solver(self, builder, dPdt: float):
+        if not MPI_PETSC_AVAILABLE:
+            raise ImportError(
+                "solver_backend='mpi_direct' requires mpi4py and petsc4py with a PETSc "
+                "build linked against a direct sparse solver such as MUMPS."
+            )
+
+        comm = MPI.COMM_WORLD
+        rank = comm.Get_rank()
+        n_rows = self.grid.N
+        n_cols = self.grid.N
+        mat = PETSc.Mat().create(comm=PETSc.COMM_WORLD)
+        mat.setSizes([n_rows, n_cols])
+        mat.setType(PETSc.Mat.Type.AIJ)
+        mat.setUp()
+        rstart, rend = mat.getOwnershipRange()
+        self._mpi_row_range = (rstart, rend)
+        local = builder.build_LH(row_range=(rstart, rend)).tocsr()
+        mat.setValuesCSR(local.indptr, local.indices, local.data)
+        mat.assemblyBegin()
+        mat.assemblyEnd()
+
+        ksp = PETSc.KSP().create(comm=PETSc.COMM_WORLD)
+        ksp.setOperators(mat)
+        ksp.setType(PETSc.KSP.Type.PREONLY)
+        pc = ksp.getPC()
+        pc.setType(PETSc.PC.Type.LU)
+        try:
+            pc.setFactorSolverType("mumps")
+        except Exception as exc:
+            raise RuntimeError(
+                "PETSc direct backend is available, but MUMPS is not configured in this PETSc build."
+            ) from exc
+        ksp.setFromOptions()
+
+        def solve(rhs: np.ndarray) -> np.ndarray:
+            rhs = np.asarray(rhs, dtype=float)
+            if rhs.ndim != 1 or rhs.size != (rend - rstart):
+                raise ValueError(
+                    f"Expected local RHS of shape ({rend - rstart},), got {rhs.shape}."
+                )
+
+            b = PETSc.Vec().createMPI(n_rows, comm=PETSc.COMM_WORLD)
+            x = PETSc.Vec().createMPI(n_rows, comm=PETSc.COMM_WORLD)
+            b.setValues(np.arange(rstart, rend, dtype=int), rhs)
+            b.assemblyBegin()
+            b.assemblyEnd()
+
+            ksp.solve(b, x)
+            local_x = x.getArray().copy()
+            gathered = comm.allgather(local_x)
+            if rank == 0:
+                return np.concatenate(gathered)
+            return np.concatenate(gathered)
 
         self._solve = solve
 
@@ -231,7 +300,10 @@ class FastSlipPy:
                     p.bc.bottom.uy.set_velocity(1e-5)
 
             # ── update RH with current slip velocities ──
-            RH = self.RH_builder.build_RH(dPdt, self.fault.V)
+            if self.p.solver_backend == SolverBackend.MPI_DIRECT:
+                RH = self.RH_builder.build_RH(dPdt, self.fault.V, row_range=self._mpi_row_range)
+            else:
+                RH = self.RH_builder.build_RH(dPdt, self.fault.V)
             # Inject velocity BC at fault column
             #fault_rows = (np.arange(1, Ny - 1) + (Nx // 2) * (Ny + 1)) * 2 + 1
             #RH[fault_rows] = self.fault.V[1: Ny - 1]

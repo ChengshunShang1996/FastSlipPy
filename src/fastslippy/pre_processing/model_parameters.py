@@ -33,6 +33,10 @@ class IterativeMethod(str, Enum):
     GMRES = "gmres"
     BICGSTAB = "bicgstab"
 
+class SolverBackend(str, Enum):
+    SINGLE_NODE = "single_node"
+    MPI_DIRECT = "mpi_direct"
+
 class BCType(str, Enum):
     FIXED = "fixed"
     FREE = "free"
@@ -195,6 +199,7 @@ class ModelParameters:
     output_vtk_option: bool = True
 
     # --- Linear solver ---
+    solver_backend: SolverBackend = SolverBackend.SINGLE_NODE
     linear_solver: LinearSolver = LinearSolver.DIRECT
     iterative_method: IterativeMethod = IterativeMethod.GMRES
     iterative_rtol: float = 1e-8
@@ -230,6 +235,11 @@ class ModelParameters:
                 "linear_solver must be 'direct' or 'iterative'."
             )
         self.linear_solver = LinearSolver(solver_mode)
+
+        backend_mode = self.solver_backend.value if isinstance(self.solver_backend, SolverBackend) else str(self.solver_backend).lower()
+        if backend_mode not in (SolverBackend.SINGLE_NODE.value, SolverBackend.MPI_DIRECT.value):
+            raise ValueError("solver_backend must be 'single_node' or 'mpi_direct'.")
+        self.solver_backend = SolverBackend(backend_mode)
 
         method = self.iterative_method.value if isinstance(self.iterative_method, IterativeMethod) else str(self.iterative_method).lower()
         if method not in (IterativeMethod.GMRES.value, IterativeMethod.BICGSTAB.value):

@@ -13,8 +13,10 @@ import numpy as np
 import pytest
 
 import fastslippy.fast_slip_py as fast_slip_py_module
-from fastslippy.fast_slip_py import FastSlipPy
+from fastslippy.fast_slip_py import FastSlipPy, MPI_PETSC_AVAILABLE
 from fastslippy.pre_processing.model_parameters import ModelParameters
+from fastslippy.pre_processing.grid import Grid
+from fastslippy.solver.matrix_builder import MatrixBuilder
 
 
 @pytest.mark.filterwarnings("ignore:divide by zero encountered in divide:RuntimeWarning")
@@ -73,3 +75,37 @@ def test_direct_solver_can_fallback_to_iterative_when_lu_oom(monkeypatch: pytest
     solution = model._solve(rhs)
 
     assert np.all(np.isfinite(solution))
+
+
+def test_mpi_direct_backend_solves_or_skips():
+    if not MPI_PETSC_AVAILABLE:
+        pytest.skip("mpi4py/petsc4py not available in this environment")
+
+    params = ModelParameters(
+        case_type="lab",
+        Nx=11,
+        Ny=11,
+        xsize=1.0,
+        ysize=1.0,
+        solver_backend="mpi_direct",
+    )
+    model = FastSlipPy(params=params, output_dir="output")
+    model._build_and_factor_LH(params.loading.dPdt_pre)
+    rhs = model.RH_builder.build_RH(params.loading.dPdt_pre, model.fault.V)
+    solution = model._solve(rhs)
+    assert np.all(np.isfinite(solution))
+
+
+def test_row_range_assembly_matches_full_matrix_and_rhs():
+    params = ModelParameters(case_type="lab", Nx=11, Ny=11, xsize=1.0, ysize=1.0)
+    grid = Grid(params)
+    builder = MatrixBuilder(params, grid)
+    model = FastSlipPy(params=params, output_dir="output")
+    full_lh = builder.build_LH()
+    row_range = (10, 30)
+    local_lh = builder.build_LH(row_range=row_range)
+    np.testing.assert_allclose(local_lh.toarray(), full_lh[row_range[0]:row_range[1], :].toarray())
+
+    full_rh = builder.build_RH(params.loading.dPdt_pre, model.fault.V)
+    local_rh = builder.build_RH(params.loading.dPdt_pre, model.fault.V, row_range=row_range)
+    np.testing.assert_allclose(local_rh, full_rh[row_range[0]:row_range[1]])
