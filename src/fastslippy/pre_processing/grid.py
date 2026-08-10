@@ -74,6 +74,47 @@ class Grid:
         staggered[-1] = nodes[-1] + 0.5 * (nodes[-1] - nodes[-2])
         return staggered
 
+    @classmethod
+    def _max_cell_for_axis(cls, length: float, n_points: int, inner_length: float,
+                           inner_points: int, power: int, symmetric: bool) -> float:
+        if symmetric:
+            coords = cls._symmetric_piecewise_stretch_axis(
+                length=length,
+                n_points=n_points,
+                inner_length=inner_length,
+                inner_points=inner_points,
+                power=power,
+            )
+        else:
+            coords = cls._piecewise_stretch_axis(
+                length=length,
+                n_points=n_points,
+                inner_length=inner_length,
+                inner_points=inner_points,
+                power=power,
+            )
+        return float(np.max(np.diff(coords)))
+
+    @classmethod
+    def _suggest_points_for_max_cell(cls, *, length: float, inner_length: float, inner_points: int,
+                                     power: int, max_cell_size: float, symmetric: bool,
+                                     current_points: int) -> int:
+        min_points = max(current_points, inner_points + 2)
+        if min_points % 2 == 0:
+            min_points += 1
+        for n_points in range(min_points, 10001, 2):
+            max_cell = cls._max_cell_for_axis(
+                length=length,
+                n_points=n_points,
+                inner_length=inner_length,
+                inner_points=inner_points,
+                power=power,
+                symmetric=symmetric,
+            )
+            if max_cell <= max_cell_size:
+                return n_points
+        return -1
+
     def __init__(self, p: ModelParameters):
         
         self.p = p
@@ -106,6 +147,50 @@ class Grid:
 
         self.dx_edges = np.diff(self.x)
         self.dy_edges = np.diff(self.y)
+        if p.x_stretch_enabled and p.x_stretch_max_cell_size is not None:
+            max_dx = float(np.max(self.dx_edges))
+            if max_dx > p.x_stretch_max_cell_size:
+                suggested_nx = self._suggest_points_for_max_cell(
+                    length=p.xsize,
+                    inner_length=p.x_stretch_inner_size,
+                    inner_points=p.x_stretch_inner_points,
+                    power=p.x_stretch_power,
+                    max_cell_size=p.x_stretch_max_cell_size,
+                    symmetric=True,
+                    current_points=p.Nx,
+                )
+                suggestion = (
+                    f" Suggested Nx={suggested_nx} (or larger odd value) while keeping "
+                    f"x_stretch_inner_points={p.x_stretch_inner_points}."
+                    if suggested_nx > 0
+                    else " No feasible Nx suggestion found up to 10001 points."
+                )
+                raise ValueError(
+                    f"x-stretch max cell size exceeded: max(dx)={max_dx:.6g} > "
+                    f"x_stretch_max_cell_size={p.x_stretch_max_cell_size:.6g}.{suggestion}"
+                )
+        if p.y_stretch_enabled and p.y_stretch_max_cell_size is not None:
+            max_dy = float(np.max(self.dy_edges))
+            if max_dy > p.y_stretch_max_cell_size:
+                suggested_ny = self._suggest_points_for_max_cell(
+                    length=p.ysize,
+                    inner_length=p.y_stretch_inner_size,
+                    inner_points=p.y_stretch_inner_points,
+                    power=p.y_stretch_power,
+                    max_cell_size=p.y_stretch_max_cell_size,
+                    symmetric=False,
+                    current_points=p.Ny,
+                )
+                suggestion = (
+                    f" Suggested Ny={suggested_ny} (or larger odd value) while keeping "
+                    f"y_stretch_inner_points={p.y_stretch_inner_points}."
+                    if suggested_ny > 0
+                    else " No feasible Ny suggestion found up to 10001 points."
+                )
+                raise ValueError(
+                    f"y-stretch max cell size exceeded: max(dy)={max_dy:.6g} > "
+                    f"y_stretch_max_cell_size={p.y_stretch_max_cell_size:.6g}.{suggestion}"
+                )
         self.dx = float(np.mean(self.dx_edges))
         self.dy = float(np.mean(self.dy_edges))
         self.dy_fault = np.gradient(self.y)

@@ -29,7 +29,7 @@ if __name__ == "__main__":
         alpha=90.0,
         xsize=1.0,
         ysize=1.0,
-        Nx=41,
+        Nx=51,
         Ny=41,
         Nt=10000,
         output_interval=50,
@@ -52,6 +52,8 @@ if __name__ == "__main__":
         y_stretch_inner_points=31,
         x_stretch_power=2,
         y_stretch_power=2,
+        x_stretch_max_cell_size=0.05,
+        y_stretch_max_cell_size=0.05,
         allow_nonuniform_solver=True,
     )
 

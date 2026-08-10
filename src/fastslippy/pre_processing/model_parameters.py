@@ -13,6 +13,7 @@ import numpy as np
 
 from enum import Enum
 from dataclasses import dataclass, field
+from typing import Optional
 from fastslippy.pre_processing.layer_parameters import Layer, LayerParameters
 
 class CaseType(Enum):
@@ -154,6 +155,8 @@ class ModelParameters:
     y_stretch_inner_points: int = 0
     x_stretch_power: int = 2
     y_stretch_power: int = 2
+    x_stretch_max_cell_size: Optional[float] = None
+    y_stretch_max_cell_size: Optional[float] = None
     allow_nonuniform_solver: bool = False
 
     # --- Material ---
@@ -263,6 +266,8 @@ class ModelParameters:
                     "x_stretch_inner_size/x_stretch_inner_points produces a coarser inner zone "
                     "than the domain-average spacing."
                 )
+            if self.x_stretch_max_cell_size is not None and self.x_stretch_max_cell_size <= 0.0:
+                raise ValueError("x_stretch_max_cell_size must be > 0 when provided.")
         if self.y_stretch_enabled:
             if not (0.0 < self.y_stretch_inner_size < self.ysize):
                 raise ValueError("y_stretch_inner_size must be in (0, ysize).")
@@ -277,3 +282,5 @@ class ModelParameters:
                     "y_stretch_inner_size/y_stretch_inner_points produces a coarser inner zone "
                     "than the domain-average spacing."
                 )
+            if self.y_stretch_max_cell_size is not None and self.y_stretch_max_cell_size <= 0.0:
+                raise ValueError("y_stretch_max_cell_size must be > 0 when provided.")

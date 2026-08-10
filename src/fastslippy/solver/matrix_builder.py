@@ -32,12 +32,12 @@ class MatrixBuilder:
             if not p.allow_nonuniform_solver:
                 raise ValueError(
                     "Nonuniform (stretched) mesh is enabled, but the nonuniform elastic operator "
-                    "is still experimental and not yet C++-equivalent. "
+                    "is still experimental. "
                     "Set allow_nonuniform_solver=True to run it explicitly."
                 )
             warnings.warn(
                 "allow_nonuniform_solver=True: stretched-mesh operator is experimental and may "
-                "produce inaccurate fields compared with the C++ implementation.",
+                "produce inaccurate fields.",
                 RuntimeWarning,
                 stacklevel=2,
             )
