@@ -155,7 +155,10 @@ class FastSlipPy:
         rstart, rend = mat.getOwnershipRange()
         self._mpi_row_range = (rstart, rend)
         local = builder.build_LH(row_range=(rstart, rend)).tocsr()
-        mat.setValuesCSR(local.indptr, local.indices, local.data)
+        petsc_int = np.dtype(PETSc.IntType)
+        local_indptr = np.asarray(local.indptr, dtype=petsc_int)
+        local_indices = np.asarray(local.indices, dtype=petsc_int)
+        mat.setValuesCSR(local_indptr, local_indices, local.data)
         mat.assemblyBegin()
         mat.assemblyEnd()
 
@@ -181,7 +184,8 @@ class FastSlipPy:
 
             b = PETSc.Vec().createMPI(n_rows, comm=PETSc.COMM_WORLD)
             x = PETSc.Vec().createMPI(n_rows, comm=PETSc.COMM_WORLD)
-            b.setValues(np.arange(rstart, rend, dtype=int), rhs)
+            owned_rows = np.arange(rstart, rend, dtype=petsc_int)
+            b.setValues(owned_rows, rhs)
             b.assemblyBegin()
             b.assemblyEnd()
 
