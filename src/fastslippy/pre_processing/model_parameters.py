@@ -203,7 +203,7 @@ class ModelParameters:
     ilu_drop_tol: float = 1e-3
     ilu_fill_factor: float = 10.0
     ilu_permc_spec: str = "COLAMD"
-    fallback_to_iterative_on_oom: bool = True
+    fallback_to_iterative_on_oom: bool = False
 
     # --- Derived (computed in __post_init__) ---
     G: float = field(init=False)
