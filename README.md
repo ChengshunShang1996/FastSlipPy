@@ -113,7 +113,7 @@ If a max-cell-size cap is violated, FastSlipPy raises a `ValueError` and reports
 
 By default, FastSlipPy uses a uniform grid.
 
-Stretched mesh support in the elastic solver is currently experimental and not yet fully equivalent to the C++ metric-form implementation. To run with stretched mesh anyway, set:
+Stretched mesh support in the elastic solver is currently experimental. To run with stretched mesh anyway, set:
 
 - `allow_nonuniform_solver=True`
 
