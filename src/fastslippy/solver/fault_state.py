@@ -188,9 +188,9 @@ class FaultState:
                         f"f(hi)={equation(hi):.3e}"
                     )
         
-        if p.case_type == "california":
-            start_idx = int(p.W_f // (p.ysize / (p.Ny - 1)) + 1)
-            self.V[start_idx : p.Ny] = p.loading.V_L
+        #if p.case_type == "california":
+        #    start_idx = int(p.W_f // (p.ysize / (p.Ny - 1)) + 1)
+        #    self.V[start_idx : p.Ny] = -1 * p.loading.V_L #Tips: The California benchmark uses a negative loading velocity for a normal fault. This is a specific boundary condition for the California case.
 
         self.V = np.maximum(self.V, 1e-40)
 
@@ -291,9 +291,9 @@ class FaultState:
                     self.V[iy] = np.exp(np.clip(logV, -92.1, 11.5))
 
         # 5. California benchmark loading boundary condition
-        if p.case_type == "california":
-            start_idx = int(p.W_f // (p.ysize / (p.Ny - 1)) + 1)
-            self.V[start_idx : p.Ny] = p.loading.V_L
+        #if p.case_type == "california":
+        #    start_idx = int(p.W_f // (p.ysize / (p.Ny - 1)) + 1)
+        #    self.V[start_idx : p.Ny] = -1 * p.loading.V_L #Tips: The California benchmark uses a negative loading velocity for a normal fault. This is a specific boundary condition for the California case.
 
         # 6. Apply floor truncation and update ghost cells
         self.V = np.maximum(self.V, 1e-40)
