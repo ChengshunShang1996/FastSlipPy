@@ -422,7 +422,7 @@ class MatrixBuilder:
         if p.bc.bottom.ux.type == BCType.VELOCITY:
             RH[self._kux[0, self._ix_ux_all]] = p.bc.bottom.ux.value
         if p.bc.top.ux.type == BCType.VELOCITY:
-            if is_california:
+            if is_california: #TODO: should be removed later, as it is not used
                 RH[self._kux[Ny, :mid]] = -p.bc.top.ux.value
                 RH[self._kux[Ny, mid + 1:]] = p.bc.top.ux.value
             else:
