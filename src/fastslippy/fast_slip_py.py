@@ -272,7 +272,10 @@ class FastSlipPy:
             sigmar = np.concatenate([[self.sigmaqs[0, mid_r]],
                                      self.stress_calculator._movmean_discard(self.sigmaqs[:, mid_r], 0),
                                      [self.sigmaqs[-1, mid_r]]])
-            self.fault.sigma = self.stress.sigman0 - np.minimum(sigmal, sigmar)
+            if p.case_type == "california":
+                self.fault.sigma = self.stress.sigman0 + np.minimum(sigmal, sigmar) # only works for normal fault of California benchmark
+            else:
+                self.fault.sigma = self.stress.sigman0 - np.minimum(sigmal, sigmar)
 
             # ── pressure update ──
             if p.case_type == "groningen":
