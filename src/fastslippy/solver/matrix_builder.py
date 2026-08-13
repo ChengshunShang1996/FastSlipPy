@@ -388,7 +388,7 @@ class MatrixBuilder:
             cal_mask = y[iy_int] >= p.W_f
             fault_idx = self._kuy[iy_int, mid]
             RH[fault_idx[~cal_mask]] = V[iy_int[~cal_mask]]
-            RH[fault_idx[cal_mask]] = -1 * p.loading.V_L
+            RH[fault_idx[cal_mask]] = p.loading.V_L
         else:
             RH[self._kuy[iy_int, mid]] = V[iy_int]
 
