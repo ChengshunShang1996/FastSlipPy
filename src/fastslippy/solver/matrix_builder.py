@@ -31,16 +31,9 @@ class MatrixBuilder:
         if grid.is_nonuniform:
             if not p.allow_nonuniform_solver:
                 raise ValueError(
-                    "Nonuniform (stretched) mesh is enabled, but the nonuniform elastic operator "
-                    "is still experimental. "
-                    "Set allow_nonuniform_solver=True to run it explicitly."
+                    "Nonuniform (stretched) mesh is enabled, "
+                    "please set allow_nonuniform_solver=True to run it explicitly."
                 )
-            warnings.warn(
-                "allow_nonuniform_solver=True: stretched-mesh operator is experimental and may "
-                "produce inaccurate fields.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
         self._is_uniform = not (grid.is_nonuniform_x or grid.is_nonuniform_y)
         self._precompute_local_steps()
         self._precompute_rhs_layout()
@@ -89,10 +82,10 @@ class MatrixBuilder:
             self._dy_yux = np.full(Ny + 1, dy)
             return
 
-        self._dx_xuy = np.array([self._local_step(g.xp, ix) for ix in range(Nx + 1)], dtype=float)
-        self._dy_yuy = np.array([self._local_step(g.y, iy) for iy in range(Ny)], dtype=float)
-        self._dx_xux = np.array([self._local_step(g.x, ix) for ix in range(Nx)], dtype=float)
-        self._dy_yux = np.array([self._local_step(g.yp, iy) for iy in range(Ny + 1)], dtype=float)
+        self._dx_xuy = np.array(g.metric_xp, dtype=float)
+        self._dy_yuy = np.array(g.metric_y, dtype=float)
+        self._dx_xux = np.array(g.metric_x, dtype=float)
+        self._dy_yux = np.array(g.metric_yp, dtype=float)
 
     def _precompute_rhs_layout(self):
         p = self.p

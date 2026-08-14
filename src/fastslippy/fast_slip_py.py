@@ -51,7 +51,7 @@ class FastSlipPy:
         # Initial stress
         self.stress = StressState(self.p, self.grid.y)
         # Fault state
-        self.fault  = FaultState(self.p, self.stress, self.fric)
+        self.fault  = FaultState(self.p, self.stress, self.fric, fault_y=self.grid.y)
         # ksi for adaptive dt
         self.ksi    = self._build_ksi(self.p, self.fric, self.stress.sigman0, self.grid.dy_fault)
 
@@ -145,6 +145,23 @@ class FastSlipPy:
         ksi = np.where(k3 > 0, k4, k5)
         return ksi
 
+    def _select_adaptive_fault_window(self):
+        Ny = self.p.Ny
+        interior_start = 1
+        interior_stop = Ny - 1
+        if self.p.case_type == "california":
+            start_idx = self.fault.california_loading_start_idx()
+            upper = min(max(start_idx, interior_start), interior_stop)
+            if upper > interior_start:
+                return (
+                    self.fault.V[interior_start:upper],
+                    self.ksi[interior_start:upper],
+                )
+        return (
+            self.fault.V[interior_start:interior_stop],
+            self.ksi[interior_start:interior_stop],
+        )
+
     def before_run(self):
         pass
     
@@ -197,13 +214,7 @@ class FastSlipPy:
             self.fault.solve_slip_rate_newton(self.tauqs[:, mid], self.stress, self.fric)
 
             # ── adaptive time step ──
-            if p.case_type == "california":
-                mid_idx = int(p.W_f // (p.ysize / (p.Ny - 1)))
-                V_inner = self.fault.V[1: mid_idx]
-                ksi_inner = self.ksi[1: mid_idx]
-            else:
-                V_inner = self.fault.V[1: Ny - 1]
-                ksi_inner = self.ksi[1: Ny - 1]
+            V_inner, ksi_inner = self._select_adaptive_fault_window()
             dt_cand = np.min(ksi_inner * p.L / V_inner)
             dt_cand = max(dt_cand, 1e-150)
             dt      = min(min(1.2 * dt, dt_cand), dt_max)

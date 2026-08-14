@@ -43,6 +43,33 @@ class Grid:
             out[outer] = b * s[outer] + (length - b) * np.power(chi, power)
         return out
 
+    @staticmethod
+    def _piecewise_stretch_metric(length: float, n_points: int, inner_length: float,
+                                  inner_points: int, power: int,
+                                  index_positions: np.ndarray) -> np.ndarray:
+        """
+        Analytic local spacing dx/dj for the piecewise stretch map x(j), where j is
+        the grid index coordinate (node spacing is one index unit).
+        """
+        n_total = n_points - 1
+        n_inner = inner_points - 1
+        if n_inner >= n_total:
+            return np.full_like(index_positions, length / n_total, dtype=float)
+
+        sb = n_inner / n_total
+        b = n_total * inner_length / n_inner
+        s = np.clip(np.asarray(index_positions, dtype=float) / n_total, 0.0, 1.0)
+
+        metric = np.empty_like(s, dtype=float)
+        inner = s <= sb
+        metric[inner] = b / n_total
+        if np.any(~inner):
+            chi = (s[~inner] - sb) / (1.0 - sb)
+            metric[~inner] = (
+                b + (length - b) * power * np.power(chi, power - 1) / (1.0 - sb)
+            ) / n_total
+        return metric
+
     @classmethod
     def _symmetric_piecewise_stretch_axis(cls, length: float, n_points: int, inner_length: float,
                                           inner_points: int, power: int) -> np.ndarray:
@@ -62,6 +89,28 @@ class Grid:
             power=power,
         )
         return np.concatenate((-positive[:0:-1], positive))
+
+    @classmethod
+    def _symmetric_piecewise_stretch_metric(cls, length: float, n_points: int, inner_length: float,
+                                            inner_points: int, power: int,
+                                            index_positions: np.ndarray) -> np.ndarray:
+        """
+        Analytic local spacing dx/dj for the symmetric x(j) map around the centre.
+        """
+        half_intervals = (n_points - 1) // 2
+        half_points = half_intervals + 1
+        inner_half_length = inner_length / 2.0
+        inner_half_points = (inner_points + 1) // 2
+        center = float(half_intervals)
+        mirrored = np.abs(np.asarray(index_positions, dtype=float) - center)
+        return cls._piecewise_stretch_metric(
+            length=length / 2.0,
+            n_points=half_points,
+            inner_length=inner_half_length,
+            inner_points=inner_half_points,
+            power=power,
+            index_positions=mirrored,
+        )
 
     @staticmethod
     def _staggered_from_centers(nodes: np.ndarray) -> np.ndarray:
@@ -197,6 +246,48 @@ class Grid:
         self.is_nonuniform_x = not np.allclose(self.dx_edges, self.dx_edges[0])
         self.is_nonuniform_y = not np.allclose(self.dy_edges, self.dy_edges[0])
         self.is_nonuniform = self.is_nonuniform_x or self.is_nonuniform_y
+
+        if p.x_stretch_enabled:
+            self.metric_x = self._symmetric_piecewise_stretch_metric(
+                length=p.xsize,
+                n_points=Nx,
+                inner_length=p.x_stretch_inner_size,
+                inner_points=p.x_stretch_inner_points,
+                power=p.x_stretch_power,
+                index_positions=np.arange(Nx, dtype=float),
+            )
+            self.metric_xp = self._symmetric_piecewise_stretch_metric(
+                length=p.xsize,
+                n_points=Nx,
+                inner_length=p.x_stretch_inner_size,
+                inner_points=p.x_stretch_inner_points,
+                power=p.x_stretch_power,
+                index_positions=np.arange(Nx + 1, dtype=float) - 0.5,
+            )
+        else:
+            self.metric_x = np.full(Nx, self.dx, dtype=float)
+            self.metric_xp = np.full(Nx + 1, self.dx, dtype=float)
+
+        if p.y_stretch_enabled:
+            self.metric_y = self._piecewise_stretch_metric(
+                length=p.ysize,
+                n_points=Ny,
+                inner_length=p.y_stretch_inner_size,
+                inner_points=p.y_stretch_inner_points,
+                power=p.y_stretch_power,
+                index_positions=np.arange(Ny, dtype=float),
+            )
+            self.metric_yp = self._piecewise_stretch_metric(
+                length=p.ysize,
+                n_points=Ny,
+                inner_length=p.y_stretch_inner_size,
+                inner_points=p.y_stretch_inner_points,
+                power=p.y_stretch_power,
+                index_positions=np.arange(Ny + 1, dtype=float) - 0.5,
+            )
+        else:
+            self.metric_y = np.full(Ny, self.dy, dtype=float)
+            self.metric_yp = np.full(Ny + 1, self.dy, dtype=float)
 
         # Pressure / staggered nodes
         self.xp = self._staggered_from_centers(self.x)
