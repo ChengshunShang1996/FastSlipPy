@@ -10,6 +10,7 @@ __license__     = "MIT License"
 #/////////////////////////////////////////////////
 
 import numpy as np
+from typing import Optional
 from scipy.optimize import brentq
 
 from fastslippy.pre_processing.model_parameters import ModelParameters
@@ -28,9 +29,10 @@ class FaultState:
     """
 
     def __init__(self, p: ModelParameters, stress: StressState,
-                 fric: FrictionalZones):
+                 fric: FrictionalZones, fault_y: Optional[np.ndarray] = None):
         self.p = p
         Ny = p.Ny
+        self._fault_y = None if fault_y is None else np.asarray(fault_y, dtype=float)
         self.U     = np.zeros(Ny)
         self.V     = np.full(Ny, p.Vi)
         if p.case_type == "groningen" or p.case_type == "california":
@@ -45,6 +47,17 @@ class FaultState:
             self.theta = np.full(p.Ny, p.L / p.V0)
         self.sigma = stress.sigman0.copy()
         self.tau   = stress.tau0 - p.eta * self.V
+
+    def california_loading_start_idx(self) -> int:
+        """
+        Return the first fault-node index where y >= W_f.
+        """
+        p = self.p
+        if self._fault_y is not None:
+            idx = int(np.searchsorted(self._fault_y, p.W_f, side="left"))
+            return int(np.clip(idx, 0, p.Ny))
+        uniform_y = np.linspace(0.0, p.ysize, p.Ny)
+        return int(np.searchsorted(uniform_y, p.W_f, side="left"))
 
     def solve_slip_rate_1(self, tauqs_col: np.ndarray, stress: StressState,
                         fric: FrictionalZones):
@@ -189,7 +202,7 @@ class FaultState:
                     )
         
         if p.case_type == "california":
-            start_idx = int(p.W_f // (p.ysize / (p.Ny - 1)) + 1)
+            start_idx = self.california_loading_start_idx()
             self.V[start_idx : p.Ny] = -1 * p.loading.V_L 
 
         self.V = np.maximum(self.V, 1e-40)
@@ -292,7 +305,7 @@ class FaultState:
 
         # 5. California benchmark loading boundary condition
         if p.case_type == "california":
-            start_idx = int(p.W_f // (p.ysize / (p.Ny - 1)) + 1)
+            start_idx = self.california_loading_start_idx()
             self.V[start_idx : p.Ny] =  p.loading.V_L
 
         # 6. Apply floor truncation and update ghost cells
