@@ -38,6 +38,7 @@ class BCType(str, Enum):
     FREE = "free"
     VELOCITY = "velocity"
     TRACTION = "traction"
+    TRACTION_FREE = "traction_free"
 
 @dataclass
 class DirectionBC:
@@ -61,6 +62,10 @@ class DirectionBC:
         self.type = BCType.TRACTION
         self.value = value
 
+    def set_traction_free(self):
+        self.type = BCType.TRACTION_FREE
+        self.value = 0.0
+
 @dataclass
 class BoundaryFace:
 
@@ -74,6 +79,10 @@ class BoundaryFace:
     def set_free(self):
         self.ux.set_free()
         self.uy.set_free()
+
+    def set_traction_free(self):
+        self.ux.set_traction_free()
+        self.uy.set_traction_free()
 
     def set_velocity_x(self, value: float):
         self.ux.set_velocity(value)

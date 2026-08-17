@@ -161,6 +161,20 @@ class MatrixBuilder:
                             add(kuy, kuy, 1);  add(kuy, kuy + 2, -1)
                         elif p.bc.bottom.uy.type == BCType.FIXED or p.bc.bottom.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
+                        elif p.bc.bottom.uy.type == BCType.TRACTION_FREE:
+                            # 1. uy 向内（向上）的一阶差分: (uy[iy+1] - uy[iy]) / dy_loc
+                            add(kuy, kuy + 2, 1.0 / dy_loc)
+                            add(kuy, kuy, -1.0 / dy_loc)
+                            
+                            # 2. 耦合 dux/dx 项: lambda / (lambda + 2G) * (ux[ix] - ux[ix-1]) / dx_loc
+                            r_free = lam / (lam + 2.0 * G)
+                            if ix > 0:
+                                add(kuy, kux, r_free / dx_loc)
+                                add(kuy, kux - (Ny + 1) * 2, -r_free / dx_loc)
+                            else:
+                                # 左下角点处理
+                                add(kuy, kux + (Ny + 1) * 2, r_free / dx_loc)
+                                add(kuy, kux, -r_free / dx_loc)
                         else:
                             raise ValueError(f"BC type: {p.bc.bottom.uy.type} is not supported for bottom boundary yet.")
                     elif iy == Ny - 1: #top boundary
@@ -251,6 +265,13 @@ class MatrixBuilder:
                             add(kux, kux, 1)
                         elif p.bc.bottom.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux + 2, -1)
+                        elif p.bc.bottom.ux.type == BCType.TRACTION_FREE:
+                            # 1. ux 向内（向上）的一阶差分: (ux[iy+1] - ux[iy]) / dy_loc
+                            add(kux, kux + 2, 1.0 / dy_loc)
+                            add(kux, kux, -1.0 / dy_loc)
+                            # 2. 耦合 duy/dx 项: (uy[ix+1] - uy[ix]) / dx_loc
+                            add(kux, kuy + (Ny + 1) * 2, 1.0 / dx_loc)
+                            add(kux, kuy, -1.0 / dx_loc)
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.bottom.ux.type}")
                     elif iy == Ny:
