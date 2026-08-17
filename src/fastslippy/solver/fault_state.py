@@ -96,17 +96,17 @@ class FaultState:
         """Update theta, U, tau after the velocity solve."""
         p = self.p
         
-        self.theta = self.theta + dt * (1 - self.V * self.theta / p.L)
+        # self.theta = self.theta + dt * (1 - self.V * self.theta / p.L)
         # TODO: this one is better
-        # x = self.V * dt / p.L
-        # expo = x > 1e-6
-        # theta_new = np.empty_like(self.theta)
-        # theta_new[expo] = (
-        #     p.L / self.V[expo] * (1.0 - np.exp(-x[expo]))
-        #     + self.theta[expo] * np.exp(-x[expo]))
-        # theta_new[~expo] = (self.theta[~expo]
-        #     + dt * (1.0 - self.V[~expo] * self.theta[~expo] / p.L))
-        # self.theta = theta_new
+        x = self.V * dt / p.L
+        expo = x > 1e-6
+        theta_new = np.empty_like(self.theta)
+        theta_new[expo] = (
+            p.L / self.V[expo] * (1.0 - np.exp(-x[expo]))
+            + self.theta[expo] * np.exp(-x[expo]))
+        theta_new[~expo] = (self.theta[~expo]
+            + dt * (1.0 - self.V[~expo] * self.theta[~expo] / p.L))
+        self.theta = theta_new
 
         self.tau   = tauqs_col + stress.tau0 - p.eta * self.V
         self.U     = self.U + dt * self.V
