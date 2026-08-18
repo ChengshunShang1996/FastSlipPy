@@ -162,19 +162,16 @@ class MatrixBuilder:
                         elif p.bc.bottom.uy.type == BCType.FIXED or p.bc.bottom.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
                         elif p.bc.bottom.uy.type == BCType.TRACTION_FREE:
-                            # 1. uy 向内（向上）的一阶差分: (uy[iy+1] - uy[iy]) / dy_loc
+                            r_free = lam / (lam + 2.0 * G)
+                            # ∂uy/∂y (forward, 已有)
                             add(kuy, kuy + 2, 1.0 / dy_loc)
                             add(kuy, kuy, -1.0 / dy_loc)
-                            
-                            # 2. 耦合 dux/dx 项: lambda / (lambda + 2G) * (ux[ix] - ux[ix-1]) / dx_loc
-                            r_free = lam / (lam + 2.0 * G)
-                            if ix > 0:
-                                add(kuy, kux, r_free / dx_loc)
-                                add(kuy, kux - (Ny + 1) * 2, -r_free / dx_loc)
-                            else:
-                                # 左下角点处理
-                                add(kuy, kux + (Ny + 1) * 2, r_free / dx_loc)
-                                add(kuy, kux, -r_free / dx_loc)
+                            # 新增: -cosa * ∂uy/∂x (中心差分, ix 已保证在 1..Nx-1 之间, 见前面分析)
+                            add(kuy, kuy + (Ny + 1) * 2, -cosa / (2 * dx_loc))
+                            add(kuy, kuy - (Ny + 1) * 2,  cosa / (2 * dx_loc))
+                            # 原耦合项，改为乘 sina
+                            add(kuy, kux,                  sina * r_free / dx_loc)
+                            add(kuy, kux - (Ny + 1) * 2,  -sina * r_free / dx_loc)
                         else:
                             raise ValueError(f"BC type: {p.bc.bottom.uy.type} is not supported for bottom boundary yet.")
                     elif iy == Ny - 1: #top boundary
@@ -266,12 +263,25 @@ class MatrixBuilder:
                         elif p.bc.bottom.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux + 2, -1)
                         elif p.bc.bottom.ux.type == BCType.TRACTION_FREE:
-                            # 1. ux 向内（向上）的一阶差分: (ux[iy+1] - ux[iy]) / dy_loc
+                            # 1. ∂ux/∂y 前向差分（不变）
                             add(kux, kux + 2, 1.0 / dy_loc)
                             add(kux, kux, -1.0 / dy_loc)
-                            # 2. 耦合 duy/dx 项: (uy[ix+1] - uy[ix]) / dx_loc
-                            add(kux, kuy + (Ny + 1) * 2, 1.0 / dx_loc)
-                            add(kux, kuy, -1.0 / dx_loc)
+                            # 2. -cosa * ∂ux/∂x 项（新增，需处理左右边缘单侧情况）
+                            if ix == 0:
+                                # 前向差分: (ux[1]-ux[0])/dx_loc
+                                add(kux, kux + (Ny + 1) * 2, -cosa / dx_loc)
+                                add(kux, kux,                 cosa / dx_loc)
+                            elif ix == Nx - 1:
+                                # 后向差分: (ux[Nx-1]-ux[Nx-2])/dx_loc
+                                add(kux, kux,                 -cosa / dx_loc)
+                                add(kux, kux - (Ny + 1) * 2,   cosa / dx_loc)
+                            else:
+                                # 中心差分: (ux[ix+1]-ux[ix-1])/(2*dx_loc)
+                                add(kux, kux + (Ny + 1) * 2, -cosa / (2.0 * dx_loc))
+                                add(kux, kux - (Ny + 1) * 2,  cosa / (2.0 * dx_loc))
+                            # 3. sina * ∂uy/∂x 耦合项（原来的系数是1.0，改为乘 sina）
+                            add(kux, kuy + (Ny + 1) * 2, sina / dx_loc)
+                            add(kux, kuy,                -sina / dx_loc)
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.bottom.ux.type}")
                     elif iy == Ny:
