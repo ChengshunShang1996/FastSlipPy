@@ -76,7 +76,7 @@ def test_rigid_rotation():
     assert max_sigma < tol
 
 
-def test_bottom_traction_free_annuls_rigid_rotation_for_inclined_faults():
+def test_top_traction_free_annuls_rigid_rotation_for_inclined_faults():
     """The inclined free-surface rows must not react to a rigid rotation."""
     omega = 1e-6
 

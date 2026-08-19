@@ -35,6 +35,18 @@ Vm      = d["Vm"]          # (Ny, n)  slip rate [m/s]
 Um      = d["Um"]          # (Ny, n)  cumulative slip [m]
 thetam  = d["thetam"]      # (Ny, n)  state variable [s]
 
+# OutputManager preallocates snapshots.  Discard unwritten trailing columns
+# when a calculation ends before Nt.
+valid = tm > 0.0
+if not np.any(valid):
+    raise ValueError("dataall.npz contains no stored output snapshots.")
+tm = tm[valid]
+taum = taum[:, valid]
+sigmam = sigmam[:, valid]
+Vm = Vm[:, valid]
+Um = Um[:, valid]
+thetam = thetam[:, valid]
+
 yr   = 365 * 24 * 3600.0
 t_yr = tm / yr             # time in years
 

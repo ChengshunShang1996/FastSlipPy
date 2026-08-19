@@ -131,10 +131,38 @@ class MatrixBuilder:
         def add(r, c, v):
             rows.append(r); cols.append(c); vals.append(v)
 
+        def add_ux(ix, iy, value):
+            """Add a coefficient for ux(ix, iy) to a fault-interface row."""
+            kux_local, _ = self._dofs(ix, iy, Ny)
+            add(fault_row, kux_local, fault_scale * value)
+
+        def add_uy(ix, iy, value):
+            """Add a coefficient for uy(ix, iy) to a fault-interface row."""
+            _, kuy_local = self._dofs(ix, iy, Ny)
+            add(fault_row, kuy_local, fault_scale * value)
+
+        def first_derivative_weights(coords: np.ndarray, idx: int):
+            """Weights used by numpy.gradient(..., edge_order=1) at one node."""
+            if idx == 0:
+                h = float(coords[1] - coords[0])
+                return ((0, -1.0 / h), (1, 1.0 / h))
+            if idx == coords.size - 1:
+                h = float(coords[-1] - coords[-2])
+                return ((idx - 1, -1.0 / h), (idx, 1.0 / h))
+            h_l = float(coords[idx] - coords[idx - 1])
+            h_r = float(coords[idx + 1] - coords[idx])
+            return (
+                (idx - 1, -h_r / (h_l * (h_l + h_r))),
+                (idx, (h_r - h_l) / (h_l * h_r)),
+                (idx + 1, h_l / (h_r * (h_l + h_r))),
+            )
+
         for ix in range(Nx+1):           # 0 … Nx  (MATLAB 1 … Nx+1)
             for iy in range(Ny+1):       # 0 … Ny
 
                 kux, kuy = self._dofs(ix, iy, Ny)
+                fault_row = None
+                fault_scale = None
                 mid = (Nx) // 2            # fault column index (0-based)
 
                 # ── uy equation (iy < Ny) ──────────────────────────────
@@ -162,21 +190,19 @@ class MatrixBuilder:
                         elif p.bc.top.uy.type == BCType.FIXED or p.bc.top.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
                         elif p.bc.top.uy.type == BCType.TRACTION_FREE:
-                            # U = ux * (1, 0) + uy * (cos(alpha), sin(alpha)).
-                            # At y=0, sigma_ZZ = 0 is
-                            # dy(uy) - [2G/(lambda+2G)] cos(alpha) dx(uy)
-                            #        + [lambda/(lambda+2G)] dx(ux) = 0.
-                            r_free = lam / (lam + 2.0 * G)
-                            uy_x_coeff = -(1.0 - r_free) * cosa
-                            # ∂uy/∂y (forward, 已有)
-                            add(kuy, kuy + 2, 1.0 / dy_loc)
-                            add(kuy, kuy, -1.0 / dy_loc)
-                            # 新增: -cosa * ∂uy/∂x (中心差分, ix 已保证在 1..Nx-1 之间, 见前面分析)
-                            add(kuy, kuy + (Ny + 1) * 2, uy_x_coeff / (2 * dx_loc))
-                            add(kuy, kuy - (Ny + 1) * 2, -uy_x_coeff / (2 * dx_loc))
-                            # 原耦合项，改为乘 sina
-                            add(kuy, kux,                  r_free / dx_loc)
-                            add(kuy, kux - (Ny + 1) * 2,  -r_free / dx_loc)
+                            # Direct global sigma_ZZ=0 at the uy node:
+                            # lambda*ux_x + (lambda+2G)*uy_y
+                            #     - 2G*cos(alpha)*uy_x = 0.
+                            dy_top = float(g.y[1] - g.y[0])
+                            dx_ux = float(g.x[ix] - g.x[ix - 1])
+                            normal_scale = 1.0 / (lam + 2.0 * G)
+                            add(kuy, kuy + 2, 1.0 / dy_top)
+                            add(kuy, kuy,     -1.0 / dy_top)
+                            add(kuy, kux,      lam * normal_scale / dx_ux)
+                            add(kuy, kux - (Ny + 1) * 2, -lam * normal_scale / dx_ux)
+                            for ix_d, w in first_derivative_weights(g.xp, ix):
+                                _, kuy_d = self._dofs(ix_d, iy, Ny)
+                                add(kuy, kuy_d, -2.0 * G * normal_scale * cosa * w)
                         else:
                             raise ValueError(f"BC type: {p.bc.top.uy.type} is not supported for top boundary yet.")
                     elif iy == Ny - 1: #bottom boundary (y=ysize / deep boundary)
@@ -191,43 +217,42 @@ class MatrixBuilder:
                         # Fault left side
                         add(kuy, kuy, -1); add(kuy, kuy + (Ny+1)*2, 1)
                     elif ix == mid + 1:
-                        # Fault right side
-                        kux_n, kuy_n = self._dofs(ix, iy, Ny)
-                        add(kuy, kuy - 2*(Ny+1)*2, 1)
-                        add(kuy, kuy - (Ny+1)*2,  -1)
-                        add(kuy, kuy,             -1)
-                        add(kuy, kuy + (Ny+1)*2,   1)
-                        # Cross-coupling terms with ux
-                        add(kuy, kux + (Ny+1)*2,       cosa/4)
-                        add(kuy, kux + (Ny+1)*2 + 2,   cosa/4)
-                        add(kuy, kux - (Ny+1)*2,       -cosa/2)
-                        add(kuy, kux - (Ny+1)*2 + 2,   -cosa/2)
-                        add(kuy, kux - 3*(Ny+1)*2,     cosa/4)
-                        add(kuy, kux - 3*(Ny+1)*2 + 2, cosa/4)
-                        add(kuy, kuy + (Ny+1)*2 - 2,   cosa/4/dy_loc*dx_loc)
-                        add(kuy, kuy + (Ny+1)*2 + 2,  -cosa/4/dy_loc*dx_loc)
-                        add(kuy, kuy - 2,               cosa/4/dy_loc*dx_loc)
-                        add(kuy, kuy + 2,              -cosa/4/dy_loc*dx_loc)
-                        add(kuy, kuy - (Ny+1)*2 - 2,  -cosa/4/dy_loc*dx_loc)
-                        add(kuy, kuy - (Ny+1)*2 + 2,   cosa/4/dy_loc*dx_loc)
-                        add(kuy, kuy - 2*(Ny+1)*2 - 2,  -cosa/4/dy_loc*dx_loc)
-                        add(kuy, kuy - 2*(Ny+1)*2 + 2,   cosa/4/dy_loc*dx_loc)
+                        # Enforce tau(left)-tau(right)=0 using precisely the
+                        # same staggered, coordinate-aware operator as
+                        # StressCalUtil.compute_stress_fields.
+                        fault_row = kuy
+                        jl, jr = mid - 1, mid + 1
+                        dx_uy = np.diff(g.xp)
+                        dy_ux = np.diff(g.yp)
+                        # The recovered expression below is tau/G.  Scale the
+                        # row by a local length, as the legacy dimensionless
+                        # matrix did, so sparse factorization remains well
+                        # conditioned without altering the constraint.
+                        fault_scale = dx_uy[jr]
+                        a2 = 1.0 - 2.0 * cosa * cosa
 
-                        # Difference of the ux_y contribution to the shear
-                        # traction on the two sides of the fault.  The local
-                        # shear traction is
-                        #
-                        #   tau/G = (uy_x + (1-2*cos(a)^2) ux_y
-                        #            + cos(a) (ux_x - uy_y)) / sin(a).
-                        #
-                        # The terms proportional to cos(a) above account for
-                        # ux_x and uy_y.  Do not omit ux_y: in particular it
-                        # is the *only* ux contribution for a vertical fault.
-                        shear_ux_y = (1.0 - 2.0 * cosa * cosa) * dx_loc / dy_loc
-                        add(kuy, kux - (Ny+1)*2 + 2,  shear_ux_y)
-                        add(kuy, kux - (Ny+1)*2,      -shear_ux_y)
-                        add(kuy, kux + 2,             -shear_ux_y)
-                        add(kuy, kux,                   shear_ux_y)
+                        # uy_x
+                        add_uy(jl + 1, iy,  1.0 / dx_uy[jl])
+                        add_uy(jl,     iy, -1.0 / dx_uy[jl])
+                        add_uy(jr + 1, iy, -1.0 / dx_uy[jr])
+                        add_uy(jr,     iy,  1.0 / dx_uy[jr])
+
+                        # (1-2*cos(a)^2) ux_y
+                        cy = a2 / dy_ux[iy]
+                        add_ux(jl, iy + 1,  cy); add_ux(jl, iy, -cy)
+                        add_ux(jr, iy + 1, -cy); add_ux(jr, iy,  cy)
+
+                        # cos(a) * averaged ux_x
+                        for j, sign in ((jl, 1.0), (jr, -1.0)):
+                            for ix_d, w in first_derivative_weights(g.x, j):
+                                add_ux(ix_d, iy,     0.5 * cosa * sign * w)
+                                add_ux(ix_d, iy + 1, 0.5 * cosa * sign * w)
+
+                        # -cos(a) * averaged uy_y
+                        for j, sign in ((jl, 1.0), (jr, -1.0)):
+                            for ix_u in (j, j + 1):
+                                for iy_d, w in first_derivative_weights(g.y, iy):
+                                    add_uy(ix_u, iy_d, -0.5 * cosa * sign * w)
                     else:
                         # Interior bulk
                         if self._is_uniform:
@@ -284,33 +309,29 @@ class MatrixBuilder:
                         elif p.bc.top.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux + 2, -1)
                         elif p.bc.top.ux.type == BCType.TRACTION_FREE:
-                            # sigma_XZ = 0, after eliminating dy(uy) through the
-                            # sigma_ZZ=0 row above, is
-                            # dy(ux) - cos(alpha) [1 + lambda/(lambda+2G)] dx(ux)
-                            #        + [sin(alpha)^2 - lambda/(lambda+2G)
-                            #           * cos(alpha)^2] dx(uy) = 0.
-                            r_free = lam / (lam + 2.0 * G)
-                            ux_x_coeff = -cosa * (1.0 + r_free)
-                            uy_x_coeff = sina * sina - r_free * cosa * cosa
-                            # 1. ∂ux/∂y 前向差分（不变）
-                            add(kux, kux + 2, 1.0 / dy_loc)
-                            add(kux, kux, -1.0 / dy_loc)
-                            # 2. -cosa * ∂ux/∂x 项（新增，需处理左右边缘单侧情况）
-                            if ix == 0:
-                                # 前向差分: (ux[1]-ux[0])/dx_loc
-                                add(kux, kux + (Ny + 1) * 2, ux_x_coeff / dx_loc)
-                                add(kux, kux,                -ux_x_coeff / dx_loc)
-                            elif ix == Nx - 1:
-                                # 后向差分: (ux[Nx-1]-ux[Nx-2])/dx_loc
-                                add(kux, kux,                 ux_x_coeff / dx_loc)
-                                add(kux, kux - (Ny + 1) * 2, -ux_x_coeff / dx_loc)
-                            else:
-                                # 中心差分: (ux[ix+1]-ux[ix-1])/(2*dx_loc)
-                                add(kux, kux + (Ny + 1) * 2, ux_x_coeff / (2.0 * dx_loc))
-                                add(kux, kux - (Ny + 1) * 2, -ux_x_coeff / (2.0 * dx_loc))
-                            # 3. sina * ∂uy/∂x 耦合项（原来的系数是1.0，改为乘 sina）
-                            add(kux, kuy + (Ny + 1) * 2, uy_x_coeff / dx_loc)
-                            add(kux, kuy,                -uy_x_coeff / dx_loc)
+                            # Direct global sigma_XZ=0 at the ux node:
+                            # ux_y - cos(alpha)*ux_x
+                            #   + cos(alpha)*average_x(uy_y)
+                            #   + (1-2*cos(alpha)^2)*uy_x = 0.
+                            # It is deliberately not obtained by eliminating
+                            # uy_y from the sigma_ZZ row: the two tractions are
+                            # sampled at different staggered x locations.
+                            dy_ux_top = float(g.yp[1] - g.yp[0])
+                            dy_uy_top = float(g.y[1] - g.y[0])
+                            dx_uy = float(g.xp[ix + 1] - g.xp[ix])
+                            a2 = 1.0 - 2.0 * cosa * cosa
+                            add(kux, kux + 2,  1.0 / dy_ux_top)
+                            add(kux, kux,     -1.0 / dy_ux_top)
+                            for ix_d, w in first_derivative_weights(g.x, ix):
+                                kux_d, _ = self._dofs(ix_d, iy, Ny)
+                                add(kux, kux_d, -cosa * w)
+                            for ix_u in (ix, ix + 1):
+                                _, kuy_0 = self._dofs(ix_u, iy, Ny)
+                                _, kuy_1 = self._dofs(ix_u, iy + 1, Ny)
+                                add(kux, kuy_1,  0.5 * cosa / dy_uy_top)
+                                add(kux, kuy_0, -0.5 * cosa / dy_uy_top)
+                            add(kux, kuy + (Ny + 1) * 2,  a2 / dx_uy)
+                            add(kux, kuy,                 -a2 / dx_uy)
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.top.ux.type}")
                     elif iy == Ny:
@@ -335,33 +356,44 @@ class MatrixBuilder:
                         else:
                             raise ValueError(f"BC type: {p.bc.right.ux.type} is not supported for right boundary yet.")
                     elif ix == mid:
-                        # Fault column – normal stress jump condition
-                        if self._is_uniform:
-                            add(kux, kux,              -2*r_lam)
-                            add(kux, kux + (Ny+1)*2,   r_lam)
-                            add(kux, kux - (Ny+1)*2,   r_lam)
-                        else:
-                            cxl, cxc, cxr, sx = self._second_derivative_weights(g.x, ix)
-                            add(kux, kux, sx * r_lam * cxc)
-                            add(kux, kux + (Ny+1)*2, sx * r_lam * cxr)
-                            add(kux, kux - (Ny+1)*2, sx * r_lam * cxl)
-                            dx_loc = np.sqrt(sx)
-                        fac = lam/G/dy_loc*dx_loc
-                        add(kux, kuy,                    -fac)
-                        add(kux, kuy + (Ny+1)*2,          fac)
-                        add(kux, kuy - 2,                 fac)
-                        add(kux, kuy + (Ny+1)*2 - 2,     -fac)
+                        # Enforce sigma(left)-sigma(right)=0 using the same
+                        # cell-centred normal-stress recovery operator used
+                        # after every elastic solve.  The ux row at iy maps to
+                        # sigmaqs row iy-1 on the staggered grid.
+                        fault_row = kux
+                        isigma = iy - 1
+                        jl, jr = mid - 1, mid
+                        dx_ux = np.diff(g.x)
+                        dy_uy = np.diff(g.y)
+                        dy_ux = np.diff(g.yp)
+                        # This expression is in stress units.  Use the same
+                        # local dx/G normalization as the original row.
+                        fault_scale = dx_ux[jr] / G
 
-                        # Normal traction also contains -2*G*cos(a)*ux_y.
-                        # The two cell-centred ux_y values adjacent to the
-                        # fault are averaged on each side, so their difference
-                        # reduces to the stencil below after the row is scaled
-                        # by dx_loc/G (as the other terms in this row are).
-                        normal_ux_y = cosa * dx_loc / dy_loc
-                        add(kux, kux - (Ny+1)*2 + 2, -normal_ux_y)
-                        add(kux, kux - (Ny+1)*2,       normal_ux_y)
-                        add(kux, kux + (Ny+1)*2 + 2,  normal_ux_y)
-                        add(kux, kux + (Ny+1)*2,     -normal_ux_y)
+                        # (lambda+2G) ux_x
+                        cx_l = (lam + 2.0 * G) / dx_ux[jl]
+                        add_ux(jl + 1, iy,  cx_l)
+                        add_ux(jl,     iy, -cx_l)
+                        cx_r = (lam + 2.0 * G) / dx_ux[jr]
+                        add_ux(jr + 1, iy, -cx_r)
+                        add_ux(jr,     iy,  cx_r)
+
+                        # lambda uy_y
+                        cy = lam / dy_uy[isigma]
+                        add_uy(jl + 1, isigma + 1,  cy)
+                        add_uy(jl + 1, isigma,     -cy)
+                        add_uy(jr + 1, isigma + 1, -cy)
+                        add_uy(jr + 1, isigma,      cy)
+
+                        # -2G*cos(a)*mm_outer(ux_y).  The common central
+                        # ux column cancels between the two adjacent cells.
+                        cxy = -0.5 * G * cosa
+                        for iy_d in (isigma, isigma + 1):
+                            wy = cxy / dy_ux[iy_d]
+                            add_ux(jl, iy_d + 1,  wy)
+                            add_ux(jl, iy_d,     -wy)
+                            add_ux(jr + 1, iy_d + 1, -wy)
+                            add_ux(jr + 1, iy_d,      wy)
                     else:
                         # Interior bulk
                         if self._is_uniform:

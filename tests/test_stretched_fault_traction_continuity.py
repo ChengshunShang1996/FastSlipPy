@@ -59,5 +59,5 @@ def test_stretched_fault_has_continuous_tractions_for_all_bp3_dips():
 
         mid = params.Nx // 2
         # Exclude the one-sided y stencils at the two external boundaries.
-        assert np.max(np.abs(tau[3:-3, mid - 1] - tau[3:-3, mid + 1])) < 1e-2
-        assert np.max(np.abs(sigma[3:-3, mid - 1] - sigma[3:-3, mid])) < 1e-2
+        assert np.max(np.abs(tau[3:-3, mid - 1] - tau[3:-3, mid + 1])) < 1e-10
+        assert np.max(np.abs(sigma[3:-3, mid - 1] - sigma[3:-3, mid])) < 1e-10

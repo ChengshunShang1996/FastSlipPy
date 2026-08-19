@@ -41,7 +41,13 @@ class FigureCreator:
         yr = 365 * 24 * 3600
 
         if it < 0:
-            it = om.Um.shape[1] - 1  # last stored snapshot
+            # Snapshot arrays are preallocated to Nt/output_interval.  A run
+            # stopped before Nt therefore has trailing all-zero columns; the
+            # last allocated column is not necessarily the last result.
+            valid = np.flatnonzero(om.tm > 0.0)
+            if valid.size == 0:
+                raise ValueError("No stored output snapshot is available.")
+            it = int(valid[-1])
 
         actual_it = (it + 1) * om.p.output_interval
 

@@ -11,6 +11,15 @@ def plot_results_from_file(filename="output/dataall.npz"):
     sigmam = data["sigmam"]
     tm = data["tm"]
 
+    valid = tm > 0.0
+    if not np.any(valid):
+        raise ValueError("dataall.npz contains no stored output snapshots.")
+    Um = Um[:, valid]
+    Vm = Vm[:, valid]
+    taum = taum[:, valid]
+    sigmam = sigmam[:, valid]
+    tm = tm[valid]
+
     Ny, Nt = Um.shape
     y = np.linspace(2000, 4000, Ny)  # adjust if needed
     yr = 365 * 24 * 3600
