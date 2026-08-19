@@ -125,8 +125,12 @@ class MatrixBuilder:
         dy_yuy = self._dy_yuy
         dx_xux = self._dx_xux
         dy_yux = self._dy_yux
+        use_coordinate_nonuniform_operator = (
+            not self._is_uniform and self._case_type == "california"
+        )
 
         rows, cols, vals = [], [], []
+        _point_weight_cache = {}
 
         def add(r, c, v):
             rows.append(r); cols.append(c); vals.append(v)
@@ -156,6 +160,54 @@ class MatrixBuilder:
                 (idx, (h_r - h_l) / (h_l * h_r)),
                 (idx + 1, h_l / (h_r * (h_l + h_r))),
             )
+
+        def point_weights(coords: np.ndarray, target: float, indices, derivative: int):
+            """Polynomial-exact weights for a derivative at an off-grid point.
+
+            The velocity components live on staggered grids.  On a stretched
+            mesh a mixed derivative therefore cannot be obtained by applying
+            a uniform-grid ``dx/dy`` correction to the old four-point stencil:
+            the derivative has to be evaluated at the actual target point.
+            Three neighbouring points give a second-order, quadratic-exact
+            approximation for derivative orders zero, one, and two.
+            """
+            key = (id(coords), float(target), tuple(indices), derivative)
+            cached = _point_weight_cache.get(key)
+            if cached is not None:
+                return cached
+            pts = np.asarray(coords)[list(indices)]
+            n = len(indices)
+            system = np.empty((n, n), dtype=float)
+            shifted = pts - target
+            for power in range(n):
+                system[power, :] = shifted ** power
+            rhs = np.zeros(n, dtype=float)
+            rhs[derivative] = (1.0, 1.0, 2.0)[derivative]
+            weights = np.linalg.solve(system, rhs)
+            _point_weight_cache[key] = weights
+            return weights
+
+        def add_tensor_derivative(row, component, x_coords, x_indices, x_target,
+                                  x_order, y_coords, y_indices, y_target,
+                                  y_order, coefficient):
+            """Add a staggered-grid tensor-product derivative to ``row``."""
+            wx = point_weights(x_coords, x_target, x_indices, x_order)
+            wy = point_weights(y_coords, y_target, y_indices, y_order)
+            for j, wxj in zip(x_indices, wx):
+                for i, wyi in zip(y_indices, wy):
+                    kux_local, kuy_local = self._dofs(j, i, Ny)
+                    add(row, kux_local if component == "ux" else kuy_local,
+                        coefficient * wxj * wyi)
+
+        def three_point_stencil(size: int, centre: int):
+            """Return a valid three-point stencil, one-sided near an edge."""
+            start = min(max(centre - 1, 0), size - 3)
+            return (start, start + 1, start + 2)
+
+        def three_point_stencil_in_range(centre: int, lower: int, upper: int):
+            """Three-point stencil confined to one physical side of the fault."""
+            start = min(max(centre - 1, lower), upper - 2)
+            return (start, start + 1, start + 2)
 
         for ix in range(Nx+1):           # 0 … Nx  (MATLAB 1 … Nx+1)
             for iy in range(Ny+1):       # 0 … Ny
@@ -272,27 +324,63 @@ class MatrixBuilder:
                             add(kuy, kuy - 2, sx * a2 * cyl)
                             add(kuy, kuy + 2, sx * a2 * cyr)
                             dx_loc = np.sqrt(sx)
-                        c_val = cosa/dy_loc*dx_loc*(lam + 3*G)/G/4
-                        add(kuy, kuy + (Ny+1)*2 - 2,   c_val)
-                        add(kuy, kuy + (Ny+1)*2 + 2,  -c_val)
-                        add(kuy, kuy - (Ny+1)*2 - 2,  -c_val)
-                        add(kuy, kuy - (Ny+1)*2 + 2,   c_val)
+                            # Coordinate-aware mixed derivatives.  The
+                            # uniform-grid stencil below is not valid after
+                            # stretching because ux and uy are staggered in
+                            # both directions.
+                            scale = sx
+                            coordinate_scale = scale if use_coordinate_nonuniform_operator else 0.0
+                            if ix < mid:
+                                x_ux = three_point_stencil_in_range(ix, 0, mid)
+                                x_uy = three_point_stencil_in_range(ix, 0, mid)
+                            else:
+                                x_ux = three_point_stencil_in_range(ix, mid, Nx - 1)
+                                x_uy = three_point_stencil_in_range(ix, mid + 1, Nx)
+                            y_ux = three_point_stencil(Ny + 1, iy)
+                            y_uy = three_point_stencil(Ny, iy)
+                            b2 = (lam + G) / G
+                            c3 = cosa * (lam + 3 * G) / G
+                            # -c*b2 ux_xx.  The angle-independent ux_xy
+                            # coupling is assembled with the same coordinate
+                            # operator for BP3's nonuniform California mesh.
+                            add_tensor_derivative(kuy, "ux", g.x, x_ux, g.xp[ix],
+                                                  2, g.yp, y_ux, g.y[iy], 0,
+                                                  -coordinate_scale * cosa * b2)
+                            add_tensor_derivative(kuy, "ux", g.x, x_ux, g.xp[ix],
+                                                  1, g.yp, y_ux, g.y[iy], 1,
+                                                  coordinate_scale * b2)
+                            # -c*(lambda+3G)/G uy_xy
+                            add_tensor_derivative(kuy, "uy", g.xp, x_uy, g.xp[ix],
+                                                  1, g.y, y_uy, g.y[iy], 1,
+                                                  -coordinate_scale * c3)
                         fac = 1/dy_loc*dx_loc*(lam + G)/G
-                        if ix == 1 or ix == Nx - 1:
+                        if self._is_uniform:
+                            c_val = cosa/dy_loc*dx_loc*(lam + 3*G)/G/4
+                            add(kuy, kuy + (Ny+1)*2 - 2,   c_val)
+                            add(kuy, kuy + (Ny+1)*2 + 2,  -c_val)
+                            add(kuy, kuy - (Ny+1)*2 - 2,  -c_val)
+                            add(kuy, kuy - (Ny+1)*2 + 2,   c_val)
+                            if ix == 1 or ix == Nx - 1:
+                                add(kuy, kux - (Ny+1)*2,      fac)
+                                add(kuy, kux - (Ny+1)*2 + 2, -fac)
+                                add(kuy, kux,                 -fac)
+                                add(kuy, kux + 2,              fac)
+                            else:
+                                cf = cosa*(lam + G)/G/4
+                                add(kuy, kux - (Ny+1)*2,      fac + cf)
+                                add(kuy, kux - (Ny+1)*2 + 2, -fac + cf)
+                                add(kuy, kux,                 -fac + cf)
+                                add(kuy, kux + 2,              fac + cf)
+                                add(kuy, kux - 2*(Ny+1)*2,    -cf)
+                                add(kuy, kux - 2*(Ny+1)*2+2,  -cf)
+                                add(kuy, kux + (Ny+1)*2,      -cf)
+                                add(kuy, kux + (Ny+1)*2 + 2,  -cf)
+                        elif not use_coordinate_nonuniform_operator:
+                            # Unchanged angle-independent staggered ux_xy.
                             add(kuy, kux - (Ny+1)*2,      fac)
                             add(kuy, kux - (Ny+1)*2 + 2, -fac)
                             add(kuy, kux,                 -fac)
                             add(kuy, kux + 2,              fac)
-                        else:
-                            cf = cosa*(lam + G)/G/4
-                            add(kuy, kux - (Ny+1)*2,      fac + cf)
-                            add(kuy, kux - (Ny+1)*2 + 2, -fac + cf)
-                            add(kuy, kux,                 -fac + cf)
-                            add(kuy, kux + 2,              fac + cf)
-                            add(kuy, kux - 2*(Ny+1)*2,    -cf)
-                            add(kuy, kux - 2*(Ny+1)*2+2,  -cf)
-                            add(kuy, kux + (Ny+1)*2,      -cf)
-                            add(kuy, kux + (Ny+1)*2 + 2,  -cf)
                 else:
                     # Neumann BC for ghost uy nodes at iy=Ny
                     add(kuy, kuy, 1)
@@ -411,27 +499,61 @@ class MatrixBuilder:
                             add(kux, kux - 2, sx * cyl)
                             add(kux, kux + 2, sx * cyr)
                             dx_loc = np.sqrt(sx)
-                        c_val = cosa/dy_loc*dx_loc*(lam + 3*G)/G/4
-                        add(kux, kux + (Ny+1)*2 - 2,   c_val)
-                        add(kux, kux + (Ny+1)*2 + 2,  -c_val)
-                        add(kux, kux - (Ny+1)*2 - 2,  -c_val)
-                        add(kux, kux - (Ny+1)*2 + 2,   c_val)
+                            # Coordinate-aware mixed derivatives at the ux
+                            # node (x[ix], yp[iy]).  The old terms below are
+                            # retained only for a uniform mesh.
+                            scale = sx
+                            coordinate_scale = scale if use_coordinate_nonuniform_operator else 0.0
+                            if ix < mid:
+                                x_ux = three_point_stencil_in_range(ix, 0, mid)
+                                x_uy = three_point_stencil_in_range(ix, 0, mid)
+                            else:
+                                x_ux = three_point_stencil_in_range(ix, mid, Nx - 1)
+                                x_uy = three_point_stencil_in_range(ix, mid + 1, Nx)
+                            y_ux = three_point_stencil(Ny + 1, iy)
+                            y_uy = three_point_stencil(Ny, iy)
+                            b2 = (lam + G) / G
+                            c3 = cosa * (lam + 3 * G) / G
+                            # -c*(lambda+3G)/G ux_xy
+                            add_tensor_derivative(kux, "ux", g.x, x_ux, g.x[ix],
+                                                  1, g.yp, y_ux, g.yp[iy], 1,
+                                                  -coordinate_scale * c3)
+                            # -c*b2 uy_yy.  The angle-independent uy_xy
+                            # coupling remains in its legacy staggered form.
+                            add_tensor_derivative(kux, "uy", g.xp, x_uy, g.x[ix],
+                                                  0, g.y, y_uy, g.yp[iy], 2,
+                                                  -coordinate_scale * cosa * b2)
+                            add_tensor_derivative(kux, "uy", g.xp, x_uy, g.x[ix],
+                                                  1, g.y, y_uy, g.yp[iy], 1,
+                                                  coordinate_scale * b2)
                         fac = 1/dy_loc*dx_loc*(lam + G)/G
-                        if iy == 1 or iy == Ny - 1:
+                        if self._is_uniform:
+                            c_val = cosa/dy_loc*dx_loc*(lam + 3*G)/G/4
+                            add(kux, kux + (Ny+1)*2 - 2,   c_val)
+                            add(kux, kux + (Ny+1)*2 + 2,  -c_val)
+                            add(kux, kux - (Ny+1)*2 - 2,  -c_val)
+                            add(kux, kux - (Ny+1)*2 + 2,   c_val)
+                            if iy == 1 or iy == Ny - 1:
+                                add(kux, kuy + (Ny+1)*2,      fac)
+                                add(kux, kuy + (Ny+1)*2 - 2, -fac)
+                                add(kux, kuy,                 -fac)
+                                add(kux, kuy - 2,              fac)
+                            else:
+                                cf = cosa/dy_loc/dy_loc*dx_loc*dx_loc*(lam + G)/G/4
+                                add(kux, kuy + (Ny+1)*2,        fac + cf)
+                                add(kux, kuy + (Ny+1)*2 - 2,   -fac + cf)
+                                add(kux, kuy,                   -fac + cf)
+                                add(kux, kuy - 2,                fac + cf)
+                                add(kux, kuy + (Ny+1)*2 + 2,   -cf)
+                                add(kux, kuy + (Ny+1)*2 - 4,   -cf)
+                                add(kux, kuy + 2,               -cf)
+                                add(kux, kuy - 4,               -cf)
+                        elif not use_coordinate_nonuniform_operator:
+                            # Unchanged angle-independent staggered uy_xy.
                             add(kux, kuy + (Ny+1)*2,      fac)
                             add(kux, kuy + (Ny+1)*2 - 2, -fac)
                             add(kux, kuy,                 -fac)
                             add(kux, kuy - 2,              fac)
-                        else:
-                            cf = cosa/dy_loc/dy_loc*dx_loc*dx_loc*(lam + G)/G/4
-                            add(kux, kuy + (Ny+1)*2,        fac + cf)
-                            add(kux, kuy + (Ny+1)*2 - 2,   -fac + cf)
-                            add(kux, kuy,                   -fac + cf)
-                            add(kux, kuy - 2,                fac + cf)
-                            add(kux, kuy + (Ny+1)*2 + 2,   -cf)
-                            add(kux, kuy + (Ny+1)*2 - 4,   -cf)
-                            add(kux, kuy + 2,               -cf)
-                            add(kux, kuy - 4,               -cf)
                 else:
                     # Neumann BC for ghost ux nodes at ix=Nx
                     add(kux, kux, 1)
