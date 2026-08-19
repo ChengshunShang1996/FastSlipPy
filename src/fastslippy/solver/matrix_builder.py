@@ -474,7 +474,9 @@ class MatrixBuilder:
             if is_lab:
                 RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.bottom.uy.value
             elif is_california:
-                RH[self._kuy[Ny - 1, 1:mid]] = -p.bc.bottom.uy.value
+                # The two duplicated fault-face uy nodes are mid (left) and
+                # mid+1 (right).  Both must receive the far-field plate rate.
+                RH[self._kuy[Ny - 1, 1:mid + 1]] = -p.bc.bottom.uy.value
                 RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.bottom.uy.value
             else:
                 RH[self._kuy[Ny - 1, self._ix_uy_y_boundaries]] = p.bc.bottom.uy.value

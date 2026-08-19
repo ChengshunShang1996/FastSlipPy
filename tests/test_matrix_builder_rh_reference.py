@@ -65,7 +65,7 @@ def _reference_build_rh(p: ModelParameters, g: Grid, builder: MatrixBuilder,
                             if ix > mid:
                                 RH[kuy] = p.bc.bottom.uy.value
                         elif p.case_type == "california":
-                            if ix < mid:
+                            if ix <= mid:
                                 RH[kuy] = -1 * p.bc.bottom.uy.value
                             elif ix > mid:
                                 RH[kuy] = p.bc.bottom.uy.value
