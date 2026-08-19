@@ -82,8 +82,8 @@ def test_bottom_traction_free_annuls_rigid_rotation_for_inclined_faults():
 
     for alpha in (90.0, 60.0, 45.0, 30.0):
         params = ModelParameters(Nx=51, Ny=51, alpha=alpha)
-        params.bc.bottom.ux.set_traction_free()
-        params.bc.bottom.uy.set_traction_free()
+        params.bc.top.ux.set_traction_free()
+        params.bc.top.uy.set_traction_free()
         grid = Grid(params)
         builder = MatrixBuilder(params, grid)
 

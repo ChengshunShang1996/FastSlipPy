@@ -94,7 +94,7 @@ class MatrixBuilder:
         self._mid = Nx // 2
         self._iy_int = np.arange(1, Ny - 1)  # interior iy for uy rows and ux interior rows
 
-        self._ix_uy_bottom_top = np.arange(1, Nx)  # exclude left/right boundaries by precedence
+        self._ix_uy_y_boundaries = np.arange(1, Nx)  # exclude left/right boundaries by precedence
         self._ix_uy_left = np.arange(1, self._mid)  # effective else branch ix <= mid with ix==mid excluded
         self._ix_uy_right = np.arange(self._mid + 2, Nx)  # effective else branch ix >= mid+2
 
@@ -155,13 +155,13 @@ class MatrixBuilder:
                             add(kuy, kuy, 1)
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.right.uy.type}")
-                    elif iy == 0: #bottom boundary
-                        if p.bc.bottom.uy.type == BCType.FREE:
+                    elif iy == 0: #top boundary (y=0 / free surface)
+                        if p.bc.top.uy.type == BCType.FREE:
                             #add(kuy, kuy, 1);  add(kuy, kuy + (Ny+1)*2, -1)
                             add(kuy, kuy, 1);  add(kuy, kuy + 2, -1)
-                        elif p.bc.bottom.uy.type == BCType.FIXED or p.bc.bottom.uy.type == BCType.VELOCITY:
+                        elif p.bc.top.uy.type == BCType.FIXED or p.bc.top.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
-                        elif p.bc.bottom.uy.type == BCType.TRACTION_FREE:
+                        elif p.bc.top.uy.type == BCType.TRACTION_FREE:
                             # U = ux * (1, 0) + uy * (cos(alpha), sin(alpha)).
                             # At y=0, sigma_ZZ = 0 is
                             # dy(uy) - [2G/(lambda+2G)] cos(alpha) dx(uy)
@@ -178,15 +178,15 @@ class MatrixBuilder:
                             add(kuy, kux,                  r_free / dx_loc)
                             add(kuy, kux - (Ny + 1) * 2,  -r_free / dx_loc)
                         else:
-                            raise ValueError(f"BC type: {p.bc.bottom.uy.type} is not supported for bottom boundary yet.")
-                    elif iy == Ny - 1: #top boundary
-                        if p.bc.top.uy.type == BCType.FIXED or p.bc.top.uy.type == BCType.VELOCITY:
+                            raise ValueError(f"BC type: {p.bc.top.uy.type} is not supported for top boundary yet.")
+                    elif iy == Ny - 1: #bottom boundary (y=ysize / deep boundary)
+                        if p.bc.bottom.uy.type == BCType.FIXED or p.bc.bottom.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
-                        elif p.bc.top.uy.type == BCType.FREE:
+                        elif p.bc.bottom.uy.type == BCType.FREE:
                             #add(kuy, kuy, 1);  add(kuy, kuy - (Ny+1)*2, -1)
                             add(kuy, kuy, 1);  add(kuy, kuy - 2, -1)
                         else:
-                            raise ValueError(f"BC type: {p.bc.top.uy.type} is not supported for top boundary yet.")
+                            raise ValueError(f"BC type: {p.bc.bottom.uy.type} is not supported for bottom boundary yet.")
                     elif ix == mid:
                         # Fault left side
                         add(kuy, kuy, -1); add(kuy, kuy + (Ny+1)*2, 1)
@@ -278,12 +278,12 @@ class MatrixBuilder:
                     dy_loc = dy_yux[iy]
                     r2 = dx_loc*dx_loc / dy_loc/dy_loc
                     r_lam = (lam + 2*G) / G
-                    if iy == 0: #bottom boundary
-                        if p.bc.bottom.ux.type == BCType.FIXED or p.bc.bottom.ux.type == BCType.VELOCITY:
+                    if iy == 0: #top boundary (y=0 / free surface)
+                        if p.bc.top.ux.type == BCType.FIXED or p.bc.top.ux.type == BCType.VELOCITY:
                             add(kux, kux, 1)
-                        elif p.bc.bottom.ux.type == BCType.FREE:
+                        elif p.bc.top.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux + 2, -1)
-                        elif p.bc.bottom.ux.type == BCType.TRACTION_FREE:
+                        elif p.bc.top.ux.type == BCType.TRACTION_FREE:
                             # sigma_XZ = 0, after eliminating dy(uy) through the
                             # sigma_ZZ=0 row above, is
                             # dy(ux) - cos(alpha) [1 + lambda/(lambda+2G)] dx(ux)
@@ -312,14 +312,14 @@ class MatrixBuilder:
                             add(kux, kuy + (Ny + 1) * 2, uy_x_coeff / dx_loc)
                             add(kux, kuy,                -uy_x_coeff / dx_loc)
                         else:
-                            raise ValueError(f"Unknown BC type: {p.bc.bottom.ux.type}")
+                            raise ValueError(f"Unknown BC type: {p.bc.top.ux.type}")
                     elif iy == Ny:
-                        if p.bc.top.ux.type == BCType.FIXED or p.bc.top.ux.type == BCType.VELOCITY:
+                        if p.bc.bottom.ux.type == BCType.FIXED or p.bc.bottom.ux.type == BCType.VELOCITY:
                             add(kux, kux, 1)
-                        elif p.bc.top.ux.type == BCType.FREE:
+                        elif p.bc.bottom.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux - 2, -1)
                         else:
-                            raise ValueError(f"Unknown BC type: {p.bc.top.ux.type}")
+                            raise ValueError(f"Unknown BC type: {p.bc.bottom.ux.type}")
                     elif ix == 0:
                         if p.bc.left.ux.type == BCType.FIXED or p.bc.left.ux.type == BCType.VELOCITY:
                             add(kux, kux, 1)
@@ -432,20 +432,20 @@ class MatrixBuilder:
         if p.bc.right.uy.type == BCType.VELOCITY:
             RH[self._kuy[:, Nx]] = p.bc.right.uy.value
 
-        if p.bc.bottom.uy.type == BCType.VELOCITY:
-            if is_lab:
-                RH[self._kuy[0, mid + 1:Nx]] = p.bc.bottom.uy.value
-            else:
-                RH[self._kuy[0, self._ix_uy_bottom_top]] = p.bc.bottom.uy.value
-
         if p.bc.top.uy.type == BCType.VELOCITY:
             if is_lab:
-                RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.top.uy.value
-            elif is_california:
-                RH[self._kuy[Ny - 1, 1:mid]] = -p.bc.top.uy.value
-                RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.top.uy.value
+                RH[self._kuy[0, mid + 1:Nx]] = p.bc.top.uy.value
             else:
-                RH[self._kuy[Ny - 1, self._ix_uy_bottom_top]] = p.bc.top.uy.value
+                RH[self._kuy[0, self._ix_uy_y_boundaries]] = p.bc.top.uy.value
+
+        if p.bc.bottom.uy.type == BCType.VELOCITY:
+            if is_lab:
+                RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.bottom.uy.value
+            elif is_california:
+                RH[self._kuy[Ny - 1, 1:mid]] = -p.bc.bottom.uy.value
+                RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.bottom.uy.value
+            else:
+                RH[self._kuy[Ny - 1, self._ix_uy_y_boundaries]] = p.bc.bottom.uy.value
 
         iy_int = self._iy_int
         if is_california:
@@ -483,14 +483,14 @@ class MatrixBuilder:
                     RH[self._kuy[iy, ix]] = -dPdt / dy_loc * dx_xuy[ix] * dx_xuy[ix] / G * sina
 
         # --- ux block (exact branch priority) ---
-        if p.bc.bottom.ux.type == BCType.VELOCITY:
-            RH[self._kux[0, self._ix_ux_all]] = p.bc.bottom.ux.value
         if p.bc.top.ux.type == BCType.VELOCITY:
+            RH[self._kux[0, self._ix_ux_all]] = p.bc.top.ux.value
+        if p.bc.bottom.ux.type == BCType.VELOCITY:
             if is_california: #TODO: should be removed later, as it is not used
-                RH[self._kux[Ny, :mid]] = -p.bc.top.ux.value
-                RH[self._kux[Ny, mid + 1:]] = p.bc.top.ux.value
+                RH[self._kux[Ny, :mid]] = -p.bc.bottom.ux.value
+                RH[self._kux[Ny, mid + 1:]] = p.bc.bottom.ux.value
             else:
-                RH[self._kux[Ny, self._ix_ux_all]] = p.bc.top.ux.value
+                RH[self._kux[Ny, self._ix_ux_all]] = p.bc.bottom.ux.value
 
         if p.bc.left.ux.type == BCType.VELOCITY:
             RH[self._kux[1:Ny, 0]] = p.bc.left.ux.value

@@ -53,24 +53,24 @@ def _reference_build_rh(p: ModelParameters, g: Grid, builder: MatrixBuilder,
                     if p.bc.right.uy.type.name == "VELOCITY":
                         RH[kuy] = p.bc.right.uy.value
                 elif iy == 0:
-                    if p.bc.bottom.uy.type.name == "VELOCITY":
-                        if p.case_type == "lab":
-                            if ix > mid:
-                                RH[kuy] = p.bc.bottom.uy.value
-                        else:
-                            RH[kuy] = p.bc.bottom.uy.value
-                elif iy == Ny - 1:
                     if p.bc.top.uy.type.name == "VELOCITY":
                         if p.case_type == "lab":
                             if ix > mid:
                                 RH[kuy] = p.bc.top.uy.value
-                        elif p.case_type == "california":
-                            if ix < mid:
-                                RH[kuy] = -1 * p.bc.top.uy.value
-                            elif ix > mid:
-                                RH[kuy] = p.bc.top.uy.value
                         else:
                             RH[kuy] = p.bc.top.uy.value
+                elif iy == Ny - 1:
+                    if p.bc.bottom.uy.type.name == "VELOCITY":
+                        if p.case_type == "lab":
+                            if ix > mid:
+                                RH[kuy] = p.bc.bottom.uy.value
+                        elif p.case_type == "california":
+                            if ix < mid:
+                                RH[kuy] = -1 * p.bc.bottom.uy.value
+                            elif ix > mid:
+                                RH[kuy] = p.bc.bottom.uy.value
+                        else:
+                            RH[kuy] = p.bc.bottom.uy.value
                 elif ix == mid:
                     if p.case_type == "california" and y[iy] >= p.W_f:
                         RH[kuy] = p.loading.V_L
@@ -99,17 +99,17 @@ def _reference_build_rh(p: ModelParameters, g: Grid, builder: MatrixBuilder,
                     dy_loc = dy_yux[iy]
 
                 if iy == 0:
-                    if p.bc.bottom.ux.type.name == "VELOCITY":
-                        RH[kux] = p.bc.bottom.ux.value
-                elif iy == Ny:
                     if p.bc.top.ux.type.name == "VELOCITY":
+                        RH[kux] = p.bc.top.ux.value
+                elif iy == Ny:
+                    if p.bc.bottom.ux.type.name == "VELOCITY":
                         if p.case_type == "california":
                             if ix < mid:
-                                RH[kux] = -1 * p.bc.top.ux.value
+                                RH[kux] = -1 * p.bc.bottom.ux.value
                             elif ix > mid:
-                                RH[kux] = p.bc.top.ux.value
+                                RH[kux] = p.bc.bottom.ux.value
                         else:
-                            RH[kux] = p.bc.top.ux.value
+                            RH[kux] = p.bc.bottom.ux.value
                 elif ix == 0:
                     if p.bc.left.ux.type.name == "VELOCITY":
                         RH[kux] = p.bc.left.ux.value
@@ -177,10 +177,10 @@ def test_build_rh_matches_reference_logic(params: ModelParameters, dPdt: float):
     params.bc.left.uy.set_velocity(2e-5)
     params.bc.right.ux.set_velocity(3e-5)
     params.bc.right.uy.set_velocity(4e-5)
-    params.bc.bottom.ux.set_velocity(5e-5)
-    params.bc.bottom.uy.set_velocity(6e-5)
-    params.bc.top.ux.set_velocity(7e-5)
-    params.bc.top.uy.set_velocity(8e-5)
+    params.bc.top.ux.set_velocity(5e-5)
+    params.bc.top.uy.set_velocity(6e-5)
+    params.bc.bottom.ux.set_velocity(7e-5)
+    params.bc.bottom.uy.set_velocity(8e-5)
     params.loading.V_L = 9e-5
 
     grid = Grid(params)

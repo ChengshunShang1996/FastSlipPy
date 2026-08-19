@@ -98,6 +98,8 @@ class BoundaryFace:
 
 @dataclass
 class BoundaryConditions:
+    # Grid y increases with depth: top is y=0 (free surface) and bottom is
+    # y=ysize (deep boundary).
 
     left: BoundaryFace = field(default_factory=BoundaryFace)
     right: BoundaryFace = field(default_factory=BoundaryFace)

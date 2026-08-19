@@ -58,10 +58,10 @@ if __name__ == "__main__":
     params.bc.left.uy.set_free()
     params.bc.right.ux.set_fixed()
     params.bc.right.uy.set_free()
-    params.bc.bottom.ux.set_free()
-    params.bc.bottom.uy.set_fixed()
     params.bc.top.ux.set_free()
     params.bc.top.uy.set_fixed()
+    params.bc.bottom.ux.set_free()
+    params.bc.bottom.uy.set_fixed()
 
     params.layers.set_groningen()
 
