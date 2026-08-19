@@ -212,6 +212,22 @@ class MatrixBuilder:
                         add(kuy, kuy - (Ny+1)*2 + 2,   cosa/4/dy_loc*dx_loc)
                         add(kuy, kuy - 2*(Ny+1)*2 - 2,  -cosa/4/dy_loc*dx_loc)
                         add(kuy, kuy - 2*(Ny+1)*2 + 2,   cosa/4/dy_loc*dx_loc)
+
+                        # Difference of the ux_y contribution to the shear
+                        # traction on the two sides of the fault.  The local
+                        # shear traction is
+                        #
+                        #   tau/G = (uy_x + (1-2*cos(a)^2) ux_y
+                        #            + cos(a) (ux_x - uy_y)) / sin(a).
+                        #
+                        # The terms proportional to cos(a) above account for
+                        # ux_x and uy_y.  Do not omit ux_y: in particular it
+                        # is the *only* ux contribution for a vertical fault.
+                        shear_ux_y = (1.0 - 2.0 * cosa * cosa) * dx_loc / dy_loc
+                        add(kuy, kux - (Ny+1)*2 + 2,  shear_ux_y)
+                        add(kuy, kux - (Ny+1)*2,      -shear_ux_y)
+                        add(kuy, kux + 2,             -shear_ux_y)
+                        add(kuy, kux,                   shear_ux_y)
                     else:
                         # Interior bulk
                         if self._is_uniform:
@@ -335,6 +351,17 @@ class MatrixBuilder:
                         add(kux, kuy + (Ny+1)*2,          fac)
                         add(kux, kuy - 2,                 fac)
                         add(kux, kuy + (Ny+1)*2 - 2,     -fac)
+
+                        # Normal traction also contains -2*G*cos(a)*ux_y.
+                        # The two cell-centred ux_y values adjacent to the
+                        # fault are averaged on each side, so their difference
+                        # reduces to the stencil below after the row is scaled
+                        # by dx_loc/G (as the other terms in this row are).
+                        normal_ux_y = cosa * dx_loc / dy_loc
+                        add(kux, kux - (Ny+1)*2 + 2, -normal_ux_y)
+                        add(kux, kux - (Ny+1)*2,       normal_ux_y)
+                        add(kux, kux + (Ny+1)*2 + 2,  normal_ux_y)
+                        add(kux, kux + (Ny+1)*2,     -normal_ux_y)
                     else:
                         # Interior bulk
                         if self._is_uniform:

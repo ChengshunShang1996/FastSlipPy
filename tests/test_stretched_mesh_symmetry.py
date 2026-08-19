@@ -7,14 +7,15 @@ from fastslippy.solver.matrix_builder import MatrixBuilder
 
 
 def _solve_ux(params: ModelParameters) -> np.ndarray:
+    """Solve a left/right mirror-symmetric loading configuration."""
     params.bc.left.ux.set_fixed()
-    params.bc.left.uy.set_fixed()
+    params.bc.left.uy.set_velocity(-1e-5)
     params.bc.right.ux.set_fixed()
     params.bc.right.uy.set_velocity(1e-5)
     params.bc.bottom.ux.set_fixed()
-    params.bc.bottom.uy.set_velocity(1e-5)
+    params.bc.bottom.uy.set_fixed()
     params.bc.top.ux.set_fixed()
-    params.bc.top.uy.set_velocity(1e-5)
+    params.bc.top.uy.set_fixed()
 
     grid = Grid(params)
     builder = MatrixBuilder(params, grid)
