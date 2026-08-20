@@ -1,7 +1,6 @@
 import numpy as np
 from math import factorial
 
-from examples.run_case_BP3 import build_bp3_parameters
 from fastslippy import FastSlipPy
 from fastslippy.pre_processing.frictional_zones import FrictionalZones
 from fastslippy.pre_processing.grid import Grid
@@ -42,7 +41,26 @@ def _bp3_parameters(**overrides):
 
 
 def test_bp3_example_grid_matches_matlab_stretch_parameters():
-    params = build_bp3_parameters()
+    # Keep this test install-safe: ``examples`` is intentionally not part of
+    # the src-layout wheel, so CI must only import the installed package.
+    params = _bp3_parameters(
+        Nx=181,
+        Ny=137,
+        xsize=80e3,
+        ysize=45e3,
+        W_f=40e3,
+        H=15e3,
+        h=3e3,
+        x_stretch_enabled=True,
+        y_stretch_enabled=True,
+        x_stretch_inner_size=20e3,
+        y_stretch_inner_size=20e3,
+        x_stretch_inner_points=101,
+        y_stretch_inner_points=101,
+        x_stretch_power=2,
+        y_stretch_power=2,
+        allow_nonuniform_solver=True,
+    )
     grid = Grid(params)
 
     element_size = 200.0
@@ -269,6 +287,39 @@ def test_newton_v2_solves_both_velocity_branches_after_large_stress_step():
         assert np.max(np.abs(residual)) <= params.friction_tolerance
 
 
+def test_bp3_motion_sign_automatically_controls_internal_loading(tmp_path):
+    for motion_sign in (-1, 1):
+        params = _bp3_parameters(
+            motion_sign=motion_sign,
+            Vi=4e-9,
+            W_f=700.0,
+            Nt=1,
+            output_interval=1,
+        )
+        params.loading.V_p = 2e-9
+        params.loading.V_L = 3e-9
+        params.bc.left.uy.set_velocity(99.0)
+        params.bc.right.uy.set_velocity(99.0)
+        params.bc.bottom.uy.set_velocity(99.0)
+
+        model = FastSlipPy(
+            params=params,
+            output_dir=str(tmp_path / f"motion_{motion_sign}"),
+        )
+        internal_sign = -motion_sign
+        assert params.Vi == internal_sign * 4e-9
+        assert params.loading.V_p == internal_sign * 2e-9
+        assert params.loading.V_L == internal_sign * 3e-9
+        assert params.bc.left.uy.value == -0.5 * params.loading.V_p
+        assert params.bc.right.uy.value == 0.5 * params.loading.V_p
+        assert params.bc.bottom.uy.value == 0.5 * params.loading.V_L
+        np.testing.assert_allclose(
+            model.fault.V[model.fault.california_loading_start_idx():],
+            params.loading.V_L,
+        )
+        model.output.close()
+
+
 def test_short_bp3_run_advances_to_exact_final_time(tmp_path):
     params = _bp3_parameters(
         Nx=11,
@@ -321,3 +372,35 @@ def test_short_bp3_run_advances_to_exact_final_time(tmp_path):
     assert len(calls) == 3
     assert np.all(np.isfinite(model.fault.V))
     assert np.all(np.isfinite(model.fault.sigma))
+
+    seas_dir = tmp_path / "output_BP3_QD"
+    expected_files = {
+        *(f"fltst_dp{name}" for name in (
+            "000", "025", "050", "075", "100", "125",
+            "150", "175", "200", "250", "300", "350",
+        )),
+        *(f"srfst_fn{name}" for name in (
+            "-32", "-16", "-08", "+00", "-00", "+08", "+16", "+32",
+        )),
+        "slip.dat",
+        "shear_stress.dat",
+        "normal_stress.dat",
+    }
+    assert {path.name for path in seas_dir.iterdir()} == expected_files
+
+    fault_output = (seas_dir / "fltst_dp000").read_text(encoding="utf-8")
+    assert "# problem=SEAS Benchmark BP3-QD" in fault_output
+    assert "# motion=normal" in fault_output
+    numeric_rows = [
+        line.strip() for line in fault_output.splitlines()
+        if line.strip() and line.strip()[0] in "+-0123456789"
+    ]
+    assert len(numeric_rows) == 3
+    final_values = np.fromstring(numeric_rows[-1], sep=" ")
+    np.testing.assert_allclose(final_values[0], model.output.tm[-1])
+    np.testing.assert_allclose(final_values[1], -model.output.Um[0, -1])
+    np.testing.assert_allclose(final_values[3], -model.output.taum[0, -1] / 1e6)
+
+    for profile_name in ("slip.dat", "shear_stress.dat", "normal_stress.dat"):
+        profile = (seas_dir / profile_name).read_text(encoding="utf-8")
+        assert "t max_slip_rate" in profile

@@ -34,7 +34,7 @@ __copyright__   = "Copyright (C) 2026-present by Chengshun Shang"
 __version__     = "0.1.2"
 __license__     = "MIT License"
 __URL__         = 'https://github.com/ChengshunShang1996/FastSlipPy'
-__logo__        = '''
+__logo__        = r'''
  ______         _    _____ _         _____       
 |  ____|       | |  / ____| (_)     |  __ \      
 | |__ __ _ ___ | |_| (___ | |_ _ __ | |__) |   _ 

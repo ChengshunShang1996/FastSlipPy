@@ -41,6 +41,7 @@ class FastSlipPy:
                  output_dir: str = "output",
                  checkpointer: int = 0):
         self.p            = params or ModelParameters()
+        self.p.apply_bp3_motion_sign()
         self.checkpointer = checkpointer
         self.output       = OutputManager(
             self.p, Path(output_dir), append_log=bool(checkpointer)
@@ -322,6 +323,10 @@ class FastSlipPy:
                     self.fault.sigma, self.stress.P, self.fault.theta,
                     dt, t, self.tauqs, self.sigmaqs,
                     self.uy, self.vy, self.ux, self.vx, self.stress.tau0)
+                if p.case_type == "california":
+                    self.output.record_bp3_surface(
+                        it, t, self.grid, self.ux, self.uy, self.vx, self.vy
+                    )
 
             if it % p.checkpoint_interval == 0:
                 self.output.save_checkpoint(
@@ -352,6 +357,8 @@ class FastSlipPy:
                     self.tauqs, self.sigmaqs,
                     self.uy, self.vy, self.ux, self.vx, dt, t)
         self.output.save_all()
+        if p.case_type == "california":
+            self.output.write_bp3_outputs(self.grid)
         self.output.close()
         if p.case_type == "groningen":
             self.figure_creator.plot_results(Nx, shift_y=2000)

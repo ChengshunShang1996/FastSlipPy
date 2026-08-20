@@ -31,6 +31,8 @@ def build_bp3_parameters() -> ModelParameters:
     params = ModelParameters(
         case_type = "california",
         alpha = 60.0,
+        motion_sign = -1,  # SEAS: -1 normal, +1 thrust
+        auto_motion_sign = True,
         xsize = 80e3,
         ysize = 45e3,
         # 200 m uniform core plus quadratic far-field stretching.
@@ -57,7 +59,7 @@ def build_bp3_parameters() -> ModelParameters:
         dt_growth = 1.2,
         friction_tolerance = 5.0,
         output_vtk_option = True,
-        Vi = 1e-9,
+        Vi = 1e-9,  # magnitude; internal sign is applied automatically
         flash_heating_option = False,
         H = 15e3,
         h = 3e3,
@@ -77,6 +79,8 @@ def build_bp3_parameters() -> ModelParameters:
     params.loading.tload = 0.0 * yr
     params.loading.dPdt_pre = 0.0
     params.loading.dPdt_post = 0.0
+    # Supply magnitudes. FastSlipPy maps these and the velocity boundaries to
+    # internal_sign = -motion_sign before constructing the initial state.
     params.loading.V_p = 1e-9
     params.loading.V_L = 1e-9
     

@@ -10,9 +10,10 @@ __license__     = "MIT License"
 #/////////////////////////////////////////////////
 
 import numpy as np
+from datetime import datetime
 from pathlib import Path
 
-from fastslippy.pre_processing.model_parameters import ModelParameters
+from fastslippy.pre_processing.model_parameters import BCType, ModelParameters
 from fastslippy.solver.fault_state import FaultState
 
 class OutputManager:
@@ -47,6 +48,12 @@ class OutputManager:
         # self.uxmall     = np.zeros((Ny+1, Nx, n))
         # self.vxmall     = np.zeros((Ny+1, Nx, n))
         self.tau0   = np.zeros((Ny, n))
+        self._written_count = 0
+        self._bp3_surface_x = None
+        self._bp3_surface_disp1 = np.zeros((8, n))
+        self._bp3_surface_disp2 = np.zeros((8, n))
+        self._bp3_surface_vel1 = np.zeros((8, n))
+        self._bp3_surface_vel2 = np.zeros((8, n))
 
         self._logfile = open(self.out / "output.txt", "a" if append_log else "w")
 
@@ -71,6 +78,7 @@ class OutputManager:
         self.thetam[:, idx] = theta
         self.dtm[idx]       = dt
         self.tm[idx]        = t
+        self._written_count = max(self._written_count, idx + 1)
         # self.taumall[:, :, idx]   = tauqs
         # self.sigmamall[:, :, idx] = sigmaqs
         # self.uymall[:, :, idx]    = uy
@@ -84,6 +92,258 @@ class OutputManager:
         #     tauqs=tauqs, sigmaqs=sigmaqs,
         #     uy=uy, vy=vy, ux=ux, vx=vx
         # )
+
+    def record_bp3_surface(self, it: int, t: float, grid, ux, uy, vx, vy):
+        """Record the eight SEAS BP3 free-surface stations."""
+        if self.p.case_type != "california" or it % self.p.output_interval:
+            return
+        idx = it // self.p.output_interval - 1
+        if idx < 0 or idx >= self._bp3_surface_disp1.shape[1]:
+            return
+
+        mid = self.p.Nx // 2
+        core_dx = float(grid.x[mid + 1] - grid.x[mid])
+        surface_x = np.array(
+            [-32e3, -16e3, -8e3, core_dx / 2.0, -core_dx / 2.0,
+             8e3, 16e3, 32e3],
+            dtype=float,
+        )
+        self._bp3_surface_x = surface_x
+
+        def interp(coords, values):
+            return np.interp(surface_x, coords, values, left=np.nan, right=np.nan)
+
+        normal_displacement = np.mean(ux[:2, :], axis=0)
+        normal_velocity = np.mean(vx[:2, :], axis=0)
+        un = interp(grid.x, normal_displacement)
+        vn = interp(grid.x, normal_velocity)
+        ut = interp(grid.xp, uy[0, :])
+        vt = interp(grid.xp, vy[0, :])
+
+        sides_loaded = (
+            self.p.bc.left.uy.type == BCType.VELOCITY
+            and self.p.bc.right.uy.type == BCType.VELOCITY
+        )
+        surface_side = np.array([-1, -1, -1, 1, -1, 1, 1, 1], dtype=float)
+        rigid_rate = (
+            np.zeros_like(surface_side)
+            if sides_loaded
+            else -surface_side * self.p.loading.V_p / 2.0
+        )
+        cosa = grid.cosa
+        sina = grid.sina
+        self._bp3_surface_disp1[:, idx] = (
+            un + ut * cosa + rigid_rate * t * cosa
+        )
+        self._bp3_surface_disp2[:, idx] = ut * sina + rigid_rate * t * sina
+        self._bp3_surface_vel1[:, idx] = vn + vt * cosa + rigid_rate * cosa
+        self._bp3_surface_vel2[:, idx] = vt * sina + rigid_rate * sina
+
+    @staticmethod
+    def _matlab_round_positive(value: float) -> int:
+        return int(np.floor(value + 0.5))
+
+    def _bp3_element_size(self, grid) -> float:
+        mid = self.p.Nx // 2
+        return float(
+            min(
+                abs(grid.x[mid + 1] - grid.x[mid]),
+                abs(grid.y[1] - grid.y[0]),
+            )
+        )
+
+    def _write_bp3_common_header(
+        self, handle, *, motion_name: str, element_size: float, nt: int
+    ):
+        p = self.p
+        handle.write("# This is the file header:\n")
+        handle.write("# problem=SEAS Benchmark BP3-QD\n")
+        handle.write(f"# code={p.code_name}\n")
+        if p.code_version:
+            handle.write(f"# version={p.code_version}\n")
+        handle.write(f"# modeler={p.modeler}\n")
+        handle.write(f"# date={datetime.now().strftime('%Y/%m/%d')}\n")
+        handle.write(f"# element size={element_size:g} m\n")
+        handle.write(f"# motion={motion_name}\n")
+        handle.write(f"# dip angle={p.alpha:g} degrees\n")
+        handle.write(f"# num time steps={nt}\n")
+
+    def _write_bp3_profile(
+        self, filename: Path, *, field_name: str, description: str,
+        grid, times, velocities, field, scale: float, indices,
+        element_size: float,
+    ):
+        p = self.p
+        with filename.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write("# This is the file header:\n")
+            handle.write("# problem=SEAS Benchmark BP3-QD\n")
+            handle.write(f"# modeler={p.modeler}\n")
+            handle.write(f"# date={datetime.now().strftime('%Y/%m/%d')}\n")
+            handle.write(f"# code={p.code_name}\n")
+            if p.code_version:
+                handle.write(f"# code version={p.code_version}\n")
+            handle.write(f"# element size={element_size:g} m\n")
+            handle.write("# Row #1 = Distance down dip (m) with two zeros first\n")
+            handle.write("# Column #1 = Time (s)\n")
+            handle.write("# Column #2 = Max slip rate (log10 m/s)\n")
+            handle.write(
+                f"# Columns #3-{len(indices) + 2} = {description}\n"
+            )
+            handle.write(
+                "# Computational domain size: down-dip "
+                f"{p.ysize / 1e3:g} km, distance off fault "
+                f"{p.xsize / 2e3:g} km, dip {p.alpha:g} degrees\n"
+            )
+            handle.write("# The line below lists the names of the data fields\n")
+            handle.write("xd\n")
+            handle.write(f"t max_slip_rate {field_name}\n")
+            handle.write("# Here are the data\n")
+            first_row = np.concatenate(([0.0, 0.0], grid.y[indices]))
+            handle.write(" ".join(f"{value:14.6E}" for value in first_row) + "\n")
+            tiny = np.finfo(float).tiny
+            for column, time_value in enumerate(times):
+                max_rate = np.log10(max(np.max(np.abs(velocities[:, column])), tiny))
+                values = field[indices, column] * scale
+                row = np.concatenate(([time_value, max_rate], values))
+                handle.write(
+                    f"{row[0]:21.13E} "
+                    + " ".join(f"{value:14.6E}" for value in row[1:])
+                    + "\n"
+                )
+
+    def write_bp3_outputs(self, grid):
+        """Write MATLAB-compatible SEAS BP3 ASCII products in addition to NPZ."""
+        if self.p.case_type != "california" or self._written_count == 0:
+            return
+
+        p = self.p
+        nt = self._written_count
+        times = self.tm[:nt]
+        U = self.Um[:, :nt]
+        V = self.Vm[:, :nt]
+        tau = self.taum[:, :nt]
+        sigma = self.sigmam[:, :nt]
+        theta = self.thetam[:, :nt]
+        output_dir = self.out / "output_BP3_QD"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        motion_name = "thrust" if p.motion_sign > 0 else "normal"
+        element_size = self._bp3_element_size(grid)
+        tiny = np.finfo(float).tiny
+
+        fault_stations = np.array(
+            [0, 2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20, 25, 30, 35]
+        ) * 1e3
+        fault_names = [
+            "000", "025", "050", "075", "100", "125",
+            "150", "175", "200", "250", "300", "350",
+        ]
+        for station, name in zip(fault_stations, fault_names):
+            iy = int(np.argmin(np.abs(grid.y - station)))
+            with (output_dir / f"fltst_dp{name}").open(
+                "w", encoding="utf-8", newline="\n"
+            ) as handle:
+                self._write_bp3_common_header(
+                    handle, motion_name=motion_name,
+                    element_size=element_size, nt=nt,
+                )
+                handle.write(
+                    f"# location=on fault, {station / 1e3:.1f} km down-dip distance\n"
+                )
+                handle.write("# Column #1 = Time (s)\n")
+                handle.write("# Column #2 = Slip (m)\n")
+                handle.write("# Column #3 = Slip rate (log10 m/s)\n")
+                handle.write("# Column #4 = Shear stress (MPa)\n")
+                handle.write("# Column #5 = Normal stress (MPa)\n")
+                handle.write("# Column #6 = State (log10 s)\n")
+                handle.write("# The line below lists the names of the data fields\n")
+                handle.write("t slip slip_rate shear_stress normal_stress state\n")
+                handle.write("# Here is the time-series data.\n")
+                for column, time_value in enumerate(times):
+                    values = (
+                        time_value,
+                        -U[iy, column],
+                        np.log10(max(abs(V[iy, column]), tiny)),
+                        -tau[iy, column] / 1e6,
+                        sigma[iy, column] / 1e6,
+                        np.log10(max(theta[iy, column], tiny)),
+                    )
+                    handle.write(
+                        f"{values[0]:21.13E} "
+                        + " ".join(f"{value:14.6E}" for value in values[1:])
+                        + "\n"
+                    )
+
+        surface_names = [
+            "srfst_fn-32", "srfst_fn-16", "srfst_fn-08", "srfst_fn+00",
+            "srfst_fn-00", "srfst_fn+08", "srfst_fn+16", "srfst_fn+32",
+        ]
+        surface_nominal = np.array([-32, -16, -8, 0, 0, 8, 16, 32]) * 1e3
+        if self._bp3_surface_x is not None:
+            for station_idx, (name, nominal) in enumerate(
+                zip(surface_names, surface_nominal)
+            ):
+                with (output_dir / name).open(
+                    "w", encoding="utf-8", newline="\n"
+                ) as handle:
+                    self._write_bp3_common_header(
+                        handle, motion_name=motion_name,
+                        element_size=element_size, nt=nt,
+                    )
+                    handle.write(
+                        f"# location=on surface, {nominal / 1e3:+g} km distance off-fault\n"
+                    )
+                    handle.write(
+                        f"# sampled at x={self._bp3_surface_x[station_idx] / 1e3:+.4f} km\n"
+                    )
+                    handle.write("# Column #1 = Time (s)\n")
+                    handle.write("# Column #2 = Displacement 1 (m)\n")
+                    handle.write("# Column #3 = Displacement 2 (m)\n")
+                    handle.write("# Column #4 = Velocity 1 (m/s)\n")
+                    handle.write("# Column #5 = Velocity 2 (m/s)\n")
+                    handle.write("# The line below lists the names of the data fields\n")
+                    handle.write("t disp_1 disp_2 vel_1 vel_2\n")
+                    handle.write("# Here is the time-series data.\n")
+                    arrays = (
+                        self._bp3_surface_disp1,
+                        self._bp3_surface_disp2,
+                        self._bp3_surface_vel1,
+                        self._bp3_surface_vel2,
+                    )
+                    for column, time_value in enumerate(times):
+                        values = [array[station_idx, column] for array in arrays]
+                        handle.write(
+                            f"{time_value:21.13E} "
+                            + " ".join(f"{value:14.6E}" for value in values)
+                            + "\n"
+                        )
+
+        profile_indices = np.flatnonzero(grid.y <= p.W_f)
+        if profile_indices.size:
+            stride = max(
+                1,
+                self._matlab_round_positive(500.0 / element_size),
+            )
+            selected = profile_indices[::stride]
+            if selected[-1] != profile_indices[-1]:
+                selected = np.append(selected, profile_indices[-1])
+            self._write_bp3_profile(
+                output_dir / "slip.dat", field_name="slip",
+                description="Slip (m)", grid=grid, times=times,
+                velocities=V, field=U, scale=-1.0, indices=selected,
+                element_size=element_size,
+            )
+            self._write_bp3_profile(
+                output_dir / "shear_stress.dat", field_name="shear_stress",
+                description="Shear stress (MPa)", grid=grid, times=times,
+                velocities=V, field=tau, scale=-1e-6, indices=selected,
+                element_size=element_size,
+            )
+            self._write_bp3_profile(
+                output_dir / "normal_stress.dat", field_name="normal_stress",
+                description="Normal stress (MPa)", grid=grid, times=times,
+                velocities=V, field=sigma, scale=1e-6, indices=selected,
+                element_size=element_size,
+            )
 
     def save_checkpoint(self, it: int, checkpointer: int,
                         fault: "FaultState", tauqs, sigmaqs,

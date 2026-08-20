@@ -153,6 +153,7 @@ class ModelParameters:
     # --- Fault geometry ---
     alpha: float = 90.0          # Fault dip angle [degrees]
     motion_sign: int = -1        # SEAS convention: +1 thrust, -1 normal
+    auto_motion_sign: bool = True # Map BP3 loading to internal sign convention
 
     # --- Grid ---
     xsize: float = 1.0           # Horizontal model size [m]
@@ -209,6 +210,11 @@ class ModelParameters:
     output_interval: int = 10
     checkpoint_interval: int = 1000
     output_vtk_option: bool = True
+
+    # --- SEAS BP3 output metadata ---
+    code_name: str = "FastSlipPy"
+    code_version: str = "0.1.2"
+    modeler: str = "Chengshun Shang"
 
     # --- Linear solver ---
     linear_solver: LinearSolver = LinearSolver.DIRECT
@@ -319,3 +325,36 @@ class ModelParameters:
                 )
             if self.y_stretch_max_cell_size is not None and self.y_stretch_max_cell_size <= 0.0:
                 raise ValueError("y_stretch_max_cell_size must be > 0 when provided.")
+
+    def apply_bp3_motion_sign(self):
+        """Apply the SEAS motion convention to BP3 internal velocities.
+
+        SEAS uses ``+1`` for thrust and ``-1`` for normal motion, whereas the
+        internal fault jump is ``uy(+) - uy(-)``. Consequently the internal
+        velocity sign is ``-motion_sign``, matching the MATLAB reference.
+        Magnitudes supplied by the caller are preserved.
+        """
+        if self.case_type != CaseType.CALIFORNIA or not self.auto_motion_sign:
+            return
+
+        internal_sign = -float(self.motion_sign)
+        initial_magnitude = abs(float(self.Vi))
+        plate_magnitude = abs(float(self.loading.V_p))
+        creep_magnitude = abs(float(self.loading.V_L))
+        if plate_magnitude == 0.0:
+            plate_magnitude = initial_magnitude
+        if creep_magnitude == 0.0:
+            creep_magnitude = initial_magnitude
+
+        self.Vi = internal_sign * initial_magnitude
+        self.loading.V_p = internal_sign * plate_magnitude
+        self.loading.V_L = internal_sign * creep_magnitude
+
+        # These are face velocities. The California RHS doubles side values
+        # because its LHS rows average ghost and interior unknowns.
+        if self.bc.left.uy.type == BCType.VELOCITY:
+            self.bc.left.uy.value = -0.5 * self.loading.V_p
+        if self.bc.right.uy.type == BCType.VELOCITY:
+            self.bc.right.uy.value = 0.5 * self.loading.V_p
+        if self.bc.bottom.uy.type == BCType.VELOCITY:
+            self.bc.bottom.uy.value = 0.5 * self.loading.V_L
