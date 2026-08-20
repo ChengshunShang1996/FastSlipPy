@@ -95,7 +95,10 @@ def build_bp3_parameters() -> ModelParameters:
     params.bc.right.uy.set_velocity(velocity_y)
     params.bc.top.set_traction_free()
     params.bc.bottom.ux.set_fixed()
-    params.bc.bottom.uy.set_fixed()
+    # Continue the rigid plate motion along the truncated deep boundary.
+    # MatrixBuilder applies this as -V_L/2 on the left and +V_L/2 on the
+    # right; automatic motion_sign handling supplies the normal/thrust sign.
+    params.bc.bottom.uy.set_velocity(params.loading.V_L / 2)
 
     top_of_layer = params.ysize
     bottom_of_layer = params.ysize * 2
