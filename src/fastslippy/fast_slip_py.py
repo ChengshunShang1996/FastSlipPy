@@ -42,7 +42,9 @@ class FastSlipPy:
                  checkpointer: int = 0):
         self.p            = params or ModelParameters()
         self.checkpointer = checkpointer
-        self.output       = OutputManager(self.p, Path(output_dir))
+        self.output       = OutputManager(
+            self.p, Path(output_dir), append_log=bool(checkpointer)
+        )
 
         # Build grid
         self.grid  = Grid(self.p)
@@ -147,16 +149,14 @@ class FastSlipPy:
 
     def _select_adaptive_fault_window(self):
         Ny = self.p.Ny
+        if self.p.case_type == "california":
+            stop = self.fault.california_loading_start_idx()
+            if stop > 0:
+                return self.fault.V[:stop], self.ksi[:stop]
+            return self.fault.V, self.ksi
+
         interior_start = 1
         interior_stop = Ny - 1
-        if self.p.case_type == "california":
-            start_idx = self.fault.california_loading_start_idx()
-            upper = min(max(start_idx, interior_start), interior_stop)
-            if upper > interior_start:
-                return (
-                    self.fault.V[interior_start:upper],
-                    self.ksi[interior_start:upper],
-                )
         return (
             self.fault.V[interior_start:interior_stop],
             self.ksi[interior_start:interior_stop],
@@ -173,6 +173,8 @@ class FastSlipPy:
         # ── initialise / load checkpoint ──
         if not self.checkpointer:
             dPdt = p.loading.dPdt_pre
+            dt = p.dt_init
+            t = 0.0
             self._build_and_factor_LH(dPdt)
         else:
             ckpt = self.output.load_checkpoint(self.checkpointer)
@@ -185,14 +187,22 @@ class FastSlipPy:
             self.sigmaqs = ckpt["sigmaqs"]
             self.uy = ckpt["uy"];  self.vy = ckpt["vy"]
             self.ux = ckpt["ux"];  self.vx = ckpt["vx"]
-            dPdt = p.dPdt_pre
+            dt = float(ckpt["dt"])
+            t = float(ckpt["t"])
+            dPdt = (
+                p.loading.dPdt_post
+                if p.case_type == "groningen" and t >= p.loading.tload
+                else p.loading.dPdt_pre
+            )
             self._build_and_factor_LH(dPdt)
 
-        dt     = p.dt_init
         dt_max = p.dt_max
-        t      = 0.0
         t2     = 0.0
-        phase  = 0        # 0 = pre-depletion, 1 = transition, 2 = post-depletion
+        phase = (
+            0
+            if p.case_type == "groningen" and t < p.loading.tload
+            else 2
+        )
 
         print(f"Setup complete in {time.perf_counter()-t0_all:.1f}s.  "
               f"Starting {p.Nt} time steps …")
@@ -211,16 +221,30 @@ class FastSlipPy:
 
             # ── velocity solve (rate-and-state) ──
             mid = Nx // 2
-            self.fault.solve_slip_rate_newton(self.tauqs[:, mid], self.stress, self.fric)
+            if p.case_type == "california":
+                self.fault.solve_slip_rate_newton_v2(
+                    self.tauqs[:, mid], self.stress, self.fric
+                )
+            else:
+                self.fault.solve_slip_rate_newton(
+                    self.tauqs[:, mid], self.stress, self.fric
+                )
 
             # ── adaptive time step ──
             V_inner, ksi_inner = self._select_adaptive_fault_window()
-            dt_cand = np.min(ksi_inner * p.L / V_inner)
+            speed = np.maximum(np.abs(V_inner), np.finfo(float).tiny)
+            dt_cand = np.min(ksi_inner * p.L / speed)
             dt_cand = max(dt_cand, 1e-150)
-            dt      = min(min(1.2 * dt, dt_cand), dt_max)
+            dt = min(p.dt_growth * dt, dt_cand, dt_max, p.tfinal - t)
+            if dt <= 0.0:
+                break
 
             # Clamp dt so we hit tload exactly
-            if phase == 0 and t + dt >= p.loading.tload:
+            if (
+                p.case_type == "groningen"
+                and phase == 0
+                and t + dt >= p.loading.tload
+            ):
                 dt    = p.loading.tload - t
                 phase = 1
 
@@ -264,30 +288,34 @@ class FastSlipPy:
             self.ux += self.vx * dt
 
             # ── compute stress ──
-            if self.grid.is_nonuniform:
-                self.tauqs, self.sigmaqs = self.stress_calculator.compute_stress_fields(
-                    self.uy, self.ux, self.grid.dx, self.grid.dy,
-                    p.lam, p.G, self.grid.cosa, self.grid.sina, Ny, Nx,
-                    x=self.grid.x, y=self.grid.y, xp=self.grid.xp, yp=self.grid.yp)
-            else:
-                self.tauqs, self.sigmaqs = self.stress_calculator.compute_stress_fields(
-                    self.uy, self.ux, self.grid.dx, self.grid.dy,
-                    p.lam, p.G, self.grid.cosa, self.grid.sina, Ny, Nx)
+            self.tauqs, self.sigmaqs = self.stress_calculator.compute_stress_fields(
+                self.uy, self.ux, self.grid.dx, self.grid.dy,
+                p.lam, p.G, self.grid.cosa, self.grid.sina, Ny, Nx,
+                x=self.grid.x, y=self.grid.y,
+                xp=self.grid.xp, yp=self.grid.yp,
+            )
 
             # Update effective normal stress from sigmaqs
             mid_l = (Nx - 1) // 2 - 1
             mid_r = (Nx - 1) // 2
-            sigmal = np.concatenate([[self.sigmaqs[0, mid_l]],
-                                     self.stress_calculator._movmean_discard(self.sigmaqs[:, mid_l], 0),
-                                     [self.sigmaqs[-1, mid_l]]])
-            sigmar = np.concatenate([[self.sigmaqs[0, mid_r]],
-                                     self.stress_calculator._movmean_discard(self.sigmaqs[:, mid_r], 0),
-                                     [self.sigmaqs[-1, mid_r]]])
-            self.fault.sigma = self.stress.sigman0 - np.minimum(sigmal, sigmar)
+            sigmal, sigmar = self.stress_calculator.recover_fault_normal_stress(
+                self.sigmaqs,
+                self.grid.x,
+                self.grid.y,
+                self.grid.xp,
+                self.grid.yp,
+                mid_l,
+                mid_r,
+            )
+            self.fault.sigma = self.stress.sigman0 - 0.5 * (sigmal + sigmar)
 
             # ── pressure update ──
             if p.case_type == "groningen":
                 self.stress.update_pressure(dt, dPdt)
+
+            t += dt
+            if phase == 2:
+                t2 += dt
 
             # ── logging ──
             self.output.log(it, t2 if phase == 2 else t, dt,
@@ -315,9 +343,8 @@ class FastSlipPy:
                         self.tauqs, self.sigmaqs,
                         self.fault, t)
 
-            t += dt
-            if phase == 2:
-                t2 += dt
+            if t >= p.tfinal:
+                break
 
         if p.run_mode == "debug":
             mid = Nx//2

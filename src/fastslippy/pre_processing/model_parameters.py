@@ -152,6 +152,7 @@ class ModelParameters:
     
     # --- Fault geometry ---
     alpha: float = 90.0          # Fault dip angle [degrees]
+    motion_sign: int = -1        # SEAS convention: +1 thrust, -1 normal
 
     # --- Grid ---
     xsize: float = 1.0           # Horizontal model size [m]
@@ -179,6 +180,7 @@ class ModelParameters:
     g: float = 9.81              # Gravitational acceleration [m/s²]
     K0: float = 0.75             # Ratio σ_min / σ_max
     E: float = 0.0               # Young's modulus [Pa] 
+    sigma0: float = 50e6         # BP3 effective normal stress [Pa]
 
     # --- Rate-and-state defaults (used when heterogeneous profile is off) ---
     friction_law: FrictionLaw = FrictionLaw.RATE_STATE
@@ -199,6 +201,9 @@ class ModelParameters:
     Nt: int = 1000               # Number of time steps
     dt_init: float = 1e-5         # Initial time step [s]
     dt_max: float = 0.002          # Maximum time step [s]
+    dt_growth: float = 1.2        # Maximum multiplicative timestep growth
+    tfinal: float = np.inf        # Optional final physical time [s]
+    friction_tolerance: float = 5.0  # Friction residual tolerance [Pa]
 
     # --- Output intervals ---
     output_interval: int = 10
@@ -260,7 +265,14 @@ class ModelParameters:
         if not self.ilu_permc_spec:
             raise ValueError("ilu_permc_spec must be a non-empty string.")
         assert self.Nx % 2 == 1, "Nx must be odd (fault at centre column)."
-        assert self.Ny % 2 == 1, "Ny must be odd."
+        if self.Ny < 4:
+            raise ValueError("Ny must provide at least three stress-cell centres.")
+        if self.motion_sign not in (-1, 1):
+            raise ValueError("motion_sign must be +1 (thrust) or -1 (normal).")
+        if self.dt_growth <= 0.0:
+            raise ValueError("dt_growth must be positive.")
+        if self.friction_tolerance < 0.0:
+            raise ValueError("friction_tolerance must be non-negative.")
         if self.x_stretch_enabled:
             if not (0.0 < self.x_stretch_inner_size < self.xsize):
                 raise ValueError("x_stretch_inner_size must be in (0, xsize).")

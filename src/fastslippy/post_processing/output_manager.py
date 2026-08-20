@@ -23,7 +23,8 @@ class OutputManager:
       - NumPy checkpoints
     """
 
-    def __init__(self, p: ModelParameters, output_dir: Path = Path(".")):
+    def __init__(self, p: ModelParameters, output_dir: Path = Path("."),
+                 append_log: bool = False):
         self.p   = p
         self.out = output_dir
         self.out.mkdir(parents=True, exist_ok=True)
@@ -47,7 +48,7 @@ class OutputManager:
         # self.vxmall     = np.zeros((Ny+1, Nx, n))
         self.tau0   = np.zeros((Ny, n))
 
-        self._logfile = open(self.out / "output.txt", "w")
+        self._logfile = open(self.out / "output.txt", "a" if append_log else "w")
 
     def log(self, it: int, t: float, dt: float, V: np.ndarray, U: np.ndarray,
             checkpointer: int = 0):

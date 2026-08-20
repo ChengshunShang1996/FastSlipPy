@@ -37,16 +37,22 @@ class FaultState:
         self.V     = np.full(Ny, p.Vi)
         if p.case_type == "groningen" or p.case_type == "california":
             logarg = 2 * p.V0 / p.Vi * np.sinh((stress.tau0 - p.eta * p.Vi) / fric.a / stress.sigman0)
-            safe_logarg = np.maximum(logarg, 1e-30)
             if np.any(logarg <= 0):
-                print(logarg)
-                print("Warning: logarg has non-positive values, which may cause issues in the solver.")
-            self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.log(safe_logarg)- p.mu0 / fric.b))
-            #self.theta = (p.L / p.V0 * np.exp(fric.a / fric.b * np.emath.log(logarg)- p.mu0 / fric.b))
+                raise ValueError(
+                    "BP3 initial-state inversion produced a non-positive "
+                    "logarithm argument."
+                )
+            self.theta = (
+                p.L / p.V0
+                * np.exp(fric.a / fric.b * np.log(logarg) - p.mu0 / fric.b)
+            )
         elif p.case_type == "lab":
             self.theta = np.full(p.Ny, p.L / p.V0)
         self.sigma = stress.sigman0.copy()
         self.tau   = stress.tau0 - p.eta * self.V
+        if p.case_type == "california":
+            start_idx = self.california_loading_start_idx()
+            self.V[start_idx:] = p.loading.V_L
 
     def california_loading_start_idx(self) -> int:
         """
@@ -90,6 +96,187 @@ class FaultState:
         self.V = np.maximum(self.V, 1e-40)
         self.V[0]  = self.V[1]
         self.V[-1] = self.V[-2]
+
+    def solve_slip_rate_newton_v2(
+                        self,
+                        tauqs_col: np.ndarray,
+                        stress: StressState,
+                        fric: FrictionalZones):
+        """Solve the signed rate-state equation with safeguarded Newton steps.
+
+        Unlike :meth:`solve_slip_rate_newton`, this version solves for
+        ``log(abs(V))`` on either velocity branch. A monotonic root bracket is
+        maintained throughout the iteration, so an unsafe Newton step can be
+        replaced by a bracketed step without losing the root. The original
+        Newton solver is intentionally retained for comparison.
+        """
+        p = self.p
+        tauqs_col = np.asarray(tauqs_col, dtype=float)
+        if tauqs_col.shape != (p.Ny,):
+            raise ValueError(
+                f"tauqs_col must have shape ({p.Ny},), got {tauqs_col.shape}."
+            )
+
+        creep_start = (
+            self.california_loading_start_idx()
+            if p.case_type == "california"
+            else p.Ny
+        )
+        solved = self.V.copy()
+
+        for iy in range(creep_start):
+            rhs = float(tauqs_col[iy] + stress.tau0[iy])
+            if not np.isfinite(rhs):
+                raise RuntimeError(
+                    f"Newton v2 received a non-finite driving stress at node {iy}."
+                )
+            if rhs == 0.0:
+                solved[iy] = 0.0
+                continue
+
+            a_i = float(fric.a[iy])
+            b_i = float(fric.b[iy])
+            theta_i = float(self.theta[iy])
+            sigma_i = float(self.sigma[iy])
+            if a_i <= 0.0 or theta_i <= 0.0 or sigma_i <= 0.0:
+                raise RuntimeError(
+                    "Newton v2 requires positive a, theta, and effective "
+                    f"normal stress (fault node {iy})."
+                )
+
+            exponent = (
+                p.mu0 + b_i * np.log(p.V0 * theta_i / p.L)
+            ) / a_i
+            flash = (
+                1.0 + p.L / (p.Vw * theta_i)
+                if p.flash_heating_option
+                else 1.0
+            )
+            friction_scale = sigma_i * a_i / flash
+            log_multiplier = exponent - np.log(2.0 * p.V0)
+            target = abs(rhs)
+            velocity_sign = 1.0 if rhs > 0.0 else -1.0
+
+            if not np.isfinite(log_multiplier) or friction_scale <= 0.0:
+                raise RuntimeError(
+                    f"Newton v2 received invalid friction data at node {iy}."
+                )
+
+            def residual_and_log_derivative(speed):
+                """Return F(speed) and dF/d(log(speed)), avoiding overflow."""
+                log_speed = np.log(speed)
+                log_q = log_speed + log_multiplier
+                if log_q > 20.0:
+                    asinh_q = log_q + np.log1p(
+                        np.sqrt(1.0 + np.exp(-2.0 * log_q))
+                    )
+                    q_over_hypot = 1.0 / np.sqrt(
+                        1.0 + np.exp(-2.0 * log_q)
+                    )
+                else:
+                    q = np.exp(log_q)
+                    asinh_q = np.arcsinh(q)
+                    q_over_hypot = q / np.hypot(1.0, q)
+
+                residual = (
+                    friction_scale * asinh_q + p.eta * speed - target
+                )
+                derivative = (
+                    friction_scale * q_over_hypot + p.eta * speed
+                )
+                return residual, derivative
+
+            # F is strictly increasing. Radiation damping therefore gives the
+            # finite analytical upper bound ``target / eta``.
+            guaranteed_upper = target / p.eta
+            previous_speed = abs(float(self.V[iy]))
+            if not np.isfinite(previous_speed):
+                previous_speed = abs(float(p.Vi))
+            smallest_speed = np.nextafter(0.0, 1.0)
+            upper = min(
+                max(2.0 * previous_speed, smallest_speed),
+                guaranteed_upper,
+            )
+            f_upper, _ = residual_and_log_derivative(upper)
+
+            # Normally the previous solution gives a tight bracket. If stress
+            # changed sharply, expand it and finally use the analytical bound.
+            for _ in range(64):
+                if f_upper >= 0.0:
+                    break
+                next_upper = min(2.0 * upper, guaranteed_upper)
+                if next_upper <= upper:
+                    break
+                upper = next_upper
+                f_upper, _ = residual_and_log_derivative(upper)
+            if f_upper < 0.0:
+                upper = guaranteed_upper
+                f_upper, _ = residual_and_log_derivative(upper)
+            if not np.isfinite(f_upper) or f_upper < 0.0:
+                raise RuntimeError(
+                    f"Newton v2 could not bracket the friction root at node {iy}."
+                )
+
+            lower = 0.0
+            speed = min(max(previous_speed, smallest_speed), upper)
+            converged = False
+            for _ in range(100):
+                residual, derivative = residual_and_log_derivative(speed)
+                if not np.isfinite(residual) or not np.isfinite(derivative):
+                    raise RuntimeError(
+                        f"Newton v2 became non-finite at fault node {iy}."
+                    )
+                if abs(residual) <= p.friction_tolerance:
+                    converged = True
+                    break
+
+                if residual > 0.0:
+                    upper = speed
+                else:
+                    lower = speed
+
+                if derivative > 0.0:
+                    newton_log_speed = np.log(speed) - residual / derivative
+                    log_lower = np.log(lower) if lower > 0.0 else -np.inf
+                    log_upper = np.log(upper)
+                    newton_speed = (
+                        np.exp(newton_log_speed)
+                        if np.isfinite(newton_log_speed)
+                        and log_lower < newton_log_speed < log_upper
+                        else np.nan
+                    )
+                else:
+                    newton_speed = np.nan
+
+                if not np.isfinite(newton_speed) or not (
+                    lower < newton_speed < upper
+                ):
+                    newton_speed = (
+                        np.sqrt(lower * upper)
+                        if lower > 0.0
+                        else 0.5 * upper
+                    )
+
+                if newton_speed == speed:
+                    # No further representable progress is possible.
+                    converged = abs(residual) <= max(
+                        p.friction_tolerance,
+                        16.0 * np.finfo(float).eps * target,
+                    )
+                    break
+                speed = newton_speed
+
+            if not converged:
+                residual, _ = residual_and_log_derivative(speed)
+                raise RuntimeError(
+                    "Newton v2 did not converge at fault node "
+                    f"{iy} (friction residual={residual:g} Pa)."
+                )
+            solved[iy] = velocity_sign * speed
+
+        self.V[:] = solved
+        if p.case_type == "california":
+            self.V[creep_start:] = p.loading.V_L
     
     # ------------------------------------------------------------------
     def advance(self, dt: float, tauqs_col: np.ndarray, stress: StressState):
@@ -98,14 +285,15 @@ class FaultState:
         
         # self.theta = self.theta + dt * (1 - self.V * self.theta / p.L)
         # TODO: this one is better
-        x = self.V * dt / p.L
+        speed = np.abs(self.V)
+        x = speed * dt / p.L
         expo = x > 1e-6
         theta_new = np.empty_like(self.theta)
         theta_new[expo] = (
-            p.L / self.V[expo] * (1.0 - np.exp(-x[expo]))
+            p.L / speed[expo] * (1.0 - np.exp(-x[expo]))
             + self.theta[expo] * np.exp(-x[expo]))
         theta_new[~expo] = (self.theta[~expo]
-            + dt * (1.0 - self.V[~expo] * self.theta[~expo] / p.L))
+            + dt * (1.0 - speed[~expo] * self.theta[~expo] / p.L))
         self.theta = theta_new
 
         self.tau   = tauqs_col + stress.tau0 - p.eta * self.V
@@ -209,6 +397,93 @@ class FaultState:
 
         self.V[0]  = self.V[1]
         self.V[-1] = self.V[-2]
+
+    def solve_slip_rate_matlab(
+                        self,
+                        tauqs_col: np.ndarray,
+                        stress: StressState,
+                        fric: FrictionalZones):
+        """Solve the signed BP3 friction equation as in the MATLAB reference."""
+
+        p = self.p
+        if p.case_type == "california":
+            creep_start = self.california_loading_start_idx()
+        else:
+            creep_start = p.Ny
+
+        active = np.arange(creep_start, dtype=int)
+        if active.size == 0:
+            self.V[:] = p.loading.V_L
+            return
+
+        bracket = 2.0 * float(np.max(np.abs(self.V[active])))
+        bracket = max(bracket, np.finfo(float).tiny)
+        positive_branch = p.loading.V_p > 0.0
+        lower, upper = ((0.0, bracket) if positive_branch else (-bracket, 0.0))
+
+        solved = self.V.copy()
+        for iy in active:
+            rhs = tauqs_col[iy] + stress.tau0[iy]
+            a_i = fric.a[iy]
+            b_i = fric.b[iy]
+            theta_i = self.theta[iy]
+            sigma_i = self.sigma[iy]
+            exponent = (
+                p.mu0 + b_i * np.log(p.V0 * theta_i / p.L)
+            ) / a_i
+            exp_exponent = np.exp(exponent)
+            flash = (
+                1.0 + p.L / (p.Vw * theta_i)
+                if p.flash_heating_option
+                else 1.0
+            )
+
+            def residual(velocity):
+                friction = sigma_i * a_i * np.arcsinh(
+                    velocity / (2.0 * p.V0) * exp_exponent
+                )
+                return friction / flash + p.eta * velocity - rhs
+
+            lo = lower
+            hi = upper
+            f_lo = residual(lo)
+            f_hi = residual(hi)
+            if abs(f_lo) <= p.friction_tolerance:
+                solved[iy] = lo
+                continue
+            if abs(f_hi) <= p.friction_tolerance:
+                solved[iy] = hi
+                continue
+            if not np.isfinite(f_lo) or not np.isfinite(f_hi) or f_lo * f_hi > 0:
+                raise RuntimeError(
+                    "BP3 friction solve failed: the root left the dynamic "
+                    f"bracket at fault node {iy} (half-width={bracket:g} m/s)."
+                )
+
+            for _ in range(1000):
+                midpoint = 0.5 * (lo + hi)
+                f_mid = residual(midpoint)
+                if not np.isfinite(f_mid):
+                    raise RuntimeError(
+                        f"BP3 friction residual became non-finite at node {iy}."
+                    )
+                if abs(f_mid) <= p.friction_tolerance:
+                    solved[iy] = midpoint
+                    break
+                if np.signbit(f_mid) == np.signbit(f_hi):
+                    hi = midpoint
+                    f_hi = f_mid
+                else:
+                    lo = midpoint
+                    f_lo = f_mid
+            else:
+                raise RuntimeError(
+                    f"BP3 friction bisection did not converge at node {iy}."
+                )
+
+        self.V[:] = solved
+        if p.case_type == "california":
+            self.V[creep_start:] = p.loading.V_L
 
     def solve_slip_rate_newton(self,
                         tauqs_col: np.ndarray,

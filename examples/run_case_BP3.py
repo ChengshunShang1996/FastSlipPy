@@ -25,20 +25,22 @@ class RunFastSlipPy(FastSlipPy):
         self.grid.plot_grid()
         self.grid.plot_mesh()
 
-if __name__ == "__main__":
-    # Customise parameters here or leave all defaults
 
+def build_bp3_parameters() -> ModelParameters:
+    """Build the stretched-grid BP3 configuration used by this example."""
     params = ModelParameters(
         case_type = "california",
         alpha = 60.0,
         xsize = 80e3,
-        ysize = 80e3,
-        Nx = 361, Ny = 361,
-        #Nx = 641, Ny = 161, #500 m 
-        #Nx = 141, Ny = 31,
-        Nt = 100000,
+        ysize = 45e3,
+        # 200 m uniform core plus quadratic far-field stretching.
+        # MATLAB equivalent:
+        #   element_size=200; x_core=10e3; y_core=20e3;
+        #   nx_stretch=40; ny_stretch=36; stretch_r=2;
+        Nx = 181, Ny = 137,
+        Nt = 10,
         output_interval = 10,
-        checkpoint_interval = 1000,
+        checkpoint_interval = 10,
         rho = 2670.0,
         cs = 3464,
         mu0 = 0.6,
@@ -50,8 +52,11 @@ if __name__ == "__main__":
         b0 = 0.015,
         L = 0.008,
         dt_init = 1.0,
-        dt_max = 1e6,
-        output_vtk_option = False,
+        dt_max = 0.1 * 365 * 24 * 3600.0,
+        tfinal = 1500 * 365 * 24 * 3600.0,
+        dt_growth = 1.2,
+        friction_tolerance = 5.0,
+        output_vtk_option = True,
         Vi = 1e-9,
         flash_heating_option = False,
         H = 15e3,
@@ -61,8 +66,8 @@ if __name__ == "__main__":
         y_stretch_enabled=True,
         x_stretch_inner_size=20e3,
         y_stretch_inner_size=20e3,
-        x_stretch_inner_points=201,
-        y_stretch_inner_points=201,
+        x_stretch_inner_points=101,
+        y_stretch_inner_points=101,
         x_stretch_power=2,
         y_stretch_power=2,
         allow_nonuniform_solver=True,
@@ -86,11 +91,17 @@ if __name__ == "__main__":
     params.bc.right.uy.set_velocity(velocity_y)
     params.bc.top.set_traction_free()
     params.bc.bottom.ux.set_fixed()
-    params.bc.bottom.uy.set_velocity(velocity_y)
+    params.bc.bottom.uy.set_fixed()
 
     top_of_layer = params.ysize
     bottom_of_layer = params.ysize * 2
     params.layers.set_homogeneous(top = top_of_layer, bottom = bottom_of_layer, a=params.a0, b=params.b0)
+
+    return params
+
+
+if __name__ == "__main__":
+    params = build_bp3_parameters()
 
     model = RunFastSlipPy(params=params, output_dir="output")
     model.run()

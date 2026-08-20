@@ -12,6 +12,11 @@ __license__     = "MIT License"
 import numpy as np
 from typing import Optional
 
+from fastslippy.utilities.grid_operators import (
+    RecoveryOperators,
+    build_recovery_operators,
+)
+
 try:
     from numba import njit
     _HAS_NUMBA = True
@@ -117,6 +122,16 @@ class StressCalUtil:
     def __init__(self, prefer_numba: bool = True):
         self._use_numba = bool(prefer_numba and _HAS_NUMBA)
         self._workspace = {}
+        self._recovery_cache = {}
+
+    def _recovery_operators(self, x, y, xp, yp) -> RecoveryOperators:
+        arrays = tuple(np.asarray(value, dtype=float) for value in (x, y, xp, yp))
+        key = tuple((id(value), value.size) for value in arrays)
+        operators = self._recovery_cache.get(key)
+        if operators is None:
+            operators = build_recovery_operators(*arrays)
+            self._recovery_cache[key] = operators
+        return operators
 
     def _movmean_discard(self, arr: np.ndarray, axis: int) -> np.ndarray:
         """Running mean of adjacent pairs along *axis*, discarding endpoints."""
@@ -249,19 +264,33 @@ class StressCalUtil:
 
             return tauqs, sigmaqs
         else:
-            dx_uy = self._edge_divisor(np.diff(xp) if xp is not None else dx, Nx)
-            dy_ux = self._edge_divisor(np.diff(yp) if yp is not None else dy, Ny)
-            dx_ux = self._edge_divisor(np.diff(x) if x is not None else dx, Nx - 1)
-            dy_uy = self._edge_divisor(np.diff(y) if y is not None else dy, Ny - 1)
-            x_ux = self._coord_or_uniform(x, Nx, dx)
-            y_uy = self._coord_or_uniform(y, Ny, dy)
+            if any(value is None for value in (x, y, xp, yp)):
+                raise ValueError(
+                    "MATLAB-equivalent stress recovery requires x, y, xp, and yp."
+                )
+            x = np.asarray(x, dtype=float)
+            y = np.asarray(y, dtype=float)
+            xp = np.asarray(xp, dtype=float)
+            yp = np.asarray(yp, dtype=float)
+            recovery = self._recovery_operators(x, y, xp, yp)
 
-            term1 = np.diff(uy, axis=1) / dx_uy[None, :]                    # (Ny, Nx)
-            term2 = (1 - 2 * cosa**2) * np.diff(ux, axis=0) / dy_ux[:, None]   # (Ny, Nx)
-            duxdx = np.gradient(ux, x_ux, axis=1)                 # (Ny+1, Nx)
-            mm_duxdx = self._movmean_discard(duxdx, axis=0)          # (Ny,   Nx)  ✓
-            duydy = np.gradient(uy, y_uy, axis=0)                 # (Ny, Nx+1)
-            mm_duydy = self._movmean_discard(duydy, axis=1)          # (Ny, Nx)
+            dx_uy = self._edge_divisor(np.diff(xp), Nx)
+            dy_ux = self._edge_divisor(np.diff(yp), Ny)
+            dx_ux = self._edge_divisor(np.diff(x), Nx - 1)
+            dy_uy = self._edge_divisor(np.diff(y), Ny - 1)
+
+            term1 = np.diff(uy, axis=1) / dx_uy[None, :]
+            term2 = (
+                (1 - 2 * cosa**2)
+                * np.diff(ux, axis=0)
+                / dy_ux[:, None]
+            )
+            duxdx_nodes = (recovery.derivative_x @ ux.T).T
+            mm_duxdx = recovery.midpoint_y_to_node @ duxdx_nodes
+            duydy_nodes = recovery.derivative_y @ uy
+            mm_duydy = (
+                recovery.midpoint_x_to_node @ duydy_nodes.T
+            ).T
 
         # ── Assemble tauqs ──────────────────────────────────────────────────
         tauqs = G / sina * (term1 + term2 + cosa * (mm_duxdx - mm_duydy))  # (Ny, Nx)
@@ -282,3 +311,20 @@ class StressCalUtil:
                 - 2*G*cosa  * mm_outer)                   # (Ny-1, Nx-1)
 
         return tauqs, sigmaqs
+
+    def recover_fault_normal_stress(
+        self,
+        sigmaqs: np.ndarray,
+        x: np.ndarray,
+        y: np.ndarray,
+        xp: np.ndarray,
+        yp: np.ndarray,
+        left_column: int,
+        right_column: int,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Recover normal stress on both fault faces at every fault node."""
+
+        recovery = self._recovery_operators(x, y, xp, yp)
+        left = recovery.sigma_centres_to_nodes @ sigmaqs[:, left_column]
+        right = recovery.sigma_centres_to_nodes @ sigmaqs[:, right_column]
+        return np.asarray(left), np.asarray(right)

@@ -45,6 +45,20 @@ class FrictionalZones:
         a = np.zeros_like(y)
         b = np.zeros_like(y)
 
+        if p.case_type == "california":
+            a.fill(p.a_max)
+            shallow = y < p.H
+            transition = (y >= p.H) & (y < p.H + p.h)
+            a[shallow] = p.a0
+            a[transition] = (
+                p.a0
+                + (p.a_max - p.a0)
+                * (y[transition] - p.H)
+                / p.h
+            )
+            b.fill(p.b0)
+            return a, b
+
         #layers = list(self.LAYERS.items())
         layers = self.p.layers.layers
 
@@ -67,17 +81,7 @@ class FrictionalZones:
             else:
                 mask = (y > top_y) & (y <= bot_y)
 
-            if p.case_type == "california":
-                # Linear interpolation of a(y)
-                mask_zone1 = (y >= 0) & (y < p.H)
-                mask_zone2 = (y >= p.H) & (y < p.H + p.h)
-                mask_zone3 = (y >= p.H + p.h)
-                a[mask_zone1] = p.a0
-                a[mask_zone2] = p.a0 + (p.a_max - p.a0) * (y[mask_zone2] - p.H) / p.h
-                a[mask_zone3] = p.a_max
-                b[mask] = layer.b
-            else:
-                a[mask] = layer.a
-                b[mask] = layer.b
+            a[mask] = layer.a
+            b[mask] = layer.b
 
         return a, b

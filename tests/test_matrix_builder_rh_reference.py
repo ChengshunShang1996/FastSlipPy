@@ -135,6 +135,19 @@ def _reference_build_rh(p: ModelParameters, g: Grid, builder: MatrixBuilder,
                         if yv == 800 and ix < mid + 1:
                             RH[kux] = -dPdt / dy_loc * dx_loc * dx_loc / G * sina * cosa
 
+    if p.case_type == "california":
+        if p.bc.left.uy.type.name == "VELOCITY":
+            for iy in range(Ny):
+                _, kuy = MatrixBuilder._dofs(0, iy, Ny)
+                RH[kuy] = 2.0 * p.bc.left.uy.value
+        if p.bc.right.uy.type.name == "VELOCITY":
+            for iy in range(Ny):
+                _, kuy = MatrixBuilder._dofs(Nx, iy, Ny)
+                RH[kuy] = 2.0 * p.bc.right.uy.value
+        for iy in range(Ny):
+            _, kuy = MatrixBuilder._dofs(mid, iy, Ny)
+            RH[kuy] = V[iy]
+
     return RH
 
 

@@ -21,10 +21,13 @@ def test_vertical_fault_far_field_loading_is_mirror_symmetric():
     params.bc.top.set_traction_free()
     params.bc.bottom.ux.set_fixed()
     params.bc.bottom.uy.set_velocity(half_rate)
+    params.loading.V_L = 2.0 * half_rate
 
     grid = Grid(params)
     builder = MatrixBuilder(params, grid)
-    rhs = builder.build_RH(0.0, np.zeros(params.Ny))
+    slip_rate = np.zeros(params.Ny)
+    slip_rate[-1] = params.loading.V_L
+    rhs = builder.build_RH(0.0, slip_rate)
     solution = spsolve(builder.build_LH().tocsc(), rhs)
 
     ux = solution[0::2].reshape(params.Nx + 1, params.Ny + 1).T[:, :params.Nx]

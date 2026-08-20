@@ -80,10 +80,10 @@ def test_adaptive_dt_window_uses_same_wf_indexing(tmp_path):
 
     v_inner, ksi_inner = model._select_adaptive_fault_window()
 
-    expected_upper = min(max(start_idx, 1), params.Ny - 1)
-    if expected_upper > 1:
-        np.testing.assert_allclose(v_inner, model.fault.V[1:expected_upper], rtol=0.0, atol=0.0)
-        np.testing.assert_allclose(ksi_inner, model.ksi[1:expected_upper], rtol=0.0, atol=0.0)
+    expected_upper = min(max(start_idx, 0), params.Ny)
+    if expected_upper > 0:
+        np.testing.assert_allclose(v_inner, model.fault.V[:expected_upper], rtol=0.0, atol=0.0)
+        np.testing.assert_allclose(ksi_inner, model.ksi[:expected_upper], rtol=0.0, atol=0.0)
     else:
         np.testing.assert_allclose(v_inner, model.fault.V[1:params.Ny - 1], rtol=0.0, atol=0.0)
         np.testing.assert_allclose(ksi_inner, model.ksi[1:params.Ny - 1], rtol=0.0, atol=0.0)
