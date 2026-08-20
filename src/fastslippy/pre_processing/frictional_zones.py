@@ -62,6 +62,13 @@ class FrictionalZones:
         #layers = list(self.LAYERS.items())
         layers = self.p.layers.layers
 
+        # Homogeneous fallback keeps the general/default cases usable without
+        # requiring callers to construct a one-layer profile explicitly.
+        if not layers:
+            a.fill(p.a0)
+            b.fill(p.b0)
+            return a, b
+
         #for i, (name, layer) in enumerate(layers):
         for i, layer in enumerate(layers):
 
@@ -83,5 +90,12 @@ class FrictionalZones:
 
             a[mask] = layer.a
             b[mask] = layer.b
+
+        if np.any(a <= 0.0):
+            missing = np.flatnonzero(a <= 0.0)
+            raise ValueError(
+                "Friction layers must cover every fault node with a positive "
+                f"direct-effect coefficient a; uncovered indices: {missing.tolist()}."
+            )
 
         return a, b

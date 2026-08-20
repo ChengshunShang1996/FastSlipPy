@@ -221,14 +221,9 @@ class FastSlipPy:
 
             # ── velocity solve (rate-and-state) ──
             mid = Nx // 2
-            if p.case_type == "california":
-                self.fault.solve_slip_rate_newton_v2(
-                    self.tauqs[:, mid], self.stress, self.fric
-                )
-            else:
-                self.fault.solve_slip_rate_newton(
-                    self.tauqs[:, mid], self.stress, self.fric
-                )
+            self.fault.solve_slip_rate_newton_v2(
+                self.tauqs[:, mid], self.stress, self.fric
+            )
 
             # ── adaptive time step ──
             V_inner, ksi_inner = self._select_adaptive_fault_window()

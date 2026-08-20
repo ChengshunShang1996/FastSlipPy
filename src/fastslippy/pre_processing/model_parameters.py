@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from fastslippy.pre_processing.layer_parameters import Layer, LayerParameters
 
-class CaseType(Enum):
+class CaseType(str, Enum):
     GRONINGEN = "groningen"
     LAB = "lab"
     CALIFORNIA = "california"
@@ -231,7 +231,19 @@ class ModelParameters:
     layers: LayerParameters = field(default_factory=LayerParameters)
 
     def __post_init__(self):
-        
+        case_value = (
+            self.case_type.value
+            if isinstance(self.case_type, CaseType)
+            else str(self.case_type).lower()
+        )
+        try:
+            self.case_type = CaseType(case_value)
+        except ValueError as exc:
+            supported = ", ".join(case.value for case in CaseType)
+            raise ValueError(
+                f"case_type must be one of: {supported}."
+            ) from exc
+
         #self.G = self.rho * self.cs ** 2
         if self.E > 0:
             self.G = self.E / (2 * (1 + self.nu))
