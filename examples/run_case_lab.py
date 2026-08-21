@@ -27,7 +27,7 @@ if __name__ == "__main__":
         alpha = 90.0,
         xsize = 1.0,
         ysize = 1.0,
-        Nx=11, Ny=11,
+        Nx=41, Ny=41,
         Nt=50000,
         output_interval=10,
         checkpoint_interval=10000,
@@ -40,7 +40,9 @@ if __name__ == "__main__":
         V0 = 1e-6,
         a0 = 0.012,
         b0 = 0.0135,
-        flash_heating_option = False
+        flash_heating_option = False,
+        fault_surface_treatment = "external_boundary",
+        fault_bottom_treatment = "external_boundary",
     )
 
     params.bc.left.ux.set_fixed()
@@ -48,9 +50,13 @@ if __name__ == "__main__":
     params.bc.right.ux.set_fixed()
     params.bc.right.uy.set_velocity(1e-5)
     params.bc.top.ux.set_fixed()
-    params.bc.top.uy.set_velocity(1e-5) # only acts on the right half of the top boundary
+    params.bc.top.uy.set_velocity(
+        1e-5, profile="positive_fault_block"
+    )
     params.bc.bottom.ux.set_fixed()
-    params.bc.bottom.uy.set_velocity(1e-5) # only acts on the right half of the bottom boundary
+    params.bc.bottom.uy.set_velocity(
+        1e-5, profile="positive_fault_block"
+    )
 
     params.layers.set_homogeneous(top = 1, bottom = 2, a=params.a0, b=params.b0)
 

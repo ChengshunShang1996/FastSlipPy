@@ -13,7 +13,12 @@ import numpy as np
 import pytest
 
 from fastslippy.pre_processing.grid import Grid
-from fastslippy.pre_processing.model_parameters import ModelParameters
+from fastslippy.pre_processing.model_parameters import (
+    BoundaryProfile,
+    FaultBottomTreatment,
+    FaultSurfaceTreatment,
+    ModelParameters,
+)
 from fastslippy.solver.matrix_builder import MatrixBuilder
 
 
@@ -31,6 +36,14 @@ def _reference_build_rh(p: ModelParameters, g: Grid, builder: MatrixBuilder,
     uniform = builder._is_uniform
     dx_uniform = float(g.dx)
     dy_uniform = float(g.dy)
+    surface_fault_intersection = (
+        p.fault_surface_treatment
+        == FaultSurfaceTreatment.FREE_SURFACE_FAULT_INTERSECTION
+    )
+    bottom_fault_intersection = (
+        p.fault_bottom_treatment
+        == FaultBottomTreatment.DEEP_BOUNDARY_FAULT_INTERSECTION
+    )
 
     RH = np.zeros(N)
 
@@ -48,34 +61,35 @@ def _reference_build_rh(p: ModelParameters, g: Grid, builder: MatrixBuilder,
 
                 if ix == 0:
                     if p.bc.left.uy.type.name == "VELOCITY":
-                        RH[kuy] = p.bc.left.uy.value
+                        RH[kuy] = 2.0 * p.bc.left.uy.value
                 elif ix == Nx:
                     if p.bc.right.uy.type.name == "VELOCITY":
-                        RH[kuy] = p.bc.right.uy.value
+                        RH[kuy] = 2.0 * p.bc.right.uy.value
                 elif iy == 0:
-                    if p.bc.top.uy.type.name == "VELOCITY":
-                        if p.case_type == "lab":
-                            if ix > mid:
-                                RH[kuy] = p.bc.top.uy.value
-                        else:
+                    is_reserved = surface_fault_intersection and ix in (mid, mid + 1)
+                    if p.bc.top.uy.type.name == "VELOCITY" and not is_reserved:
+                        profile = p.bc.top.uy.profile
+                        if profile == BoundaryProfile.FULL:
                             RH[kuy] = p.bc.top.uy.value
+                        elif profile == BoundaryProfile.POSITIVE_FAULT_BLOCK and ix > mid:
+                            RH[kuy] = p.bc.top.uy.value
+                        elif profile == BoundaryProfile.NEGATIVE_FAULT_BLOCK and ix <= mid:
+                            RH[kuy] = p.bc.top.uy.value
+                        elif profile == BoundaryProfile.ANTISYMMETRIC_ABOUT_FAULT:
+                            RH[kuy] = (-1.0 if ix <= mid else 1.0) * p.bc.top.uy.value
                 elif iy == Ny - 1:
                     if p.bc.bottom.uy.type.name == "VELOCITY":
-                        if p.case_type == "lab":
-                            if ix > mid:
-                                RH[kuy] = p.bc.bottom.uy.value
-                        elif p.case_type == "california":
-                            if ix <= mid:
-                                RH[kuy] = -1 * p.bc.bottom.uy.value
-                            elif ix > mid:
-                                RH[kuy] = p.bc.bottom.uy.value
-                        else:
+                        profile = p.bc.bottom.uy.profile
+                        if profile == BoundaryProfile.FULL:
                             RH[kuy] = p.bc.bottom.uy.value
+                        elif profile == BoundaryProfile.POSITIVE_FAULT_BLOCK and ix > mid:
+                            RH[kuy] = p.bc.bottom.uy.value
+                        elif profile == BoundaryProfile.NEGATIVE_FAULT_BLOCK and ix <= mid:
+                            RH[kuy] = p.bc.bottom.uy.value
+                        elif profile == BoundaryProfile.ANTISYMMETRIC_ABOUT_FAULT:
+                            RH[kuy] = (-1.0 if ix <= mid else 1.0) * p.bc.bottom.uy.value
                 elif ix == mid:
-                    if p.case_type == "california" and y[iy] >= p.W_f:
-                        RH[kuy] = p.loading.V_L
-                    else:
-                        RH[kuy] = V[iy]
+                    RH[kuy] = V[iy]
                 elif ix == mid + 1:
                     pass
                 else:
@@ -100,16 +114,10 @@ def _reference_build_rh(p: ModelParameters, g: Grid, builder: MatrixBuilder,
 
                 if iy == 0:
                     if p.bc.top.ux.type.name == "VELOCITY":
-                        RH[kux] = p.bc.top.ux.value
+                        RH[kux] = 2.0 * p.bc.top.ux.value
                 elif iy == Ny:
                     if p.bc.bottom.ux.type.name == "VELOCITY":
-                        if p.case_type == "california":
-                            if ix < mid:
-                                RH[kux] = -1 * p.bc.bottom.ux.value
-                            elif ix > mid:
-                                RH[kux] = p.bc.bottom.ux.value
-                        else:
-                            RH[kux] = p.bc.bottom.ux.value
+                        RH[kux] = 2.0 * p.bc.bottom.ux.value
                 elif ix == 0:
                     if p.bc.left.ux.type.name == "VELOCITY":
                         RH[kux] = p.bc.left.ux.value
@@ -135,18 +143,12 @@ def _reference_build_rh(p: ModelParameters, g: Grid, builder: MatrixBuilder,
                         if yv == 800 and ix < mid + 1:
                             RH[kux] = -dPdt / dy_loc * dx_loc * dx_loc / G * sina * cosa
 
-    if p.case_type == "california":
-        if p.bc.left.uy.type.name == "VELOCITY":
-            for iy in range(Ny):
-                _, kuy = MatrixBuilder._dofs(0, iy, Ny)
-                RH[kuy] = 2.0 * p.bc.left.uy.value
-        if p.bc.right.uy.type.name == "VELOCITY":
-            for iy in range(Ny):
-                _, kuy = MatrixBuilder._dofs(Nx, iy, Ny)
-                RH[kuy] = 2.0 * p.bc.right.uy.value
-        for iy in range(Ny):
-            _, kuy = MatrixBuilder._dofs(mid, iy, Ny)
-            RH[kuy] = V[iy]
+    if surface_fault_intersection:
+        _, kuy = MatrixBuilder._dofs(mid, 0, Ny)
+        RH[kuy] = V[0]
+    if bottom_fault_intersection:
+        _, kuy = MatrixBuilder._dofs(mid, Ny - 1, Ny)
+        RH[kuy] = V[Ny - 1]
 
     return RH
 

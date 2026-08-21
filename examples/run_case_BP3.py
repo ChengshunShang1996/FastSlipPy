@@ -73,6 +73,8 @@ def build_bp3_parameters() -> ModelParameters:
         x_stretch_power=2,
         y_stretch_power=2,
         allow_nonuniform_solver=True,
+        fault_surface_treatment="free_surface_fault_intersection",
+        fault_bottom_treatment="deep_boundary_fault_intersection",
     )
 
     yr = 365 * 24 * 3600.0
@@ -98,7 +100,10 @@ def build_bp3_parameters() -> ModelParameters:
     # Continue the rigid plate motion along the truncated deep boundary.
     # MatrixBuilder applies this as -V_L/2 on the left and +V_L/2 on the
     # right; automatic motion_sign handling supplies the normal/thrust sign.
-    params.bc.bottom.uy.set_velocity(params.loading.V_L / 2)
+    params.bc.bottom.uy.set_velocity(
+        params.loading.V_L / 2,
+        profile="antisymmetric_about_fault",
+    )
 
     top_of_layer = params.ysize
     bottom_of_layer = params.ysize * 2

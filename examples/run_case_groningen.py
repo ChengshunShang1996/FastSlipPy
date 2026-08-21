@@ -47,6 +47,8 @@ if __name__ == "__main__":
         Vw = 1e90,
         Vi = 1e-30,
         flash_heating_option = True,
+        fault_surface_treatment = "external_boundary",
+        fault_bottom_treatment = "external_boundary",
     )
 
     yr = 365 * 24 * 3600.0

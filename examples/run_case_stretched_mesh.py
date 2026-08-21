@@ -55,6 +55,8 @@ if __name__ == "__main__":
         x_stretch_max_cell_size=0.05,
         y_stretch_max_cell_size=0.05,
         allow_nonuniform_solver=True,
+        fault_surface_treatment="external_boundary",
+        fault_bottom_treatment="external_boundary",
     )
 
     params.bc.left.ux.set_fixed()
@@ -62,9 +64,9 @@ if __name__ == "__main__":
     params.bc.right.ux.set_fixed()
     params.bc.right.uy.set_velocity(1e-5)
     params.bc.top.ux.set_fixed()
-    params.bc.top.uy.set_velocity(1e-5)
+    params.bc.top.uy.set_velocity(1e-5, profile="positive_fault_block")
     params.bc.bottom.ux.set_fixed()
-    params.bc.bottom.uy.set_velocity(1e-5)
+    params.bc.bottom.uy.set_velocity(1e-5, profile="positive_fault_block")
 
     params.layers.set_homogeneous(top=1, bottom=2, a=params.a0, b=params.b0)
 

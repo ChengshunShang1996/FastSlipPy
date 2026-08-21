@@ -12,7 +12,13 @@ __license__     = "MIT License"
 import numpy as np
 from scipy import sparse
 
-from fastslippy.pre_processing.model_parameters import ModelParameters, BCType
+from fastslippy.pre_processing.model_parameters import (
+    BCType,
+    BoundaryProfile,
+    FaultBottomTreatment,
+    FaultSurfaceTreatment,
+    ModelParameters,
+)
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.utilities.grid_operators import finite_difference_weights
 
@@ -22,7 +28,8 @@ class MatrixBuilder:
     Assembles the sparse stiffness matrix LH and right-hand-side vector RH
     for the quasi-static elastic equilibrium problem on the staggered grid.
 
-    The stencil follows the original MATLAB build_LH / build_RH logic exactly.
+    Fault traction continuity follows the MATLAB BP3 stencil for every case;
+    only the physical outer-boundary and endpoint treatments are configurable.
     """
 
     def __init__(self, p: ModelParameters, grid: Grid):
@@ -128,31 +135,20 @@ class MatrixBuilder:
         dx_xux = self._dx_xux
         dy_yux = self._dy_yux
         use_coordinate_nonuniform_operator = not self._is_uniform
-        is_california = self._case_type == "california"
+        use_surface_fault_intersection = (
+            p.fault_surface_treatment
+            == FaultSurfaceTreatment.FREE_SURFACE_FAULT_INTERSECTION
+        )
+        use_bottom_fault_intersection = (
+            p.fault_bottom_treatment
+            == FaultBottomTreatment.DEEP_BOUNDARY_FAULT_INTERSECTION
+        )
 
         rows, cols, vals = [], [], []
         _point_weight_cache = {}
 
         def add(r, c, v):
             rows.append(r); cols.append(c); vals.append(v)
-
-        def add_ux(ix, iy, value):
-            """Add a coefficient for ux(ix, iy) to a fault-interface row."""
-            kux_local, _ = self._dofs(ix, iy, Ny)
-            add(fault_row, kux_local, fault_scale * value)
-
-        def add_uy(ix, iy, value):
-            """Add a coefficient for uy(ix, iy) to a fault-interface row."""
-            _, kuy_local = self._dofs(ix, iy, Ny)
-            add(fault_row, kuy_local, fault_scale * value)
-
-        def first_derivative_weights(coords: np.ndarray, idx: int):
-            """Quadratic-exact three-point derivative at a node."""
-            stencil = three_point_stencil(coords.size, idx)
-            weights = finite_difference_weights(
-                coords[idx], coords[list(stencil)], 1
-            )
-            return tuple(zip(stencil, weights))
 
         def point_weights(coords: np.ndarray, target: float, indices, derivative: int):
             """Polynomial-exact weights for a derivative at an off-grid point.
@@ -194,8 +190,6 @@ class MatrixBuilder:
             for iy in range(Ny+1):       # 0 … Ny
 
                 kux, kuy = self._dofs(ix, iy, Ny)
-                fault_row = None
-                fault_scale = None
                 mid = (Nx) // 2            # fault column index (0-based)
 
                 # ── uy equation (iy < Ny) ──────────────────────────────
@@ -207,8 +201,7 @@ class MatrixBuilder:
                             add(kuy, kuy, 1);  add(kuy, kuy + (Ny+1)*2, -1)
                         elif p.bc.left.uy.type == BCType.FIXED or p.bc.left.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
-                            if is_california:
-                                add(kuy, kuy + (Ny+1)*2, 1)
+                            add(kuy, kuy + (Ny+1)*2, 1)
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.left.uy.type}")
                     elif ix == Nx: #right boundary
@@ -216,12 +209,11 @@ class MatrixBuilder:
                             add(kuy, kuy, 1);  add(kuy, kuy - (Ny+1)*2, -1)
                         elif p.bc.right.uy.type == BCType.FIXED or p.bc.right.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
-                            if is_california:
-                                add(kuy, kuy - (Ny+1)*2, 1)
+                            add(kuy, kuy - (Ny+1)*2, 1)
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.right.uy.type}")
                     elif iy == 0 and not (
-                        is_california and ix in (mid, mid + 1)
+                        use_surface_fault_intersection and ix in (mid, mid + 1)
                     ): #top boundary (y=0 / free surface)
                         if p.bc.top.uy.type == BCType.FREE:
                             #add(kuy, kuy, 1);  add(kuy, kuy + (Ny+1)*2, -1)
@@ -229,38 +221,26 @@ class MatrixBuilder:
                         elif p.bc.top.uy.type == BCType.FIXED or p.bc.top.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
                         elif p.bc.top.uy.type == BCType.TRACTION_FREE:
-                            if is_california:
-                                wy = finite_difference_weights(
-                                    g.y[0], g.y[:3], 1
+                            # Coordinate-aware physical free-surface row.  It
+                            # is a discretisation property, not a BP3-only BC.
+                            wy = finite_difference_weights(g.y[0], g.y[:3], 1)
+                            normal_scale = dx_loc / G
+                            for iy_d, weight in enumerate(wy):
+                                add(
+                                    kuy,
+                                    kuy + 2 * iy_d,
+                                    normal_scale * (lam + 2 * G) * weight,
                                 )
-                                normal_scale = dx_loc / G
-                                for iy_d, weight in enumerate(wy):
-                                    add(
-                                        kuy,
-                                        kuy + 2 * iy_d,
-                                        normal_scale * (lam + 2 * G) * weight,
-                                    )
-                                add(kuy, kuy - (Ny+1)*2, normal_scale * G * cosa / dx_loc)
-                                add(kuy, kuy + (Ny+1)*2, -normal_scale * G * cosa / dx_loc)
-                                coefficient = normal_scale * lam / (2 * dx_loc)
-                                add(kuy, kux, coefficient)
-                                add(kuy, kux + 2, coefficient)
-                                add(kuy, kux - (Ny+1)*2, -coefficient)
-                                add(kuy, kux - (Ny+1)*2 + 2, -coefficient)
-                            else:
-                                dy_top = float(g.y[1] - g.y[0])
-                                dx_ux = float(g.x[ix] - g.x[ix - 1])
-                                normal_scale = 1.0 / (lam + 2.0 * G)
-                                add(kuy, kuy + 2, 1.0 / dy_top)
-                                add(kuy, kuy,     -1.0 / dy_top)
-                                add(kuy, kux,      lam * normal_scale / dx_ux)
-                                add(kuy, kux - (Ny + 1) * 2, -lam * normal_scale / dx_ux)
-                                for ix_d, w in first_derivative_weights(g.xp, ix):
-                                    _, kuy_d = self._dofs(ix_d, iy, Ny)
-                                    add(kuy, kuy_d, -2.0 * G * normal_scale * cosa * w)
+                            add(kuy, kuy - (Ny+1)*2, normal_scale * G * cosa / dx_loc)
+                            add(kuy, kuy + (Ny+1)*2, -normal_scale * G * cosa / dx_loc)
+                            coefficient = normal_scale * lam / (2 * dx_loc)
+                            add(kuy, kux, coefficient)
+                            add(kuy, kux + 2, coefficient)
+                            add(kuy, kux - (Ny+1)*2, -coefficient)
+                            add(kuy, kux - (Ny+1)*2 + 2, -coefficient)
                         else:
                             raise ValueError(f"BC type: {p.bc.top.uy.type} is not supported for top boundary yet.")
-                    elif iy == Ny - 1 and is_california and ix == mid:
+                    elif iy == Ny - 1 and use_bottom_fault_intersection and ix == mid:
                         add(kuy, kuy, -1)
                         add(kuy, kuy + (Ny+1)*2, 1)
                     elif iy == Ny - 1: #bottom boundary (y=ysize / deep boundary)
@@ -274,8 +254,8 @@ class MatrixBuilder:
                     elif ix == mid:
                         # Fault left side
                         add(kuy, kuy, -1); add(kuy, kuy + (Ny+1)*2, 1)
-                    elif is_california and ix == mid + 1:
-                        # MATLAB BP3 shear-traction continuity row.
+                    elif ix == mid + 1:
+                        # Shared MATLAB-validated shear-traction continuity.
                         dx_fault = dx_xuy[ix]
                         dy_fault = dy_yuy[iy]
                         spacing_left = g.xp[ix - 1] - g.xp[ix - 2]
@@ -316,43 +296,6 @@ class MatrixBuilder:
                         add(kuy, kux - (Ny+1)*2 + 2, -cosa)
                         add(kuy, kux - 2*(Ny+1)*2, cosa / 2)
                         add(kuy, kux - 2*(Ny+1)*2 + 2, cosa / 2)
-                    elif ix == mid + 1:
-                        # Enforce tau(left)-tau(right)=0 using precisely the
-                        # same staggered, coordinate-aware operator as
-                        # StressCalUtil.compute_stress_fields.
-                        fault_row = kuy
-                        jl, jr = mid - 1, mid + 1
-                        dx_uy = np.diff(g.xp)
-                        dy_ux = np.diff(g.yp)
-                        # The recovered expression below is tau/G.  Scale the
-                        # row by a local length, as the legacy dimensionless
-                        # matrix did, so sparse factorization remains well
-                        # conditioned without altering the constraint.
-                        fault_scale = dx_uy[jr]
-                        a2 = 1.0 - 2.0 * cosa * cosa
-
-                        # uy_x
-                        add_uy(jl + 1, iy,  1.0 / dx_uy[jl])
-                        add_uy(jl,     iy, -1.0 / dx_uy[jl])
-                        add_uy(jr + 1, iy, -1.0 / dx_uy[jr])
-                        add_uy(jr,     iy,  1.0 / dx_uy[jr])
-
-                        # (1-2*cos(a)^2) ux_y
-                        cy = a2 / dy_ux[iy]
-                        add_ux(jl, iy + 1,  cy); add_ux(jl, iy, -cy)
-                        add_ux(jr, iy + 1, -cy); add_ux(jr, iy,  cy)
-
-                        # cos(a) * averaged ux_x
-                        for j, sign in ((jl, 1.0), (jr, -1.0)):
-                            for ix_d, w in first_derivative_weights(g.x, j):
-                                add_ux(ix_d, iy,     0.5 * cosa * sign * w)
-                                add_ux(ix_d, iy + 1, 0.5 * cosa * sign * w)
-
-                        # -cos(a) * averaged uy_y
-                        for j, sign in ((jl, 1.0), (jr, -1.0)):
-                            for ix_u in (j, j + 1):
-                                for iy_d, w in first_derivative_weights(g.y, iy):
-                                    add_uy(ix_u, iy_d, -0.5 * cosa * sign * w)
                     else:
                         # Interior bulk
                         if self._is_uniform:
@@ -447,7 +390,7 @@ class MatrixBuilder:
                     dy_loc = dy_yux[iy]
                     r2 = dx_loc*dx_loc / dy_loc/dy_loc
                     r_lam = (lam + 2*G) / G
-                    if iy == 0 and is_california and ix == mid:
+                    if iy == 0 and use_surface_fault_intersection and ix == mid:
                         # Fault-line ghost above the free surface: zero
                         # curvature along the fault, not zero shear traction.
                         add(kux, kux, 1)
@@ -456,60 +399,42 @@ class MatrixBuilder:
                     elif iy == 0: #top boundary (y=0 / free surface)
                         if p.bc.top.ux.type == BCType.FIXED or p.bc.top.ux.type == BCType.VELOCITY:
                             add(kux, kux, 1)
+                            add(kux, kux + 2, 1)
                         elif p.bc.top.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux + 2, -1)
                         elif p.bc.top.ux.type == BCType.TRACTION_FREE:
-                            if is_california:
-                                wy = finite_difference_weights(
-                                    g.y[0], g.y[:3], 1
-                                )
-                                shear_scale = dx_loc / sina
-                                hux_surface = g.yp[1] - g.yp[0]
-                                add(kux, kux, -shear_scale / hux_surface)
-                                add(kux, kux + 2, shear_scale / hux_surface)
+                            # Same complete, coordinate-aware free-surface
+                            # equation for every case that requests it.
+                            wy = finite_difference_weights(g.y[0], g.y[:3], 1)
+                            shear_scale = dx_loc / sina
+                            hux_surface = g.yp[1] - g.yp[0]
+                            add(kux, kux, -shear_scale / hux_surface)
+                            add(kux, kux + 2, shear_scale / hux_surface)
 
-                                a2 = 1.0 - 2.0 * cosa * cosa
-                                for iy_d, weight in enumerate(wy):
-                                    coefficient = shear_scale * cosa * weight / 2
-                                    add(kux, kuy + 2*iy_d, coefficient)
-                                    add(kux, kuy + (Ny+1)*2 + 2*iy_d, coefficient)
-                                add(kux, kuy, -shear_scale * a2 / dx_loc)
-                                add(kux, kuy + (Ny+1)*2, shear_scale * a2 / dx_loc)
+                            a2 = 1.0 - 2.0 * cosa * cosa
+                            for iy_d, weight in enumerate(wy):
+                                coefficient = shear_scale * cosa * weight / 2
+                                add(kux, kuy + 2*iy_d, coefficient)
+                                add(kux, kuy + (Ny+1)*2 + 2*iy_d, coefficient)
+                            add(kux, kuy, -shear_scale * a2 / dx_loc)
+                            add(kux, kuy + (Ny+1)*2, shear_scale * a2 / dx_loc)
 
-                                if ix == 0:
-                                    x_terms = ((ix, 0.5), (ix + 1, -0.5))
-                                elif ix == Nx - 1:
-                                    x_terms = ((ix, -0.5), (ix - 1, 0.5))
-                                else:
-                                    x_terms = ((ix + 1, -0.25), (ix - 1, 0.25))
-                                for ix_d, factor in x_terms:
-                                    kux_d, _ = self._dofs(ix_d, iy, Ny)
-                                    add(kux, kux_d, shear_scale * cosa * factor / dx_loc)
-                                    add(kux, kux_d + 2, shear_scale * cosa * factor / dx_loc)
+                            if ix == 0:
+                                x_terms = ((ix, 0.5), (ix + 1, -0.5))
+                            elif ix == Nx - 1:
+                                x_terms = ((ix, -0.5), (ix - 1, 0.5))
                             else:
-                                dy_ux_top = float(g.yp[1] - g.yp[0])
-                                dy_uy_top = float(g.y[1] - g.y[0])
-                                dx_uy = float(g.xp[ix + 1] - g.xp[ix])
-                                a2 = 1.0 - 2.0 * cosa * cosa
-                                add(kux, kux + 2,  1.0 / dy_ux_top)
-                                add(kux, kux,     -1.0 / dy_ux_top)
-                                for ix_d, w in first_derivative_weights(g.x, ix):
-                                    kux_d, _ = self._dofs(ix_d, iy, Ny)
-                                    add(kux, kux_d, -cosa * w)
-                                for ix_u in (ix, ix + 1):
-                                    _, kuy_0 = self._dofs(ix_u, iy, Ny)
-                                    _, kuy_1 = self._dofs(ix_u, iy + 1, Ny)
-                                    add(kux, kuy_1,  0.5 * cosa / dy_uy_top)
-                                    add(kux, kuy_0, -0.5 * cosa / dy_uy_top)
-                                add(kux, kuy + (Ny + 1) * 2,  a2 / dx_uy)
-                                add(kux, kuy,                 -a2 / dx_uy)
+                                x_terms = ((ix + 1, -0.25), (ix - 1, 0.25))
+                            for ix_d, factor in x_terms:
+                                kux_d, _ = self._dofs(ix_d, iy, Ny)
+                                add(kux, kux_d, shear_scale * cosa * factor / dx_loc)
+                                add(kux, kux_d + 2, shear_scale * cosa * factor / dx_loc)
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.top.ux.type}")
                     elif iy == Ny:
                         if p.bc.bottom.ux.type == BCType.FIXED or p.bc.bottom.ux.type == BCType.VELOCITY:
                             add(kux, kux, 1)
-                            if is_california:
-                                add(kux, kux - 2, 1)
+                            add(kux, kux - 2, 1)
                         elif p.bc.bottom.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux - 2, -1)
                         else:
@@ -528,8 +453,8 @@ class MatrixBuilder:
                             add(kux, kux, 1); add(kux, kux - (Ny+1)*2, -1)
                         else:
                             raise ValueError(f"BC type: {p.bc.right.ux.type} is not supported for right boundary yet.")
-                    elif is_california and ix == mid:
-                        # MATLAB BP3 homogeneous normal-traction continuity.
+                    elif ix == mid:
+                        # Shared MATLAB-validated normal-traction continuity.
                         dx_fault = dx_xux[ix]
                         dy_fault = dy_yux[iy]
                         h_minus = self._hxm_ux[ix]
@@ -546,45 +471,6 @@ class MatrixBuilder:
                         add(kux, kuy + (Ny+1)*2, coefficient)
                         add(kux, kuy - 2, coefficient)
                         add(kux, kuy + (Ny+1)*2 - 2, -coefficient)
-                    elif ix == mid:
-                        # Enforce sigma(left)-sigma(right)=0 using the same
-                        # cell-centred normal-stress recovery operator used
-                        # after every elastic solve.  The ux row at iy maps to
-                        # sigmaqs row iy-1 on the staggered grid.
-                        fault_row = kux
-                        isigma = iy - 1
-                        jl, jr = mid - 1, mid
-                        dx_ux = np.diff(g.x)
-                        dy_uy = np.diff(g.y)
-                        dy_ux = np.diff(g.yp)
-                        # This expression is in stress units.  Use the same
-                        # local dx/G normalization as the original row.
-                        fault_scale = dx_ux[jr] / G
-
-                        # (lambda+2G) ux_x
-                        cx_l = (lam + 2.0 * G) / dx_ux[jl]
-                        add_ux(jl + 1, iy,  cx_l)
-                        add_ux(jl,     iy, -cx_l)
-                        cx_r = (lam + 2.0 * G) / dx_ux[jr]
-                        add_ux(jr + 1, iy, -cx_r)
-                        add_ux(jr,     iy,  cx_r)
-
-                        # lambda uy_y
-                        cy = lam / dy_uy[isigma]
-                        add_uy(jl + 1, isigma + 1,  cy)
-                        add_uy(jl + 1, isigma,     -cy)
-                        add_uy(jr + 1, isigma + 1, -cy)
-                        add_uy(jr + 1, isigma,      cy)
-
-                        # -2G*cos(a)*mm_outer(ux_y).  The common central
-                        # ux column cancels between the two adjacent cells.
-                        cxy = -0.5 * G * cosa
-                        for iy_d in (isigma, isigma + 1):
-                            wy = cxy / dy_ux[iy_d]
-                            add_ux(jl, iy_d + 1,  wy)
-                            add_ux(jl, iy_d,     -wy)
-                            add_ux(jr + 1, iy_d + 1, -wy)
-                            add_ux(jr + 1, iy_d,      wy)
                     else:
                         # Interior bulk
                         if self._is_uniform:
@@ -685,42 +571,58 @@ class MatrixBuilder:
         RH = self._rh
         RH.fill(0.0)
 
-        is_lab = self._case_type == "lab"
-        is_california = self._case_type == "california"
         is_groningen = self._case_type == "groningen"
+        use_surface_fault_intersection = (
+            p.fault_surface_treatment
+            == FaultSurfaceTreatment.FREE_SURFACE_FAULT_INTERSECTION
+        )
+        use_bottom_fault_intersection = (
+            p.fault_bottom_treatment
+            == FaultBottomTreatment.DEEP_BOUNDARY_FAULT_INTERSECTION
+        )
+
+        def apply_uy_boundary_profile(iy, boundary, reserved=()):
+            """Apply one top/bottom uy velocity profile with row precedence."""
+            indices = self._ix_uy_y_boundaries
+            if reserved:
+                indices = indices[~np.isin(indices, reserved)]
+
+            if boundary.profile == BoundaryProfile.FULL:
+                RH[self._kuy[iy, indices]] = boundary.value
+            elif boundary.profile == BoundaryProfile.POSITIVE_FAULT_BLOCK:
+                positive = indices[indices > mid]
+                RH[self._kuy[iy, positive]] = boundary.value
+            elif boundary.profile == BoundaryProfile.NEGATIVE_FAULT_BLOCK:
+                negative = indices[indices <= mid]
+                RH[self._kuy[iy, negative]] = boundary.value
+            elif boundary.profile == BoundaryProfile.ANTISYMMETRIC_ABOUT_FAULT:
+                negative = indices[indices <= mid]
+                positive = indices[indices > mid]
+                RH[self._kuy[iy, negative]] = -boundary.value
+                RH[self._kuy[iy, positive]] = boundary.value
+            else:
+                raise ValueError(f"Unsupported boundary profile: {boundary.profile}")
 
         # --- uy block (exact branch priority) ---
         if p.bc.left.uy.type == BCType.VELOCITY:
-            factor = 2.0 if is_california else 1.0
-            RH[self._kuy[:, 0]] = factor * p.bc.left.uy.value
+            RH[self._kuy[:, 0]] = 2.0 * p.bc.left.uy.value
         if p.bc.right.uy.type == BCType.VELOCITY:
-            factor = 2.0 if is_california else 1.0
-            RH[self._kuy[:, Nx]] = factor * p.bc.right.uy.value
+            RH[self._kuy[:, Nx]] = 2.0 * p.bc.right.uy.value
 
         if p.bc.top.uy.type == BCType.VELOCITY:
-            if is_lab:
-                RH[self._kuy[0, mid + 1:Nx]] = p.bc.top.uy.value
-            else:
-                RH[self._kuy[0, self._ix_uy_y_boundaries]] = p.bc.top.uy.value
+            reserved = (mid, mid + 1) if use_surface_fault_intersection else ()
+            apply_uy_boundary_profile(0, p.bc.top.uy, reserved)
 
         if p.bc.bottom.uy.type == BCType.VELOCITY:
-            if is_lab:
-                RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.bottom.uy.value
-            elif is_california:
-                # The two duplicated fault-face uy nodes are mid (left) and
-                # mid+1 (right).  Both must receive the far-field plate rate.
-                RH[self._kuy[Ny - 1, 1:mid + 1]] = -p.bc.bottom.uy.value
-                RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.bottom.uy.value
-            else:
-                RH[self._kuy[Ny - 1, self._ix_uy_y_boundaries]] = p.bc.bottom.uy.value
+            reserved = (mid,) if use_bottom_fault_intersection else ()
+            apply_uy_boundary_profile(Ny - 1, p.bc.bottom.uy, reserved)
 
         iy_int = self._iy_int
-        if is_california:
-            # MATLAB applies the fault jump at every physical fault node,
-            # including the free-surface and bottom intersections.
-            RH[self._kuy[:, mid]] = V
-        else:
-            RH[self._kuy[iy_int, mid]] = V[iy_int]
+        RH[self._kuy[iy_int, mid]] = V[iy_int]
+        if use_surface_fault_intersection:
+            RH[self._kuy[0, mid]] = V[0]
+        if use_bottom_fault_intersection:
+            RH[self._kuy[Ny - 1, mid]] = V[Ny - 1]
 
         if is_groningen:
             y_int = y[iy_int]
@@ -750,13 +652,9 @@ class MatrixBuilder:
 
         # --- ux block (exact branch priority) ---
         if p.bc.top.ux.type == BCType.VELOCITY:
-            RH[self._kux[0, self._ix_ux_all]] = p.bc.top.ux.value
+            RH[self._kux[0, self._ix_ux_all]] = 2.0 * p.bc.top.ux.value
         if p.bc.bottom.ux.type == BCType.VELOCITY:
-            if is_california: #TODO: should be removed later, as it is not used
-                RH[self._kux[Ny, :mid]] = -p.bc.bottom.ux.value
-                RH[self._kux[Ny, mid + 1:]] = p.bc.bottom.ux.value
-            else:
-                RH[self._kux[Ny, self._ix_ux_all]] = p.bc.bottom.ux.value
+            RH[self._kux[Ny, self._ix_ux_all]] = 2.0 * p.bc.bottom.ux.value
 
         if p.bc.left.ux.type == BCType.VELOCITY:
             RH[self._kux[1:Ny, 0]] = p.bc.left.ux.value

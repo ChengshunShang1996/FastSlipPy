@@ -51,6 +51,8 @@ if __name__ == "__main__":
         iterative_maxiter=200,
         ilu_drop_tol=1e-2,
         ilu_fill_factor=8.0,
+        fault_surface_treatment="external_boundary",
+        fault_bottom_treatment="external_boundary",
     )
 
     params.bc.left.ux.set_fixed()
@@ -58,9 +60,9 @@ if __name__ == "__main__":
     params.bc.right.ux.set_fixed()
     params.bc.right.uy.set_velocity(1e-5)
     params.bc.top.ux.set_fixed()
-    params.bc.top.uy.set_velocity(1e-5)  # only acts on right half of top boundary
+    params.bc.top.uy.set_velocity(1e-5, profile="positive_fault_block")
     params.bc.bottom.ux.set_fixed()
-    params.bc.bottom.uy.set_velocity(1e-5)  # only acts on right half of bottom boundary
+    params.bc.bottom.uy.set_velocity(1e-5, profile="positive_fault_block")
 
     params.layers.set_homogeneous(top=1, bottom=2, a=params.a0, b=params.b0)
 

@@ -39,7 +39,9 @@ def test_stretched_fault_has_continuous_tractions_for_all_bp3_dips():
         params.bc.right.uy.set_velocity(half_rate)
         params.bc.top.set_traction_free()
         params.bc.bottom.ux.set_fixed()
-        params.bc.bottom.uy.set_velocity(half_rate)
+        params.bc.bottom.uy.set_velocity(
+            half_rate, profile="antisymmetric_about_fault"
+        )
 
         grid = Grid(params)
         builder = MatrixBuilder(params, grid)

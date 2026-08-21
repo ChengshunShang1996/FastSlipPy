@@ -20,7 +20,9 @@ def test_vertical_fault_far_field_loading_is_mirror_symmetric():
     half_rate = 0.5e-9
     params.bc.top.set_traction_free()
     params.bc.bottom.ux.set_fixed()
-    params.bc.bottom.uy.set_velocity(half_rate)
+    params.bc.bottom.uy.set_velocity(
+        half_rate, profile="antisymmetric_about_fault"
+    )
     params.loading.V_L = 2.0 * half_rate
 
     grid = Grid(params)

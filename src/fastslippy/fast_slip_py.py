@@ -250,16 +250,16 @@ class FastSlipPy:
             if p.case_type == "lab":
                 if it <= 30000:
                     p.bc.right.uy.set_velocity(1e-4)
-                    p.bc.top.uy.set_velocity(1e-4)
-                    p.bc.bottom.uy.set_velocity(1e-4)
+                    p.bc.top.uy.set_velocity(1e-4, profile="positive_fault_block")
+                    p.bc.bottom.uy.set_velocity(1e-4, profile="positive_fault_block")
                 elif it <= 40000:
                     p.bc.right.uy.set_velocity(1e-4)
-                    p.bc.top.uy.set_velocity(1e-4)
-                    p.bc.bottom.uy.set_velocity(1e-4)
+                    p.bc.top.uy.set_velocity(1e-4, profile="positive_fault_block")
+                    p.bc.bottom.uy.set_velocity(1e-4, profile="positive_fault_block")
                 else:
                     p.bc.right.uy.set_velocity(1e-5)
-                    p.bc.top.uy.set_velocity(1e-5)
-                    p.bc.bottom.uy.set_velocity(1e-5)
+                    p.bc.top.uy.set_velocity(1e-5, profile="positive_fault_block")
+                    p.bc.bottom.uy.set_velocity(1e-5, profile="positive_fault_block")
 
             # ── update RH with current slip velocities ──
             RH = self.RH_builder.build_RH(dPdt, self.fault.V)

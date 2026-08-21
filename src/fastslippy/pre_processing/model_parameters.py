@@ -29,6 +29,23 @@ class LinearSolver(str, Enum):
     DIRECT = "direct"
     ITERATIVE = "iterative"
 
+class FaultSurfaceTreatment(str, Enum):
+    """Equation used where the fault meets the model's top boundary."""
+    EXTERNAL_BOUNDARY = "external_boundary"
+    FREE_SURFACE_FAULT_INTERSECTION = "free_surface_fault_intersection"
+
+class FaultBottomTreatment(str, Enum):
+    """Equation used where the fault meets the model's deep boundary."""
+    EXTERNAL_BOUNDARY = "external_boundary"
+    DEEP_BOUNDARY_FAULT_INTERSECTION = "deep_boundary_fault_intersection"
+
+class BoundaryProfile(str, Enum):
+    """Spatial distribution of a scalar condition along a boundary face."""
+    FULL = "full"
+    POSITIVE_FAULT_BLOCK = "positive_fault_block"
+    NEGATIVE_FAULT_BLOCK = "negative_fault_block"
+    ANTISYMMETRIC_ABOUT_FAULT = "antisymmetric_about_fault"
+
 class IterativeMethod(str, Enum):
     GMRES = "gmres"
     BICGSTAB = "bicgstab"
@@ -45,26 +62,45 @@ class DirectionBC:
 
     type: BCType = BCType.FIXED
     value: float = 0.0
+    profile: BoundaryProfile = BoundaryProfile.FULL
+
+    def __post_init__(self):
+        self.profile = self._normalise_profile(self.profile)
+
+    @staticmethod
+    def _normalise_profile(profile) -> BoundaryProfile:
+        value = profile.value if isinstance(profile, BoundaryProfile) else str(profile).lower()
+        try:
+            return BoundaryProfile(value)
+        except ValueError as exc:
+            supported = ", ".join(item.value for item in BoundaryProfile)
+            raise ValueError(f"profile must be one of: {supported}.") from exc
 
     def set_fixed(self):
         self.type = BCType.FIXED
         self.value = 0.0
+        self.profile = BoundaryProfile.FULL
 
     def set_free(self):
         self.type = BCType.FREE
         self.value = 0.0
+        self.profile = BoundaryProfile.FULL
 
-    def set_velocity(self, value: float):
+    def set_velocity(self, value: float, profile=BoundaryProfile.FULL):
+        """Set a velocity and its spatial distribution along the face."""
         self.type = BCType.VELOCITY
         self.value = value
+        self.profile = self._normalise_profile(profile)
 
     def set_traction(self, value: float):
         self.type = BCType.TRACTION
         self.value = value
+        self.profile = BoundaryProfile.FULL
 
     def set_traction_free(self):
         self.type = BCType.TRACTION_FREE
         self.value = 0.0
+        self.profile = BoundaryProfile.FULL
 
 @dataclass
 class BoundaryFace:
@@ -84,11 +120,11 @@ class BoundaryFace:
         self.ux.set_traction_free()
         self.uy.set_traction_free()
 
-    def set_velocity_x(self, value: float):
-        self.ux.set_velocity(value)
+    def set_velocity_x(self, value: float, profile=BoundaryProfile.FULL):
+        self.ux.set_velocity(value, profile=profile)
 
-    def set_velocity_y(self, value: float):
-        self.uy.set_velocity(value)
+    def set_velocity_y(self, value: float, profile=BoundaryProfile.FULL):
+        self.uy.set_velocity(value, profile=profile)
 
     def set_traction_x(self, value: float):
         self.ux.set_traction(value)
@@ -172,6 +208,12 @@ class ModelParameters:
     y_stretch_max_cell_size: Optional[float] = None
     allow_nonuniform_solver: bool = False
 
+    # --- Fault/boundary intersections ---
+    # These describe which equation owns a fault endpoint.  They do not
+    # describe whether the geometric fault trace reaches the domain edge.
+    fault_surface_treatment: Optional[FaultSurfaceTreatment] = None
+    fault_bottom_treatment: Optional[FaultBottomTreatment] = None
+
     # --- Material ---
     rho: float = 2650            # Rock density [kg/m³]
     rhof: float = 1150.0         # Fluid density [kg/m³]
@@ -236,6 +278,17 @@ class ModelParameters:
     loading: LoadingConditions = field(default_factory=LoadingConditions)
     layers: LayerParameters = field(default_factory=LayerParameters)
 
+    @staticmethod
+    def _normalise_enum(value, enum_type, default, field_name):
+        if value is None:
+            return default
+        raw_value = value.value if isinstance(value, enum_type) else str(value).lower()
+        try:
+            return enum_type(raw_value)
+        except ValueError as exc:
+            supported = ", ".join(item.value for item in enum_type)
+            raise ValueError(f"{field_name} must be one of: {supported}.") from exc
+
     def __post_init__(self):
         case_value = (
             self.case_type.value
@@ -249,6 +302,29 @@ class ModelParameters:
             raise ValueError(
                 f"case_type must be one of: {supported}."
             ) from exc
+
+        surface_default = (
+            FaultSurfaceTreatment.FREE_SURFACE_FAULT_INTERSECTION
+            if self.case_type == CaseType.CALIFORNIA
+            else FaultSurfaceTreatment.EXTERNAL_BOUNDARY
+        )
+        bottom_default = (
+            FaultBottomTreatment.DEEP_BOUNDARY_FAULT_INTERSECTION
+            if self.case_type == CaseType.CALIFORNIA
+            else FaultBottomTreatment.EXTERNAL_BOUNDARY
+        )
+        self.fault_surface_treatment = self._normalise_enum(
+            self.fault_surface_treatment,
+            FaultSurfaceTreatment,
+            surface_default,
+            "fault_surface_treatment",
+        )
+        self.fault_bottom_treatment = self._normalise_enum(
+            self.fault_bottom_treatment,
+            FaultBottomTreatment,
+            bottom_default,
+            "fault_bottom_treatment",
+        )
 
         #self.G = self.rho * self.cs ** 2
         if self.E > 0:
@@ -350,8 +426,8 @@ class ModelParameters:
         self.loading.V_p = internal_sign * plate_magnitude
         self.loading.V_L = internal_sign * creep_magnitude
 
-        # These are face velocities. The California RHS doubles side values
-        # because its LHS rows average ghost and interior unknowns.
+        # These are physical-face velocities. MatrixBuilder converts them to
+        # the staggered ghost-plus-interior boundary equation.
         if self.bc.left.uy.type == BCType.VELOCITY:
             self.bc.left.uy.value = -0.5 * self.loading.V_p
         if self.bc.right.uy.type == BCType.VELOCITY:

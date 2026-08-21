@@ -24,9 +24,9 @@ def _solve_displacement_fields(params: ModelParameters):
     params.bc.right.ux.set_fixed()
     params.bc.right.uy.set_velocity(1e-5)
     params.bc.bottom.ux.set_fixed()
-    params.bc.bottom.uy.set_velocity(1e-5)
+    params.bc.bottom.uy.set_velocity(1e-5, profile="positive_fault_block")
     params.bc.top.ux.set_fixed()
-    params.bc.top.uy.set_velocity(1e-5)
+    params.bc.top.uy.set_velocity(1e-5, profile="positive_fault_block")
 
     grid = Grid(params)
     builder = MatrixBuilder(params, grid)
