@@ -222,7 +222,7 @@ class FastSlipPy:
 
             # ── velocity solve (rate-and-state) ──
             mid = Nx // 2
-            self.fault.solve_slip_rate_matlab(#solve_slip_rate_newton_v2(
+            self.fault.solve_slip_rate_newton_v2(
                 self.tauqs[:, mid], self.stress, self.fric
             )
 
