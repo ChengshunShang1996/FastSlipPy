@@ -43,6 +43,7 @@ if __name__ == "__main__":
         flash_heating_option = False,
         fault_surface_treatment = "external_boundary",
         fault_bottom_treatment = "external_boundary",
+        friction_tolerance = 1e-8,
     )
 
     params.bc.left.ux.set_fixed()
