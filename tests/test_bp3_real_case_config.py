@@ -13,6 +13,7 @@ def test_real_90_degree_case_resolves_complete_frictional_fault_uniformly():
     assert params.tfinal == 500.0 * YR
     assert params.dt_max == 0.1 * YR
     assert params.friction_tolerance == 5.0
+    assert params.extrapolate_surface_fault_rate
     assert params.y_stretch_inner_size >= params.W_f
 
     rate_state_nodes = grid.y <= params.W_f

@@ -38,6 +38,10 @@ def _bp3_parameters(**overrides):
         b0=0.015,
         L=0.008,
         Vi=1e-9,
+        # The MATLAB reference applies friction directly at the incompatible
+        # free-surface/fault corner.  Keep that legacy choice only in parity
+        # tests; production BP3 runs extrapolate the surface rate.
+        extrapolate_surface_fault_rate=False,
     )
     values.update(overrides)
     return ModelParameters(**values)

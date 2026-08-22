@@ -16,7 +16,10 @@ from fastslippy.pre_processing.model_parameters import ModelParameters
 
 
 YR = 365 * 24 * 3600.0
-OUTPUT_DIR = Path("output") / "bp3_90_real_dx100_ycore60_newton_tol5"
+OUTPUT_DIR = (
+    Path("output")
+    / "bp3_90_real_dx100_ycore60_newton_tol5_surface_extrap"
+)
 
 class RunFastSlipPy(FastSlipPy):
     """
@@ -69,6 +72,7 @@ def build_bp3_90_parameters() -> ModelParameters:
         output_vtk_option = False,
         Vi = 1e-9,
         flash_heating_option = False,
+        extrapolate_surface_fault_rate = True,
         H = 15e3,
         h = 3e3,
         W_f = 40e3,

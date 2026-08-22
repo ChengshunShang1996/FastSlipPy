@@ -65,6 +65,26 @@ class FaultState:
         uniform_y = np.linspace(0.0, p.ysize, p.Ny)
         return int(np.searchsorted(uniform_y, p.W_f, side="left"))
 
+    def _apply_surface_fault_rate_condition(
+        self,
+        values: np.ndarray,
+        creep_start: int,
+    ) -> None:
+        """Close the BP3 fault at the free surface by interior extrapolation.
+
+        For a vertical fault, the fault shear traction at ``y=0`` is also a
+        free-surface traction and is therefore identically zero.  Applying the
+        finite-normal-stress friction equation at that same point locks only
+        the trace node and introduces a grid-scale jump in slip rate.  The
+        physical fault value is represented by the one-sided interior limit.
+        """
+        if (
+            self.p.case_type == "california"
+            and self.p.extrapolate_surface_fault_rate
+            and creep_start > 1
+        ):
+            values[0] = values[1]
+
     def solve_slip_rate_1(self, tauqs_col: np.ndarray, stress: StressState,
                         fric: FrictionalZones):
         """
@@ -274,9 +294,10 @@ class FaultState:
                 )
             solved[iy] = velocity_sign * speed
 
-        self.V[:] = solved
         if p.case_type == "california":
-            self.V[creep_start:] = p.loading.V_L
+            solved[creep_start:] = p.loading.V_L
+        self._apply_surface_fault_rate_condition(solved, creep_start)
+        self.V[:] = solved
     
     # ------------------------------------------------------------------
     def advance(self, dt: float, tauqs_col: np.ndarray, stress: StressState):
@@ -481,9 +502,10 @@ class FaultState:
                     f"BP3 friction bisection did not converge at node {iy}."
                 )
 
-        self.V[:] = solved
         if p.case_type == "california":
-            self.V[creep_start:] = p.loading.V_L
+            solved[creep_start:] = p.loading.V_L
+        self._apply_surface_fault_rate_condition(solved, creep_start)
+        self.V[:] = solved
 
     def solve_slip_rate_newton(self,
                         tauqs_col: np.ndarray,

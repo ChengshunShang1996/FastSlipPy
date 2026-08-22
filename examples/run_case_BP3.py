@@ -61,6 +61,7 @@ def build_bp3_parameters() -> ModelParameters:
         output_vtk_option = True,
         Vi = 1e-9,  # magnitude; internal sign is applied automatically
         flash_heating_option = False,
+        extrapolate_surface_fault_rate = True,
         H = 15e3,
         h = 3e3,
         W_f = 40e3,
