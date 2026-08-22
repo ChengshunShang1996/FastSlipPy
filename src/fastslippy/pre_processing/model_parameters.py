@@ -194,7 +194,7 @@ class ModelParameters:
     Vw: float = 1e90             # Dynamic weakening velocity [m/s]
     Vi: float = 1e-30            # Initial/background slip rate [m/s]
     flash_heating_option: bool = False  # Whether to include flash heating in the friction law
-    extrapolate_surface_fault_rate: bool = True
+    extrapolate_surface_fault_rate: bool = False  # Whether to extrapolate the slip rate at the free-surface/fault intersection
     # At the BP3 free-surface/fault intersection, zero surface shear traction
     # and rate-state friction with finite effective normal stress cannot both
     # be imposed on the same point.  Treat y=0 as a boundary trace and copy the
