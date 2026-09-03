@@ -129,6 +129,10 @@ fastslippy = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+# The tests also exercise configuration builders kept in ``examples``.
+# Unlike ``python -m pytest``, the ``pytest`` console script does not
+# consistently put the repository root on sys.path (notably on Linux CI).
+pythonpath = ["."]
 
 # ============================================================
 # Black
