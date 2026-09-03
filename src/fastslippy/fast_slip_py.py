@@ -163,6 +163,20 @@ class FastSlipPy:
             self.ksi[interior_start:interior_stop],
         )
 
+    def set_lab_case_velocity_bc(self, p: ModelParameters, t: float):
+        if t <= 4:
+            p.bc.right.uy.set_velocity(1e-5)
+            p.bc.top.uy.set_velocity(1e-5)
+            p.bc.bottom.uy.set_velocity(1e-5)
+        elif t <= 6:
+            p.bc.right.uy.set_velocity(1e-4)
+            p.bc.top.uy.set_velocity(1e-4)
+            p.bc.bottom.uy.set_velocity(1e-4)
+        else:
+            p.bc.right.uy.set_velocity(1e-5)
+            p.bc.top.uy.set_velocity(1e-5)
+            p.bc.bottom.uy.set_velocity(1e-5)
+
     def before_run(self):
         pass
     
@@ -248,18 +262,7 @@ class FastSlipPy:
             self.fault.advance(dt, self.tauqs[:, mid], self.stress)
 
             if p.case_type == "lab":
-                if it <= 30000:
-                    p.bc.right.uy.set_velocity(1e-4)
-                    p.bc.top.uy.set_velocity(1e-4)
-                    p.bc.bottom.uy.set_velocity(1e-4)
-                elif it <= 40000:
-                    p.bc.right.uy.set_velocity(1e-4)
-                    p.bc.top.uy.set_velocity(1e-4)
-                    p.bc.bottom.uy.set_velocity(1e-4)
-                else:
-                    p.bc.right.uy.set_velocity(1e-5)
-                    p.bc.top.uy.set_velocity(1e-5)
-                    p.bc.bottom.uy.set_velocity(1e-5)
+                self.set_lab_case_velocity_bc(p, t)
 
             # ── update RH with current slip velocities ──
             RH = self.RH_builder.build_RH(dPdt, self.fault.V)

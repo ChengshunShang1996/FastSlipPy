@@ -19,6 +19,21 @@ class RunFastSlipPy(FastSlipPy):
     def run(self):
         super().run()
 
+    #define the velocity boundary condition for the lab case
+    def set_lab_case_velocity_bc(self, p: ModelParameters, t: float):
+        if t <= 4:
+            p.bc.right.uy.set_velocity(1e-5)
+            p.bc.top.uy.set_velocity(1e-5)
+            p.bc.bottom.uy.set_velocity(1e-5)
+        elif t <= 6:
+            p.bc.right.uy.set_velocity(1e-4)
+            p.bc.top.uy.set_velocity(1e-4)
+            p.bc.bottom.uy.set_velocity(1e-4)
+        else:
+            p.bc.right.uy.set_velocity(1e-5)
+            p.bc.top.uy.set_velocity(1e-5)
+            p.bc.bottom.uy.set_velocity(1e-5)
+
 if __name__ == "__main__":
     # Customise parameters here or leave all defaults
 
@@ -27,16 +42,16 @@ if __name__ == "__main__":
         alpha = 90.0,
         xsize = 1.0,
         ysize = 1.0,
-        Nx=11, Ny=11,
-        Nt=50000,
+        Nx=21, Ny=21,
+        Nt=10000,
         output_interval=10,
-        checkpoint_interval=10000,
+        checkpoint_interval=1000,
         Vi=1e-40,
         dt_init=0.0001,
         dt_max = 0.01,
         mu0=0.72,
         nu=0.25,
-        E=0.55e10, #according to k_critical = sigam * (b-a) / d_c, E = 1e10
+        E=1e12, #according to k_critical = sigam * (b-a) / d_c, E = 1e10  ## E=0.55e10 for stick-slip pattern
         V0 = 1e-6,
         a0 = 0.012,
         b0 = 0.0135,
