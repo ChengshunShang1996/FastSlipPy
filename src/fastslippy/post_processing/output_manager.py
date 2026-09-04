@@ -358,10 +358,23 @@ class OutputManager:
 
     def save_all(self):
         fname = self.out / "dataall.npz"
-        np.savez(fname,
-                 Um=self.Um, Vm=self.Vm, taum=self.taum,
-                 sigmam=self.sigmam, Pm=self.Pm, thetam=self.thetam,
-                 dtm=self.dtm, tm=self.tm)
+        arrays = dict(
+            Um=self.Um, Vm=self.Vm, taum=self.taum,
+            sigmam=self.sigmam, Pm=self.Pm, thetam=self.thetam,
+            dtm=self.dtm, tm=self.tm,
+        )
+        # Surface histories are small compared with the fault histories and
+        # are especially useful when a long BP3 calculation is interrupted
+        # before write_bp3_outputs() creates the ASCII station files.
+        if self._bp3_surface_x is not None:
+            arrays.update(
+                bp3_surface_x=self._bp3_surface_x,
+                bp3_surface_disp1=self._bp3_surface_disp1,
+                bp3_surface_disp2=self._bp3_surface_disp2,
+                bp3_surface_vel1=self._bp3_surface_vel1,
+                bp3_surface_vel2=self._bp3_surface_vel2,
+            )
+        np.savez(fname, **arrays)
 
     def close(self):
         self._logfile.close()
