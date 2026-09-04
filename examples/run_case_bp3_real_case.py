@@ -100,8 +100,7 @@ def build_bp3_90_parameters() -> ModelParameters:
     params.bc.right.ux.set_fixed()
     params.bc.right.uy.set_velocity(0.5 * params.loading.V_p)
     params.bc.top.set_traction_free()
-    params.bc.bottom.ux.set_fixed()
-    params.bc.bottom.uy.set_velocity(0.5 * params.loading.V_L)
+    params.bc.bottom.set_traction_free()
 
     top_of_layer = params.ysize
     bottom_of_layer = params.ysize * 2

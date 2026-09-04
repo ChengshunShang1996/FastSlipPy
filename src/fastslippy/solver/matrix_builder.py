@@ -242,7 +242,8 @@ class MatrixBuilder:
                                     )
                                 add(kuy, kuy - (Ny+1)*2, normal_scale * G * cosa / dx_loc)
                                 add(kuy, kuy + (Ny+1)*2, -normal_scale * G * cosa / dx_loc)
-                                coefficient = normal_scale * lam / (2 * dx_loc)
+                                dx_ux = float(g.x[ix] - g.x[ix - 1])
+                                coefficient = normal_scale * lam / (2 * dx_ux)
                                 add(kuy, kux, coefficient)
                                 add(kuy, kux + 2, coefficient)
                                 add(kuy, kux - (Ny+1)*2, -coefficient)
@@ -269,6 +270,40 @@ class MatrixBuilder:
                         elif p.bc.bottom.uy.type == BCType.FREE:
                             #add(kuy, kuy, 1);  add(kuy, kuy - (Ny+1)*2, -1)
                             add(kuy, kuy, 1);  add(kuy, kuy - 2, -1)
+                        elif p.bc.bottom.uy.type == BCType.TRACTION_FREE:
+                            if is_california:
+                                wy = finite_difference_weights(
+                                    g.y[-1], g.y[-3:], 1
+                                )
+                                normal_scale = dx_loc / G
+                                for iy_d, weight in zip(range(Ny - 3, Ny), wy):
+                                    _, kuy_d = self._dofs(ix, iy_d, Ny)
+                                    add(
+                                        kuy,
+                                        kuy_d,
+                                        normal_scale * (lam + 2 * G) * weight,
+                                    )
+                                add(kuy, kuy - (Ny+1)*2, normal_scale * G * cosa / dx_loc)
+                                add(kuy, kuy + (Ny+1)*2, -normal_scale * G * cosa / dx_loc)
+                                dx_ux = float(g.x[ix] - g.x[ix - 1])
+                                coefficient = normal_scale * lam / (2 * dx_ux)
+                                add(kuy, kux, coefficient)
+                                add(kuy, kux + 2, coefficient)
+                                add(kuy, kux - (Ny+1)*2, -coefficient)
+                                add(kuy, kux - (Ny+1)*2 + 2, -coefficient)
+                            else:
+                                dy_bottom = float(g.y[-1] - g.y[-2])
+                                dx_ux = float(g.x[ix] - g.x[ix - 1])
+                                normal_scale = 1.0 / (lam + 2.0 * G)
+                                add(kuy, kuy,      1.0 / dy_bottom)
+                                add(kuy, kuy - 2, -1.0 / dy_bottom)
+                                kux_bottom, _ = self._dofs(ix, Ny, Ny)
+                                kux_left, _ = self._dofs(ix - 1, Ny, Ny)
+                                add(kuy, kux_bottom, lam * normal_scale / dx_ux)
+                                add(kuy, kux_left, -lam * normal_scale / dx_ux)
+                                for ix_d, w in first_derivative_weights(g.xp, ix):
+                                    _, kuy_d = self._dofs(ix_d, iy, Ny)
+                                    add(kuy, kuy_d, -2.0 * G * normal_scale * cosa * w)
                         else:
                             raise ValueError(f"BC type: {p.bc.bottom.uy.type} is not supported for bottom boundary yet.")
                     elif ix == mid:
@@ -512,6 +547,59 @@ class MatrixBuilder:
                                 add(kux, kux - 2, 1)
                         elif p.bc.bottom.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux - 2, -1)
+                        elif p.bc.bottom.ux.type == BCType.TRACTION_FREE:
+                            if is_california:
+                                shear_scale = dx_loc / sina
+                                hux_bottom = g.yp[-1] - g.yp[-2]
+                                add(kux, kux - 2, -shear_scale / hux_bottom)
+                                add(kux, kux,      shear_scale / hux_bottom)
+
+                                wy = finite_difference_weights(
+                                    g.y[-1], g.y[-3:], 1
+                                )
+                                a2 = 1.0 - 2.0 * cosa * cosa
+                                for iy_d, weight in zip(range(Ny - 3, Ny), wy):
+                                    _, kuy_left = self._dofs(ix, iy_d, Ny)
+                                    _, kuy_right = self._dofs(ix + 1, iy_d, Ny)
+                                    coefficient = shear_scale * cosa * weight / 2
+                                    add(kux, kuy_left, coefficient)
+                                    add(kux, kuy_right, coefficient)
+
+                                _, kuy_left = self._dofs(ix, Ny - 1, Ny)
+                                _, kuy_right = self._dofs(ix + 1, Ny - 1, Ny)
+                                add(kux, kuy_left, -shear_scale * a2 / dx_loc)
+                                add(kux, kuy_right, shear_scale * a2 / dx_loc)
+
+                                if ix == 0:
+                                    x_terms = ((ix, 0.5), (ix + 1, -0.5))
+                                elif ix == Nx - 1:
+                                    x_terms = ((ix, -0.5), (ix - 1, 0.5))
+                                else:
+                                    x_terms = ((ix + 1, -0.25), (ix - 1, 0.25))
+                                for ix_d, factor in x_terms:
+                                    kux_inner, _ = self._dofs(ix_d, Ny - 1, Ny)
+                                    kux_ghost, _ = self._dofs(ix_d, Ny, Ny)
+                                    add(kux, kux_inner, shear_scale * cosa * factor / dx_loc)
+                                    add(kux, kux_ghost, shear_scale * cosa * factor / dx_loc)
+                            else:
+                                dy_ux_bottom = float(g.yp[-1] - g.yp[-2])
+                                dy_uy_bottom = float(g.y[-1] - g.y[-2])
+                                dx_uy = float(g.xp[ix + 1] - g.xp[ix])
+                                a2 = 1.0 - 2.0 * cosa * cosa
+                                add(kux, kux,      1.0 / dy_ux_bottom)
+                                add(kux, kux - 2, -1.0 / dy_ux_bottom)
+                                for ix_d, w in first_derivative_weights(g.x, ix):
+                                    kux_d, _ = self._dofs(ix_d, iy, Ny)
+                                    add(kux, kux_d, -cosa * w)
+                                for ix_u in (ix, ix + 1):
+                                    _, kuy_0 = self._dofs(ix_u, Ny - 2, Ny)
+                                    _, kuy_1 = self._dofs(ix_u, Ny - 1, Ny)
+                                    add(kux, kuy_1,  0.5 * cosa / dy_uy_bottom)
+                                    add(kux, kuy_0, -0.5 * cosa / dy_uy_bottom)
+                                _, kuy_left = self._dofs(ix, Ny - 1, Ny)
+                                _, kuy_right = self._dofs(ix + 1, Ny - 1, Ny)
+                                add(kux, kuy_right,  a2 / dx_uy)
+                                add(kux, kuy_left,  -a2 / dx_uy)
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.bottom.ux.type}")
                     elif ix == 0:

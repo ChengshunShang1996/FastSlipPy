@@ -27,9 +27,10 @@ def test_real_90_degree_case_resolves_complete_frictional_fault_uniformly():
     assert np.max(grid.dy_edges) <= params.y_stretch_max_cell_size
 
 
-def test_real_90_degree_case_uses_side_and_bottom_loading():
+def test_real_90_degree_case_uses_side_loading_and_free_bottom():
     params = build_bp3_90_parameters()
 
     assert params.bc.left.uy.value == -0.5 * params.loading.V_p
     assert params.bc.right.uy.value == 0.5 * params.loading.V_p
-    assert params.bc.bottom.uy.value == 0.5 * params.loading.V_L
+    assert params.bc.bottom.ux.type.name == "TRACTION_FREE"
+    assert params.bc.bottom.uy.type.name == "TRACTION_FREE"
