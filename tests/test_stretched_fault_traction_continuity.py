@@ -7,9 +7,9 @@ from fastslippy.solver.matrix_builder import MatrixBuilder
 from fastslippy.utilities.stress_cal_util import StressCalUtil
 
 
-def test_stretched_fault_has_continuous_tractions_for_all_bp3_dips():
-    """The matrix interface rows and stress recovery must use one traction stencil."""
-    for alpha in (30.0, 60.0, 90.0):
+def test_stretched_inclined_fault_uses_recovered_traction_at_interface():
+    """Inclined-fault matrix rows must constrain the recovered tractions."""
+    for alpha in (30.0, 60.0):
         params = ModelParameters(
             case_type="california",
             alpha=alpha,
@@ -38,7 +38,8 @@ def test_stretched_fault_has_continuous_tractions_for_all_bp3_dips():
         params.bc.right.ux.set_fixed()
         params.bc.right.uy.set_velocity(half_rate)
         params.bc.top.set_traction_free()
-        params.bc.bottom.set_traction_free()
+        params.bc.bottom.ux.set_fixed()
+        params.bc.bottom.uy.set_velocity(half_rate)
 
         grid = Grid(params)
         builder = MatrixBuilder(params, grid)
@@ -68,9 +69,29 @@ def test_stretched_fault_has_continuous_tractions_for_all_bp3_dips():
             normal_row, _ = builder._dofs(mid, iy, params.Ny)
             interface_rows.append(normal_row)
 
-        # The MATLAB interface equations themselves are the authoritative
-        # staggered traction discretisation; recovered plotting stresses use a
-        # separate, higher-order interpolation operator.
+        # A small algebraic residual only proves that the rows assembled into
+        # the matrix were solved.  The physical invariant is that those rows
+        # impose continuity on the very same discrete tractions subsequently
+        # used by the friction law.
         assert np.max(np.abs(residual[interface_rows])) < 1e-18
-        assert np.all(np.isfinite(tau))
-        assert np.all(np.isfinite(sigma))
+
+        shear_left = tau[:, mid - 1]
+        shear_right = tau[:, mid + 1]
+        np.testing.assert_allclose(
+            shear_left[:-1], shear_right[:-1], rtol=1e-8, atol=1e-11
+        )
+
+        recovered_left, recovered_right = StressCalUtil(
+            prefer_numba=False
+        ).recover_fault_normal_stress(
+            sigma,
+            grid.x,
+            grid.y,
+            grid.xp,
+            grid.yp,
+            left_column=mid - 1,
+            right_column=mid,
+        )
+        np.testing.assert_allclose(
+            recovered_left, recovered_right, rtol=1e-8, atol=1e-11
+        )

@@ -14,7 +14,10 @@ from scipy import sparse
 
 from fastslippy.pre_processing.model_parameters import ModelParameters, BCType
 from fastslippy.pre_processing.grid import Grid
-from fastslippy.utilities.grid_operators import finite_difference_weights
+from fastslippy.utilities.grid_operators import (
+    build_recovery_operators,
+    finite_difference_weights,
+)
 
 
 class MatrixBuilder:
@@ -129,6 +132,8 @@ class MatrixBuilder:
         dy_yux = self._dy_yux
         use_coordinate_nonuniform_operator = not self._is_uniform
         is_california = self._case_type == "california"
+        is_vertical_california = is_california and cosa == 0.0
+        recovery = build_recovery_operators(g.x, g.y, g.xp, g.yp)
 
         rows, cols, vals = [], [], []
         _point_weight_cache = {}
@@ -153,6 +158,11 @@ class MatrixBuilder:
                 coords[idx], coords[list(stencil)], 1
             )
             return tuple(zip(stencil, weights))
+
+        def sparse_row_entries(matrix: sparse.csr_matrix, row: int):
+            """Return non-zero column/value pairs from one recovery row."""
+            start, stop = matrix.indptr[row : row + 2]
+            return zip(matrix.indices[start:stop], matrix.data[start:stop])
 
         def point_weights(coords: np.ndarray, target: float, indices, derivative: int):
             """Polynomial-exact weights for a derivative at an off-grid point.
@@ -309,8 +319,10 @@ class MatrixBuilder:
                     elif ix == mid:
                         # Fault left side
                         add(kuy, kuy, -1); add(kuy, kuy + (Ny+1)*2, 1)
-                    elif is_california and ix == mid + 1:
-                        # MATLAB BP3 shear-traction continuity row.
+                    elif is_vertical_california and ix == mid + 1:
+                        # Preserve the MATLAB BP3 row for the vertical case.
+                        # With cos(alpha)=0 its cross-coupling terms vanish,
+                        # and this row already matches recovered shear traction.
                         dx_fault = dx_xuy[ix]
                         dy_fault = dy_yuy[iy]
                         spacing_left = g.xp[ix - 1] - g.xp[ix - 2]
@@ -377,17 +389,55 @@ class MatrixBuilder:
                         add_ux(jl, iy + 1,  cy); add_ux(jl, iy, -cy)
                         add_ux(jr, iy + 1, -cy); add_ux(jr, iy,  cy)
 
-                        # cos(a) * averaged ux_x
-                        for j, sign in ((jl, 1.0), (jr, -1.0)):
-                            for ix_d, w in first_derivative_weights(g.x, j):
-                                add_ux(ix_d, iy,     0.5 * cosa * sign * w)
-                                add_ux(ix_d, iy + 1, 0.5 * cosa * sign * w)
+                        if is_california:
+                            # Reuse the exact sparse derivative/interpolation
+                            # rows used by StressCalUtil.  A hard-coded 1/2
+                            # average is inconsistent on a stretched mesh.
+                            for j, sign in ((jl, 1.0), (jr, -1.0)):
+                                for iy_d, wy in sparse_row_entries(
+                                    recovery.midpoint_y_to_node, iy
+                                ):
+                                    for ix_d, wx in sparse_row_entries(
+                                        recovery.derivative_x, j
+                                    ):
+                                        add_ux(
+                                            ix_d,
+                                            iy_d,
+                                            cosa * sign * wy * wx,
+                                        )
 
-                        # -cos(a) * averaged uy_y
-                        for j, sign in ((jl, 1.0), (jr, -1.0)):
-                            for ix_u in (j, j + 1):
-                                for iy_d, w in first_derivative_weights(g.y, iy):
-                                    add_uy(ix_u, iy_d, -0.5 * cosa * sign * w)
+                            for j, sign in ((jl, 1.0), (jr, -1.0)):
+                                for ix_u, wx in sparse_row_entries(
+                                    recovery.midpoint_x_to_node, j
+                                ):
+                                    for iy_d, wy in sparse_row_entries(
+                                        recovery.derivative_y, iy
+                                    ):
+                                        add_uy(
+                                            ix_u,
+                                            iy_d,
+                                            -cosa * sign * wx * wy,
+                                        )
+                        else:
+                            # Preserve the existing non-BP3 discretisation.
+                            for j, sign in ((jl, 1.0), (jr, -1.0)):
+                                for ix_d, w in first_derivative_weights(g.x, j):
+                                    add_ux(
+                                        ix_d, iy, 0.5 * cosa * sign * w
+                                    )
+                                    add_ux(
+                                        ix_d, iy + 1, 0.5 * cosa * sign * w
+                                    )
+                            for j, sign in ((jl, 1.0), (jr, -1.0)):
+                                for ix_u in (j, j + 1):
+                                    for iy_d, w in first_derivative_weights(
+                                        g.y, iy
+                                    ):
+                                        add_uy(
+                                            ix_u,
+                                            iy_d,
+                                            -0.5 * cosa * sign * w,
+                                        )
                     else:
                         # Interior bulk
                         if self._is_uniform:
@@ -616,8 +666,11 @@ class MatrixBuilder:
                             add(kux, kux, 1); add(kux, kux - (Ny+1)*2, -1)
                         else:
                             raise ValueError(f"BC type: {p.bc.right.ux.type} is not supported for right boundary yet.")
-                    elif is_california and ix == mid:
-                        # MATLAB BP3 homogeneous normal-traction continuity.
+                    elif is_vertical_california and ix == mid:
+                        # Preserve the MATLAB BP3 row for alpha=90, where it
+                        # is already consistent and has an exact regression
+                        # reference.  Inclined faults use the recovered-node
+                        # traction row below.
                         dx_fault = dx_xux[ix]
                         dy_fault = dy_yux[iy]
                         h_minus = self._hxm_ux[ix]
@@ -635,12 +688,12 @@ class MatrixBuilder:
                         add(kux, kuy - 2, coefficient)
                         add(kux, kuy + (Ny+1)*2 - 2, -coefficient)
                     elif ix == mid:
-                        # Enforce sigma(left)-sigma(right)=0 using the same
-                        # cell-centred normal-stress recovery operator used
-                        # after every elastic solve.  The ux row at iy maps to
-                        # sigmaqs row iy-1 on the staggered grid.
+                        # For inclined BP3, enforce equality of the fault-node
+                        # normal tractions consumed by the friction law.
+                        # sigmaqs is cell centred, so the BP3 path includes
+                        # the same recovery used after the solve.  Other case
+                        # types retain their existing cell-centred row below.
                         fault_row = kux
-                        isigma = iy - 1
                         jl, jr = mid - 1, mid
                         dx_ux = np.diff(g.x)
                         dy_uy = np.diff(g.y)
@@ -649,30 +702,62 @@ class MatrixBuilder:
                         # local dx/G normalization as the original row.
                         fault_scale = dx_ux[jr] / G
 
-                        # (lambda+2G) ux_x
-                        cx_l = (lam + 2.0 * G) / dx_ux[jl]
-                        add_ux(jl + 1, iy,  cx_l)
-                        add_ux(jl,     iy, -cx_l)
-                        cx_r = (lam + 2.0 * G) / dx_ux[jr]
-                        add_ux(jr + 1, iy, -cx_r)
-                        add_ux(jr,     iy,  cx_r)
+                        if is_california:
+                            for isigma, node_weight in sparse_row_entries(
+                                recovery.sigma_centres_to_nodes, iy
+                            ):
+                                # (lambda+2G) ux_x
+                                cx_l = (
+                                    node_weight * (lam + 2.0 * G) / dx_ux[jl]
+                                )
+                                add_ux(jl + 1, isigma + 1,  cx_l)
+                                add_ux(jl,     isigma + 1, -cx_l)
+                                cx_r = (
+                                    node_weight * (lam + 2.0 * G) / dx_ux[jr]
+                                )
+                                add_ux(jr + 1, isigma + 1, -cx_r)
+                                add_ux(jr,     isigma + 1,  cx_r)
 
-                        # lambda uy_y
-                        cy = lam / dy_uy[isigma]
-                        add_uy(jl + 1, isigma + 1,  cy)
-                        add_uy(jl + 1, isigma,     -cy)
-                        add_uy(jr + 1, isigma + 1, -cy)
-                        add_uy(jr + 1, isigma,      cy)
+                                # lambda uy_y
+                                cy = node_weight * lam / dy_uy[isigma]
+                                add_uy(jl + 1, isigma + 1,  cy)
+                                add_uy(jl + 1, isigma,     -cy)
+                                add_uy(jr + 1, isigma + 1, -cy)
+                                add_uy(jr + 1, isigma,      cy)
 
-                        # -2G*cos(a)*mm_outer(ux_y).  The common central
-                        # ux column cancels between the two adjacent cells.
-                        cxy = -0.5 * G * cosa
-                        for iy_d in (isigma, isigma + 1):
-                            wy = cxy / dy_ux[iy_d]
-                            add_ux(jl, iy_d + 1,  wy)
-                            add_ux(jl, iy_d,     -wy)
-                            add_ux(jr + 1, iy_d + 1, -wy)
-                            add_ux(jr + 1, iy_d,      wy)
+                                # -2G*cos(a)*mm_outer(ux_y).  The common
+                                # central ux column cancels between adjacent
+                                # cells.
+                                cxy = -0.5 * G * cosa * node_weight
+                                for iy_d in (isigma, isigma + 1):
+                                    wy = cxy / dy_ux[iy_d]
+                                    add_ux(jl, iy_d + 1,  wy)
+                                    add_ux(jl, iy_d,     -wy)
+                                    add_ux(jr + 1, iy_d + 1, -wy)
+                                    add_ux(jr + 1, iy_d,      wy)
+                        else:
+                            # Preserve the existing non-BP3 cell-centred row.
+                            isigma = iy - 1
+                            cx_l = (lam + 2.0 * G) / dx_ux[jl]
+                            add_ux(jl + 1, iy,  cx_l)
+                            add_ux(jl,     iy, -cx_l)
+                            cx_r = (lam + 2.0 * G) / dx_ux[jr]
+                            add_ux(jr + 1, iy, -cx_r)
+                            add_ux(jr,     iy,  cx_r)
+
+                            cy = lam / dy_uy[isigma]
+                            add_uy(jl + 1, isigma + 1,  cy)
+                            add_uy(jl + 1, isigma,     -cy)
+                            add_uy(jr + 1, isigma + 1, -cy)
+                            add_uy(jr + 1, isigma,      cy)
+
+                            cxy = -0.5 * G * cosa
+                            for iy_d in (isigma, isigma + 1):
+                                wy = cxy / dy_ux[iy_d]
+                                add_ux(jl, iy_d + 1,  wy)
+                                add_ux(jl, iy_d,     -wy)
+                                add_ux(jr + 1, iy_d + 1, -wy)
+                                add_ux(jr + 1, iy_d,      wy)
                     else:
                         # Interior bulk
                         if self._is_uniform:
