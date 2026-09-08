@@ -157,7 +157,8 @@ def test_bottom_traction_free_annuls_rigid_rotation_for_inclined_faults():
             if ix != mid:
                 _, kuy = builder._dofs(ix, params.Ny - 1, params.Ny)
                 rows.append(kuy)
-        for ix in range(params.Nx):
+        # The side displacement condition owns the two side/bottom corners.
+        for ix in range(1, params.Nx - 1):
             kux, _ = builder._dofs(ix, params.Ny, params.Ny)
             rows.append(kux)
 
@@ -214,7 +215,8 @@ def test_bottom_traction_free_accepts_nonzero_affine_free_traction():
             if case_type != "california" or ix != mid:
                 _, kuy = builder._dofs(ix, params.Ny - 1, params.Ny)
                 rows.append(kuy)
-        for ix in range(params.Nx):
+        # The side displacement condition owns the two side/bottom corners.
+        for ix in range(1, params.Nx - 1):
             kux, _ = builder._dofs(ix, params.Ny, params.Ny)
             rows.append(kux)
 

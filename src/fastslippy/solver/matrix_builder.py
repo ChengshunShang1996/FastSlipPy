@@ -200,6 +200,54 @@ class MatrixBuilder:
             start = min(max(centre - 1, 0), size - 3)
             return (start, start + 1, start + 2)
 
+        def nearest_three_point_stencil(coords: np.ndarray, target: float):
+            """Return the three coordinate nodes nearest to an off-grid target."""
+            nearest = np.argsort(np.abs(np.asarray(coords) - target))[:3]
+            return tuple(sorted(int(index) for index in nearest))
+
+        def add_horizontal_normal_traction(row, x_target, y_target, scale):
+            """Add ``scale * sigma_zz`` using the actual staggered nodes."""
+            x_ux = nearest_three_point_stencil(g.x, x_target)
+            y_ux = nearest_three_point_stencil(g.yp, y_target)
+            x_uy = nearest_three_point_stencil(g.xp, x_target)
+            y_uy = nearest_three_point_stencil(g.y, y_target)
+            add_tensor_derivative(
+                row, "ux", g.x, x_ux, x_target, 1,
+                g.yp, y_ux, y_target, 0, scale * lam,
+            )
+            add_tensor_derivative(
+                row, "uy", g.xp, x_uy, x_target, 0,
+                g.y, y_uy, y_target, 1, scale * (lam + 2.0 * G),
+            )
+            add_tensor_derivative(
+                row, "uy", g.xp, x_uy, x_target, 1,
+                g.y, y_uy, y_target, 0, -scale * 2.0 * G * cosa,
+            )
+
+        def add_horizontal_shear_traction(row, x_target, y_target, scale):
+            """Add the scaled horizontal shear-traction bracket."""
+            x_ux = nearest_three_point_stencil(g.x, x_target)
+            y_ux = nearest_three_point_stencil(g.yp, y_target)
+            x_uy = nearest_three_point_stencil(g.xp, x_target)
+            y_uy = nearest_three_point_stencil(g.y, y_target)
+            a2 = 1.0 - 2.0 * cosa * cosa
+            add_tensor_derivative(
+                row, "ux", g.x, x_ux, x_target, 0,
+                g.yp, y_ux, y_target, 1, scale,
+            )
+            add_tensor_derivative(
+                row, "uy", g.xp, x_uy, x_target, 1,
+                g.y, y_uy, y_target, 0, scale * a2,
+            )
+            add_tensor_derivative(
+                row, "ux", g.x, x_ux, x_target, 1,
+                g.yp, y_ux, y_target, 0, -scale * cosa,
+            )
+            add_tensor_derivative(
+                row, "uy", g.xp, x_uy, x_target, 0,
+                g.y, y_uy, y_target, 1, scale * cosa,
+            )
+
         for ix in range(Nx+1):           # 0 … Nx  (MATLAB 1 … Nx+1)
             for iy in range(Ny+1):       # 0 … Ny
 
@@ -240,24 +288,10 @@ class MatrixBuilder:
                             add(kuy, kuy, 1)
                         elif p.bc.top.uy.type == BCType.TRACTION_FREE:
                             if is_california:
-                                wy = finite_difference_weights(
-                                    g.y[0], g.y[:3], 1
-                                )
                                 normal_scale = dx_loc / G
-                                for iy_d, weight in enumerate(wy):
-                                    add(
-                                        kuy,
-                                        kuy + 2 * iy_d,
-                                        normal_scale * (lam + 2 * G) * weight,
-                                    )
-                                add(kuy, kuy - (Ny+1)*2, normal_scale * G * cosa / dx_loc)
-                                add(kuy, kuy + (Ny+1)*2, -normal_scale * G * cosa / dx_loc)
-                                dx_ux = float(g.x[ix] - g.x[ix - 1])
-                                coefficient = normal_scale * lam / (2 * dx_ux)
-                                add(kuy, kux, coefficient)
-                                add(kuy, kux + 2, coefficient)
-                                add(kuy, kux - (Ny+1)*2, -coefficient)
-                                add(kuy, kux - (Ny+1)*2 + 2, -coefficient)
+                                add_horizontal_normal_traction(
+                                    kuy, g.xp[ix], g.y[0], normal_scale
+                                )
                             else:
                                 dy_top = float(g.y[1] - g.y[0])
                                 dx_ux = float(g.x[ix] - g.x[ix - 1])
@@ -282,25 +316,10 @@ class MatrixBuilder:
                             add(kuy, kuy, 1);  add(kuy, kuy - 2, -1)
                         elif p.bc.bottom.uy.type == BCType.TRACTION_FREE:
                             if is_california:
-                                wy = finite_difference_weights(
-                                    g.y[-1], g.y[-3:], 1
-                                )
                                 normal_scale = dx_loc / G
-                                for iy_d, weight in zip(range(Ny - 3, Ny), wy):
-                                    _, kuy_d = self._dofs(ix, iy_d, Ny)
-                                    add(
-                                        kuy,
-                                        kuy_d,
-                                        normal_scale * (lam + 2 * G) * weight,
-                                    )
-                                add(kuy, kuy - (Ny+1)*2, normal_scale * G * cosa / dx_loc)
-                                add(kuy, kuy + (Ny+1)*2, -normal_scale * G * cosa / dx_loc)
-                                dx_ux = float(g.x[ix] - g.x[ix - 1])
-                                coefficient = normal_scale * lam / (2 * dx_ux)
-                                add(kuy, kux, coefficient)
-                                add(kuy, kux + 2, coefficient)
-                                add(kuy, kux - (Ny+1)*2, -coefficient)
-                                add(kuy, kux - (Ny+1)*2 + 2, -coefficient)
+                                add_horizontal_normal_traction(
+                                    kuy, g.xp[ix], g.y[-1], normal_scale
+                                )
                             else:
                                 dy_bottom = float(g.y[-1] - g.y[-2])
                                 dx_ux = float(g.x[ix] - g.x[ix - 1])
@@ -322,7 +341,7 @@ class MatrixBuilder:
                     elif is_vertical_california and ix == mid + 1:
                         # Preserve the MATLAB BP3 row for the vertical case.
                         # With cos(alpha)=0 its cross-coupling terms vanish,
-                        # and this row already matches recovered shear traction.
+                        # and it preserves the mode-II mirror symmetry.
                         dx_fault = dx_xuy[ix]
                         dy_fault = dy_yuy[iy]
                         spacing_left = g.xp[ix - 1] - g.xp[ix - 2]
@@ -494,12 +513,26 @@ class MatrixBuilder:
                                 add(kuy, kux + (Ny+1)*2,      -cf)
                                 add(kuy, kux + (Ny+1)*2 + 2,  -cf)
                         elif use_coordinate_nonuniform_operator:
-                            # (lambda+G) ux_xy: the staggered four-point mixed
-                            # derivative spans one physical interval each way.
-                            add(kuy, kux - (Ny+1)*2,      fac)
-                            add(kuy, kux - (Ny+1)*2 + 2, -fac)
-                            add(kuy, kux,                 -fac)
-                            add(kuy, kux + 2,              fac)
+                            # (lambda+G) ux_xy at the uy node.  On a stretched
+                            # grid the old compact four-point difference cannot
+                            # be scaled by a single dx_loc/dy_loc: its ux nodes
+                            # have different physical spans.  Evaluate the
+                            # derivative at the actual staggered coordinates.
+                            x_ux = nearest_three_point_stencil(g.x, g.xp[ix])
+                            y_ux = nearest_three_point_stencil(g.yp, g.y[iy])
+                            add_tensor_derivative(
+                                kuy,
+                                "ux",
+                                g.x,
+                                x_ux,
+                                g.xp[ix],
+                                1,
+                                g.yp,
+                                y_ux,
+                                g.y[iy],
+                                1,
+                                scale * b2,
+                            )
 
                             # MATLAB increment 2e: keep -c*ux_xx separate and
                             # evaluate it at xp[ix] from four ux columns.  The
@@ -532,7 +565,17 @@ class MatrixBuilder:
                     dy_loc = dy_yux[iy]
                     r2 = dx_loc*dx_loc / dy_loc/dy_loc
                     r_lam = (lam + 2*G) / G
-                    if iy == 0 and is_california and ix == mid:
+                    # A prescribed side displacement owns a side/traction
+                    # corner.  This also gives ux and uy the same precedence.
+                    if ix == 0 and p.bc.left.ux.type in (
+                        BCType.FIXED, BCType.VELOCITY
+                    ):
+                        add(kux, kux, 1)
+                    elif ix == Nx - 1 and p.bc.right.ux.type in (
+                        BCType.FIXED, BCType.VELOCITY
+                    ):
+                        add(kux, kux, 1)
+                    elif iy == 0 and is_california and ix == mid:
                         # Fault-line ghost above the free surface: zero
                         # curvature along the fault, not zero shear traction.
                         add(kux, kux, 1)
@@ -545,32 +588,10 @@ class MatrixBuilder:
                             add(kux, kux, 1); add(kux, kux + 2, -1)
                         elif p.bc.top.ux.type == BCType.TRACTION_FREE:
                             if is_california:
-                                wy = finite_difference_weights(
-                                    g.y[0], g.y[:3], 1
-                                )
                                 shear_scale = dx_loc / sina
-                                hux_surface = g.yp[1] - g.yp[0]
-                                add(kux, kux, -shear_scale / hux_surface)
-                                add(kux, kux + 2, shear_scale / hux_surface)
-
-                                a2 = 1.0 - 2.0 * cosa * cosa
-                                for iy_d, weight in enumerate(wy):
-                                    coefficient = shear_scale * cosa * weight / 2
-                                    add(kux, kuy + 2*iy_d, coefficient)
-                                    add(kux, kuy + (Ny+1)*2 + 2*iy_d, coefficient)
-                                add(kux, kuy, -shear_scale * a2 / dx_loc)
-                                add(kux, kuy + (Ny+1)*2, shear_scale * a2 / dx_loc)
-
-                                if ix == 0:
-                                    x_terms = ((ix, 0.5), (ix + 1, -0.5))
-                                elif ix == Nx - 1:
-                                    x_terms = ((ix, -0.5), (ix - 1, 0.5))
-                                else:
-                                    x_terms = ((ix + 1, -0.25), (ix - 1, 0.25))
-                                for ix_d, factor in x_terms:
-                                    kux_d, _ = self._dofs(ix_d, iy, Ny)
-                                    add(kux, kux_d, shear_scale * cosa * factor / dx_loc)
-                                    add(kux, kux_d + 2, shear_scale * cosa * factor / dx_loc)
+                                add_horizontal_shear_traction(
+                                    kux, g.x[ix], g.y[0], shear_scale
+                                )
                             else:
                                 dy_ux_top = float(g.yp[1] - g.yp[0])
                                 dy_uy_top = float(g.y[1] - g.y[0])
@@ -600,37 +621,9 @@ class MatrixBuilder:
                         elif p.bc.bottom.ux.type == BCType.TRACTION_FREE:
                             if is_california:
                                 shear_scale = dx_loc / sina
-                                hux_bottom = g.yp[-1] - g.yp[-2]
-                                add(kux, kux - 2, -shear_scale / hux_bottom)
-                                add(kux, kux,      shear_scale / hux_bottom)
-
-                                wy = finite_difference_weights(
-                                    g.y[-1], g.y[-3:], 1
+                                add_horizontal_shear_traction(
+                                    kux, g.x[ix], g.y[-1], shear_scale
                                 )
-                                a2 = 1.0 - 2.0 * cosa * cosa
-                                for iy_d, weight in zip(range(Ny - 3, Ny), wy):
-                                    _, kuy_left = self._dofs(ix, iy_d, Ny)
-                                    _, kuy_right = self._dofs(ix + 1, iy_d, Ny)
-                                    coefficient = shear_scale * cosa * weight / 2
-                                    add(kux, kuy_left, coefficient)
-                                    add(kux, kuy_right, coefficient)
-
-                                _, kuy_left = self._dofs(ix, Ny - 1, Ny)
-                                _, kuy_right = self._dofs(ix + 1, Ny - 1, Ny)
-                                add(kux, kuy_left, -shear_scale * a2 / dx_loc)
-                                add(kux, kuy_right, shear_scale * a2 / dx_loc)
-
-                                if ix == 0:
-                                    x_terms = ((ix, 0.5), (ix + 1, -0.5))
-                                elif ix == Nx - 1:
-                                    x_terms = ((ix, -0.5), (ix - 1, 0.5))
-                                else:
-                                    x_terms = ((ix + 1, -0.25), (ix - 1, 0.25))
-                                for ix_d, factor in x_terms:
-                                    kux_inner, _ = self._dofs(ix_d, Ny - 1, Ny)
-                                    kux_ghost, _ = self._dofs(ix_d, Ny, Ny)
-                                    add(kux, kux_inner, shear_scale * cosa * factor / dx_loc)
-                                    add(kux, kux_ghost, shear_scale * cosa * factor / dx_loc)
                             else:
                                 dy_ux_bottom = float(g.yp[-1] - g.yp[-2])
                                 dy_uy_bottom = float(g.y[-1] - g.y[-2])
@@ -667,10 +660,10 @@ class MatrixBuilder:
                         else:
                             raise ValueError(f"BC type: {p.bc.right.ux.type} is not supported for right boundary yet.")
                     elif is_vertical_california and ix == mid:
-                        # Preserve the MATLAB BP3 row for alpha=90, where it
-                        # is already consistent and has an exact regression
-                        # reference.  Inclined faults use the recovered-node
-                        # traction row below.
+                        # Preserve the vertical BP3 mode-II row.  Replacing it
+                        # with the generic recovered-normal row satisfies a
+                        # local equality but destroys the mirror-decoupled
+                        # vertical-fault solution.
                         dx_fault = dx_xux[ix]
                         dy_fault = dy_yux[iy]
                         h_minus = self._hxm_ux[ix]
@@ -811,11 +804,26 @@ class MatrixBuilder:
                                 add(kux, kuy + 2,               -cf)
                                 add(kux, kuy - 4,               -cf)
                         elif use_coordinate_nonuniform_operator:
-                            # (lambda+G) uy_xy on its native staggered cell.
-                            add(kux, kuy + (Ny+1)*2,      fac)
-                            add(kux, kuy + (Ny+1)*2 - 2, -fac)
-                            add(kux, kuy,                 -fac)
-                            add(kux, kuy - 2,              fac)
+                            # (lambda+G) uy_xy at the ux node, evaluated from
+                            # the actual staggered coordinates.  Using the
+                            # compact uniform-grid difference with local mean
+                            # spacings creates a nonzero force for an exact
+                            # quadratic equilibrium at stretch transitions.
+                            x_uy = nearest_three_point_stencil(g.xp, g.x[ix])
+                            y_uy = nearest_three_point_stencil(g.y, g.yp[iy])
+                            add_tensor_derivative(
+                                kux,
+                                "uy",
+                                g.xp,
+                                x_uy,
+                                g.x[ix],
+                                1,
+                                g.y,
+                                y_uy,
+                                g.yp[iy],
+                                1,
+                                scale * b2,
+                            )
 
                             # MATLAB increment 2e: -c*uy_yy at yp[iy] from
                             # four uy rows, averaged across the two columns.
@@ -932,9 +940,9 @@ class MatrixBuilder:
                 RH[self._kux[Ny, self._ix_ux_all]] = p.bc.bottom.ux.value
 
         if p.bc.left.ux.type == BCType.VELOCITY:
-            RH[self._kux[1:Ny, 0]] = p.bc.left.ux.value
+            RH[self._kux[:, 0]] = p.bc.left.ux.value
         if p.bc.right.ux.type == BCType.VELOCITY:
-            RH[self._kux[1:Ny, Nx - 1]] = p.bc.right.ux.value
+            RH[self._kux[:, Nx - 1]] = p.bc.right.ux.value
 
         if is_groningen:
             y_int = y[iy_int]
