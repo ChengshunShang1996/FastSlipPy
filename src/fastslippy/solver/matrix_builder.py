@@ -306,9 +306,20 @@ class MatrixBuilder:
                         else:
                             raise ValueError(f"BC type: {p.bc.top.uy.type} is not supported for top boundary yet.")
                     elif iy == Ny - 1 and is_california and ix == mid:
+                        # Fault/bottom trace: retain the prescribed creeping
+                        # jump.  The companion fault-face row (ix=mid+1) must
+                        # remain the interface shear-traction-continuity row,
+                        # just as it does at the free-surface trace.  Applying
+                        # a bottom traction stencil there crosses the duplicated
+                        # uy values and interprets rigid fault slip as strain.
                         add(kuy, kuy, -1)
                         add(kuy, kuy + (Ny+1)*2, 1)
-                    elif iy == Ny - 1: #bottom boundary (y=ysize / deep boundary)
+                    # Ordinary deep-boundary row, excluding the BP3 trace row.
+                    elif iy == Ny - 1 and not (
+                        is_california
+                        and ix == mid + 1
+                        and p.bc.bottom.uy.type == BCType.TRACTION_FREE
+                    ):
                         if p.bc.bottom.uy.type == BCType.FIXED or p.bc.bottom.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
                         elif p.bc.bottom.uy.type == BCType.FREE:
@@ -611,6 +622,30 @@ class MatrixBuilder:
                                 add(kux, kuy,                 -a2 / dx_uy)
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.top.ux.type}")
+                    elif (
+                        iy == Ny
+                        and is_california
+                        and ix == mid
+                        and p.bc.bottom.ux.type == BCType.TRACTION_FREE
+                    ):
+                        # Fault-line ghost below the deep boundary.  At this
+                        # corner the fault-interface trace and the horizontal
+                        # traction boundary meet, so assigning a generic shear
+                        # traction row would differentiate across the fault's
+                        # allowed tangential jump.  Mirror the free-surface
+                        # closure: zero curvature along the fault constrains
+                        # only the ghost value and imposes no corner traction.
+                        y_indices = (Ny - 2, Ny - 1, Ny)
+                        weights = point_weights(
+                            g.yp, g.yp[Ny], y_indices, 2
+                        )
+                        # Preserve the dimensionless [1,-2,1] scaling on a
+                        # uniform mesh while remaining linear-exact after y
+                        # stretching.
+                        scale = (g.yp[Ny] - g.yp[Ny - 1]) ** 2
+                        for iy_d, weight in zip(y_indices, weights):
+                            kux_d, _ = self._dofs(ix, iy_d, Ny)
+                            add(kux, kux_d, scale * weight)
                     elif iy == Ny:
                         if p.bc.bottom.ux.type == BCType.FIXED or p.bc.bottom.ux.type == BCType.VELOCITY:
                             add(kux, kux, 1)

@@ -339,6 +339,42 @@ def test_side_displacement_owns_horizontal_traction_corners():
             assert row.data[0] == pytest.approx(1.0)
 
 
+@pytest.mark.parametrize("stretched", [False, True])
+@pytest.mark.parametrize("alpha", [30.0, 60.0, 90.0])
+def test_fully_creeping_fault_is_piecewise_rigid_with_free_bottom(
+    alpha, stretched
+):
+    """The fault/bottom trace must not turn rigid plate motion into stress.
+
+    With the complete fault creeping at the imposed relative plate rate, the
+    two sides translate rigidly at -Vp/2 and +Vp/2.  Both horizontal tractions
+    are then identically zero.  This test specifically exercises the three
+    rows shared by the fault interface and the bottom-boundary trace; smooth
+    manufactured fields cannot expose a stencil that crosses the uy jump.
+    """
+
+    params = _bp3_params(alpha, stretched=stretched)
+    params.bc.left.uy.set_velocity(-0.5)
+    params.bc.right.uy.set_velocity(0.5)
+    grid = Grid(params)
+    builder = MatrixBuilder(params, grid)
+
+    ux = np.zeros((params.Ny + 1, params.Nx))
+    uy = np.empty((params.Ny, params.Nx + 1))
+    mid = params.Nx // 2
+    uy[:, : mid + 1] = -0.5
+    uy[:, mid + 1 :] = 0.5
+    exact = _pack(builder, ux, uy)
+
+    lhs = builder.build_LH().tocsc()
+    rhs = builder.build_RH(0.0, np.ones(params.Ny)).copy()
+    residual = lhs @ exact - rhs
+    assert np.max(np.abs(residual)) < 2e-12
+
+    solved = spsolve(lhs, rhs)
+    np.testing.assert_allclose(solved, exact, rtol=0.0, atol=2e-10)
+
+
 def test_static_locked_fault_loading_kernel_converges_with_resolution():
     """Fault tractions converge without integrating an earthquake cycle."""
 
