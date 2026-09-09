@@ -4,7 +4,11 @@ import pytest
 from fastslippy import FastSlipPy
 from fastslippy.pre_processing.frictional_zones import FrictionalZones
 from fastslippy.pre_processing.grid import Grid
-from fastslippy.pre_processing.model_parameters import CaseType, ModelParameters
+from fastslippy.pre_processing.model_parameters import (
+    CaseType,
+    ModelParameters,
+    SlipRateSolver,
+)
 from fastslippy.solver.fault_state import FaultState
 from fastslippy.solver.stress_state import StressState
 
@@ -67,6 +71,24 @@ def test_case_type_and_default_lab_friction_are_general(case_value):
     np.testing.assert_allclose(friction.a, params.a0)
     np.testing.assert_allclose(friction.b, params.b0)
     np.testing.assert_allclose(fault.theta, params.L / params.V0)
+    assert params.slip_rate_solver is SlipRateSolver.NEWTON_V2
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("newton_v2", SlipRateSolver.NEWTON_V2),
+        ("BISECTION", SlipRateSolver.BISECTION),
+    ],
+)
+def test_slip_rate_solver_input_is_normalized(value, expected):
+    params = _lab_parameters(slip_rate_solver=value)
+    assert params.slip_rate_solver is expected
+
+
+def test_unknown_slip_rate_solver_is_rejected():
+    with pytest.raises(ValueError, match="slip_rate_solver"):
+        _lab_parameters(slip_rate_solver="unknown")
 
 
 def test_ksi_scale_only_scales_the_adaptive_fault_limit():

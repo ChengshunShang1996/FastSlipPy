@@ -61,6 +61,8 @@ def build_bp3_parameters() -> ModelParameters:
         # keeping dt_max and all physical parameters unchanged.
         ksi_scale = 1.0,
         friction_tolerance = 5.0,
+        # "newton_v2" (default) or signed "bisection".
+        slip_rate_solver = "newton_v2",
         output_vtk_option = True,
         Vi = 1e-9,  # magnitude; internal sign is applied automatically
         flash_heating_option = False,

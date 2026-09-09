@@ -419,12 +419,12 @@ class FaultState:
         self.V[0]  = self.V[1]
         self.V[-1] = self.V[-2]
 
-    def solve_slip_rate_matlab(
+    def solve_slip_rate_bisection(
                         self,
                         tauqs_col: np.ndarray,
                         stress: StressState,
                         fric: FrictionalZones):
-        """Solve the signed BP3 friction equation as in the MATLAB reference."""
+        """Solve the signed BP3 friction equation by safeguarded bisection."""
 
         p = self.p
         if p.case_type == "california":
@@ -506,6 +506,15 @@ class FaultState:
             solved[creep_start:] = p.loading.V_L
         self._apply_surface_fault_rate_condition(solved, creep_start)
         self.V[:] = solved
+
+    def solve_slip_rate_matlab(
+                        self,
+                        tauqs_col: np.ndarray,
+                        stress: StressState,
+                        fric: FrictionalZones):
+        """Compatibility alias for the former MATLAB-named bisection solver."""
+
+        return self.solve_slip_rate_bisection(tauqs_col, stress, fric)
 
     def solve_slip_rate_newton(self,
                         tauqs_col: np.ndarray,

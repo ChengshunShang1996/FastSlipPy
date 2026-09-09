@@ -21,7 +21,11 @@ from pathlib import Path
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from fastslippy.pre_processing.model_parameters import ModelParameters, CaseType
+from fastslippy.pre_processing.model_parameters import (
+    CaseType,
+    ModelParameters,
+    SlipRateSolver,
+)
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.pre_processing.frictional_zones import FrictionalZones
 from fastslippy.solver.stress_state import StressState
@@ -239,9 +243,14 @@ class FastSlipPy:
 
             # ── velocity solve (rate-and-state) ──
             mid = Nx // 2
-            self.fault.solve_slip_rate_newton_v2(
-                self.tauqs[:, mid], self.stress, self.fric
-            )
+            if p.slip_rate_solver is SlipRateSolver.NEWTON_V2:
+                self.fault.solve_slip_rate_newton_v2(
+                    self.tauqs[:, mid], self.stress, self.fric
+                )
+            else:
+                self.fault.solve_slip_rate_bisection(
+                    self.tauqs[:, mid], self.stress, self.fric
+                )
 
             # ── adaptive time step ──
             V_inner, ksi_inner = self._select_adaptive_fault_window()

@@ -2,6 +2,7 @@ from math import factorial
 from pathlib import Path
 
 import numpy as np
+import pytest
 from scipy.io import loadmat
 
 from fastslippy import FastSlipPy
@@ -327,7 +328,10 @@ def test_bp3_motion_sign_automatically_controls_internal_loading(tmp_path):
         model.output.close()
 
 
-def test_short_bp3_run_advances_to_exact_final_time(tmp_path):
+@pytest.mark.parametrize("slip_rate_solver", ["newton_v2", "bisection"])
+def test_short_bp3_run_advances_to_exact_final_time(
+    tmp_path, slip_rate_solver
+):
     params = _bp3_parameters(
         Nx=11,
         Ny=10,
@@ -349,6 +353,7 @@ def test_short_bp3_run_advances_to_exact_final_time(tmp_path):
         output_interval=1,
         checkpoint_interval=100,
         output_vtk_option=False,
+        slip_rate_solver=slip_rate_solver,
     )
     params.loading.V_p = 1e-9
     params.loading.V_L = 1e-9
@@ -362,16 +367,25 @@ def test_short_bp3_run_advances_to_exact_final_time(tmp_path):
     model = FastSlipPy(params=params, output_dir=str(tmp_path))
     assert model.grid.is_nonuniform
     model.figure_creator.plot_results = lambda *args, **kwargs: None
-    newton_v2 = model.fault.solve_slip_rate_newton_v2
+    selected_solver = getattr(
+        model.fault, f"solve_slip_rate_{slip_rate_solver}"
+    )
     calls = []
 
-    def tracked_newton_v2(*args, **kwargs):
+    def tracked_solver(*args, **kwargs):
         calls.append(True)
-        return newton_v2(*args, **kwargs)
+        return selected_solver(*args, **kwargs)
 
-    model.fault.solve_slip_rate_newton_v2 = tracked_newton_v2
-    model.fault.solve_slip_rate_matlab = lambda *args, **kwargs: (_ for _ in ()).throw(
-        AssertionError("BP3 should use Newton v2, not MATLAB bisection")
+    setattr(model.fault, f"solve_slip_rate_{slip_rate_solver}", tracked_solver)
+    unused_solver = (
+        "bisection" if slip_rate_solver == "newton_v2" else "newton_v2"
+    )
+    setattr(
+        model.fault,
+        f"solve_slip_rate_{unused_solver}",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError(f"BP3 should not use {unused_solver}")
+        ),
     )
     model.run()
 
@@ -405,8 +419,13 @@ def test_short_bp3_run_advances_to_exact_final_time(tmp_path):
     assert len(numeric_rows) == 3
     final_values = np.fromstring(numeric_rows[-1], sep=" ")
     np.testing.assert_allclose(final_values[0], model.output.tm[-1])
-    np.testing.assert_allclose(final_values[1], -model.output.Um[0, -1])
-    np.testing.assert_allclose(final_values[3], -model.output.taum[0, -1] / 1e6)
+    # BP3 text output is serialized with six digits after the exponent.
+    np.testing.assert_allclose(
+        final_values[1], -model.output.Um[0, -1], rtol=1e-6
+    )
+    np.testing.assert_allclose(
+        final_values[3], -model.output.taum[0, -1] / 1e6, rtol=1e-6
+    )
 
     for profile_name in ("slip.dat", "shear_stress.dat", "normal_stress.dat"):
         profile = (seas_dir / profile_name).read_text(encoding="utf-8")

@@ -33,6 +33,10 @@ class IterativeMethod(str, Enum):
     GMRES = "gmres"
     BICGSTAB = "bicgstab"
 
+class SlipRateSolver(str, Enum):
+    NEWTON_V2 = "newton_v2"
+    BISECTION = "bisection"
+
 class BCType(str, Enum):
     FIXED = "fixed"
     FREE = "free"
@@ -212,6 +216,7 @@ class ModelParameters:
     ksi_scale: float = 1.0        # Scale the adaptive fault-evolution timestep limit
     tfinal: float = np.inf        # Optional final physical time [s]
     friction_tolerance: float = 5.0  # Friction residual tolerance [Pa]
+    slip_rate_solver: SlipRateSolver = SlipRateSolver.NEWTON_V2
 
     # --- Output intervals ---
     output_interval: int = 10
@@ -276,6 +281,19 @@ class ModelParameters:
         if method not in (IterativeMethod.GMRES.value, IterativeMethod.BICGSTAB.value):
             raise ValueError("iterative_method must be 'gmres' or 'bicgstab'.")
         self.iterative_method = IterativeMethod(method)
+
+        slip_rate_solver = (
+            self.slip_rate_solver.value
+            if isinstance(self.slip_rate_solver, SlipRateSolver)
+            else str(self.slip_rate_solver).lower()
+        )
+        try:
+            self.slip_rate_solver = SlipRateSolver(slip_rate_solver)
+        except ValueError as exc:
+            supported = ", ".join(solver.value for solver in SlipRateSolver)
+            raise ValueError(
+                f"slip_rate_solver must be one of: {supported}."
+            ) from exc
 
         if self.iterative_rtol <= 0.0:
             raise ValueError("iterative_rtol must be > 0.")
