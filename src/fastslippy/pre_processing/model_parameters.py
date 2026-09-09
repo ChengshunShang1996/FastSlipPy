@@ -209,6 +209,7 @@ class ModelParameters:
     dt_init: float = 1e-5         # Initial time step [s]
     dt_max: float = 0.002          # Maximum time step [s]
     dt_growth: float = 1.2        # Maximum multiplicative timestep growth
+    ksi_scale: float = 1.0        # Scale the adaptive fault-evolution timestep limit
     tfinal: float = np.inf        # Optional final physical time [s]
     friction_tolerance: float = 5.0  # Friction residual tolerance [Pa]
 
@@ -295,6 +296,8 @@ class ModelParameters:
             raise ValueError("motion_sign must be +1 (thrust) or -1 (normal).")
         if self.dt_growth <= 0.0:
             raise ValueError("dt_growth must be positive.")
+        if not np.isfinite(self.ksi_scale) or self.ksi_scale <= 0.0:
+            raise ValueError("ksi_scale must be finite and positive.")
         if self.friction_tolerance < 0.0:
             raise ValueError("friction_tolerance must be non-negative.")
         if self.x_stretch_enabled:

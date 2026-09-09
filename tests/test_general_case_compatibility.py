@@ -69,6 +69,41 @@ def test_case_type_and_default_lab_friction_are_general(case_value):
     np.testing.assert_allclose(fault.theta, params.L / params.V0)
 
 
+def test_ksi_scale_only_scales_the_adaptive_fault_limit():
+    baseline = _lab_parameters(ksi_scale=1.0)
+    tightened = _lab_parameters(ksi_scale=0.25)
+    baseline_grid = Grid(baseline)
+    tightened_grid = Grid(tightened)
+    baseline_friction = FrictionalZones(baseline, baseline_grid.y)
+    tightened_friction = FrictionalZones(tightened, tightened_grid.y)
+    baseline_stress = StressState(baseline, baseline_grid.y)
+    tightened_stress = StressState(tightened, tightened_grid.y)
+
+    baseline_ksi = FastSlipPy._build_ksi(
+        None,
+        baseline,
+        baseline_friction,
+        baseline_stress.sigman0,
+        baseline_grid.dy_fault,
+    )
+    tightened_ksi = FastSlipPy._build_ksi(
+        None,
+        tightened,
+        tightened_friction,
+        tightened_stress.sigman0,
+        tightened_grid.dy_fault,
+    )
+
+    np.testing.assert_allclose(tightened_ksi, 0.25 * baseline_ksi)
+    assert tightened.dt_max == baseline.dt_max
+
+
+@pytest.mark.parametrize("value", [0.0, -0.5, np.inf, np.nan])
+def test_ksi_scale_must_be_finite_and_positive(value):
+    with pytest.raises(ValueError, match="ksi_scale"):
+        _lab_parameters(ksi_scale=value)
+
+
 def test_newton_v2_solves_signed_friction_roots_for_lab_case():
     params = _lab_parameters(Ny=9)
     grid = Grid(params)

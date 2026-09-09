@@ -57,6 +57,9 @@ def build_bp3_parameters() -> ModelParameters:
         dt_max = 0.1 * 365 * 24 * 3600.0,
         tfinal = 1500 * 365 * 24 * 3600.0,
         dt_growth = 1.2,
+        # Event-timestep convergence: compare 1.0, 0.5, and 0.25 while
+        # keeping dt_max and all physical parameters unchanged.
+        ksi_scale = 1.0,
         friction_tolerance = 5.0,
         output_vtk_option = True,
         Vi = 1e-9,  # magnitude; internal sign is applied automatically

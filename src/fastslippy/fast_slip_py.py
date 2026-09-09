@@ -145,7 +145,10 @@ class FastSlipPy:
         k3 = (k1 - k2)**2 / 4.0 - k1
         k4 = np.minimum(1.0 / (k1 - k2), 0.2)
         k5 = np.minimum(1.0 - k2 / k1, 0.2)
-        ksi = np.where(k3 > 0, k4, k5)
+        # ``ksi_scale`` is an explicit convergence-control parameter.  It
+        # tightens or relaxes only the fault-evolution stability limit; the
+        # independent interseismic cap ``dt_max`` remains unchanged.
+        ksi = p.ksi_scale * np.where(k3 > 0, k4, k5)
         return ksi
 
     def _select_adaptive_fault_window(self):
