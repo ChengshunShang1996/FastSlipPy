@@ -75,6 +75,21 @@ class FaultTractionResponse:
 
 
 @dataclass(frozen=True)
+class FaultLoadingResponse:
+    """Instantaneous fault traction rates for one complete loading state.
+
+    Unlike :class:`FaultTractionResponse`, these arrays retain the response to
+    the configured side-boundary velocities.  They are therefore the relevant
+    quantities for comparing finite-domain and outer-mesh effects at a fixed
+    fault slip-rate profile.
+    """
+
+    y: np.ndarray
+    tau_rate: np.ndarray
+    sigma_effective_rate: np.ndarray
+
+
+@dataclass(frozen=True)
 class ModalTractionResponse:
     """Scalar coefficients for one projected fault-slip mode."""
 
@@ -228,6 +243,43 @@ def solve_fault_traction_response(
     base_tau, base_sigma = _fault_tractions(params, grid, stress_util, base)
     tau, sigma = _fault_tractions(params, grid, stress_util, solution)
     return tau - base_tau, sigma - base_sigma
+
+
+def solve_fault_loading_response(
+    params: ModelParameters,
+    fault_rate: np.ndarray,
+) -> FaultLoadingResponse:
+    """Solve one full BP3 loading state and return on-fault traction rates.
+
+    The side-boundary contribution is deliberately retained.  This makes the
+    result suitable for A/B comparisons in which the physical domain or the
+    stretched outer mesh changes while the imposed plate and fault rates stay
+    fixed.  Only one sparse factorisation/backsolve is required per mesh.
+    """
+
+    if params.case_type != CaseType.CALIFORNIA:
+        raise ValueError("The BP3 loading response requires case_type='california'.")
+
+    rate = np.asarray(fault_rate, dtype=float)
+    if rate.shape != (params.Ny,):
+        raise ValueError(f"fault_rate must have shape ({params.Ny},), got {rate.shape}.")
+
+    grid = Grid(params)
+    builder = MatrixBuilder(params, grid)
+    solution = factorized(builder.build_LH().tocsc())(
+        builder.build_RH(0.0, rate).copy()
+    )
+    tau_rate, sigma_effective_rate = _fault_tractions(
+        params,
+        grid,
+        StressCalUtil(prefer_numba=False),
+        solution,
+    )
+    return FaultLoadingResponse(
+        y=grid.y.copy(),
+        tau_rate=tau_rate,
+        sigma_effective_rate=sigma_effective_rate,
+    )
 
 
 def gaussian_fault_mode(

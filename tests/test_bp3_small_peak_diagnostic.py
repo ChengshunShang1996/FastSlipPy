@@ -9,6 +9,7 @@ from fastslippy.utilities.bp3_small_peak import (
     gaussian_fault_mode,
     rate_state_friction_coefficient,
     simulate_modal_pulse,
+    solve_fault_loading_response,
     solve_fault_traction_response,
 )
 
@@ -29,6 +30,21 @@ def test_condensed_fault_response_matches_full_2d_solve():
     np.testing.assert_allclose(
         predicted_sigma, direct_sigma, rtol=2e-9, atol=2e-3
     )
+
+
+def test_complete_creep_loading_has_zero_static_traction_rate():
+    """Matched plate/fault rates must remain a stress-free rigid mode."""
+
+    params = build_small_bp3_parameters()
+    params.bc.left.uy.set_velocity(-0.5 * params.loading.V_p)
+    params.bc.right.uy.set_velocity(0.5 * params.loading.V_p)
+    response = solve_fault_loading_response(
+        params, np.full(params.Ny, params.loading.V_p)
+    )
+
+    scale = params.G * params.loading.V_p / np.min(np.diff(response.y))
+    assert np.max(np.abs(response.tau_rate)) / scale < 2e-8
+    assert np.max(np.abs(response.sigma_effective_rate)) / scale < 2e-8
 
 
 def test_near_critical_operator_can_decay_a_small_peak_and_run_away():
