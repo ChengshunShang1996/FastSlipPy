@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.linalg import eigh
 from scipy.optimize import brentq
 from scipy.sparse.linalg import factorized
 
@@ -96,6 +97,41 @@ class ModalTractionResponse:
     tau_coefficient: float
     sigma_coefficient: float
     effective_stiffness: float
+
+
+@dataclass(frozen=True)
+class FaultModeResponse:
+    """Elastic traction response to a small set of fault-slip modes.
+
+    The mode and response arrays have shape ``(Ny, number_of_modes)``.  This
+    low-rank form avoids constructing the full ``Ny x Ny`` fault operator on a
+    production mesh.
+    """
+
+    y: np.ndarray
+    modes: np.ndarray
+    tau: np.ndarray
+    sigma_effective: np.ndarray
+
+
+@dataclass(frozen=True)
+class NucleationStiffnessResult:
+    """Reduced spatial nucleation modes and their stiffness ratios."""
+
+    y: np.ndarray
+    basis: np.ndarray
+    mass_matrix: np.ndarray
+    elastic_stiffness_matrix: np.ndarray
+    critical_stiffness_matrix: np.ndarray
+    stiffness_ratios: np.ndarray
+    coefficient_modes: np.ndarray
+    spatial_modes: np.ndarray
+    tau_responses: np.ndarray
+    sigma_effective_responses: np.ndarray
+    coulomb_responses: np.ndarray
+    friction_coefficient: np.ndarray
+    critical_stiffness: np.ndarray
+    antisymmetric_fraction: float
 
 
 @dataclass(frozen=True)
@@ -225,6 +261,173 @@ def build_fault_traction_response(
     )
 
 
+def solve_fault_mode_response(
+    params: ModelParameters,
+    modes: np.ndarray,
+) -> FaultModeResponse:
+    """Apply the production elastic operator to a small modal basis.
+
+    Nonzero external velocity boundaries are removed with one zero-slip solve,
+    so every returned column is the incremental traction caused by that fault
+    mode alone.  A factorization plus ``number_of_modes + 1`` backsolves is
+    required.
+    """
+    if params.case_type != CaseType.CALIFORNIA:
+        raise ValueError("The BP3 mode response requires case_type='california'.")
+    basis = np.asarray(modes, dtype=float)
+    if basis.ndim == 1:
+        basis = basis[:, None]
+    if basis.ndim != 2 or basis.shape[0] != params.Ny:
+        raise ValueError(
+            f"modes must have shape ({params.Ny}, n_modes), got {basis.shape}."
+        )
+    if basis.shape[1] == 0 or np.any(~np.isfinite(basis)):
+        raise ValueError("modes must contain at least one finite column.")
+    if np.any(np.linalg.norm(basis, axis=0) == 0.0):
+        raise ValueError("Every mode must be nonzero.")
+    if np.any(basis[[0, -1], :] != 0.0):
+        raise ValueError("Fault endpoint trace values must be zero in every mode.")
+
+    grid = Grid(params)
+    builder = MatrixBuilder(params, grid)
+    solve = factorized(builder.build_LH().tocsc())
+    stress_util = StressCalUtil(prefer_numba=False)
+    base_solution = solve(
+        builder.build_RH(0.0, np.zeros(params.Ny)).copy()
+    )
+    base_tau, base_sigma = _fault_tractions(
+        params, grid, stress_util, base_solution
+    )
+
+    tau_response = np.empty_like(basis)
+    sigma_response = np.empty_like(basis)
+    for column in range(basis.shape[1]):
+        solution = solve(builder.build_RH(0.0, basis[:, column]).copy())
+        tau, sigma = _fault_tractions(
+            params, grid, stress_util, solution
+        )
+        tau_response[:, column] = tau - base_tau
+        sigma_response[:, column] = sigma - base_sigma
+
+    return FaultModeResponse(
+        y=grid.y.copy(),
+        modes=basis.copy(),
+        tau=tau_response,
+        sigma_effective=sigma_response,
+    )
+
+
+def localized_gaussian_basis(
+    y: np.ndarray,
+    *,
+    top: float,
+    bottom: float,
+    spacing: float,
+    width: float,
+) -> np.ndarray:
+    """Build truncated Gaussian basis functions inside a nucleation band."""
+    coordinates = np.asarray(y, dtype=float)
+    if not 0.0 <= top < bottom <= coordinates[-1]:
+        raise ValueError("Require 0 <= top < bottom <= max(y).")
+    if spacing <= 0.0 or width <= 0.0:
+        raise ValueError("spacing and width must be positive.")
+    centers = np.arange(top, bottom, spacing, dtype=float)
+    if centers.size == 0:
+        raise ValueError("The requested band contains no basis centres.")
+    basis = np.exp(
+        -0.5 * ((coordinates[:, None] - centers[None, :]) / width) ** 2
+    )
+    basis[(coordinates < top) | (coordinates >= bottom), :] = 0.0
+    basis[[0, -1], :] = 0.0
+    norms = np.max(np.abs(basis), axis=0)
+    if np.any(norms == 0.0):
+        raise ValueError("Grid resolution leaves an empty localized basis mode.")
+    return basis / norms
+
+
+def diagnose_nucleation_stiffness(
+    response: FaultModeResponse,
+    *,
+    friction_coefficient: np.ndarray,
+    critical_stiffness_profile: np.ndarray,
+) -> NucleationStiffnessResult:
+    """Solve the reduced spatial stiffness/weakening eigenproblem.
+
+    For a displacement mode ``phi``, the incremental failure stress is
+    ``delta_tau - mu * delta_sigma_effective``.  Its negative is the elastic
+    restoring stiffness.  The generalized eigenvalue compares that stiffness
+    with the local aging-law weakening rate ``sigma * (b-a) / L``.  Ratios
+    below one identify spatial modes that are softer than this quasistatic
+    nucleation criterion; they are a diagnostic, not by themselves proof of a
+    dynamic instability.
+    """
+    y = np.asarray(response.y, dtype=float)
+    basis = np.asarray(response.modes, dtype=float)
+    mu = np.asarray(friction_coefficient, dtype=float)
+    kc = np.asarray(critical_stiffness_profile, dtype=float)
+    if mu.shape != y.shape or kc.shape != y.shape:
+        raise ValueError("friction_coefficient and critical_stiffness must match y.")
+    if np.any(~np.isfinite(mu)) or np.any(~np.isfinite(kc)):
+        raise ValueError("Friction and critical-stiffness profiles must be finite.")
+
+    weights = _trapezoidal_node_weights(y)
+    weighted_basis = weights[:, None] * basis
+    mass = basis.T @ weighted_basis
+    coulomb = response.tau - mu[:, None] * response.sigma_effective
+    stiffness_unsymmetric = -(basis.T @ (weights[:, None] * coulomb))
+    stiffness = 0.5 * (stiffness_unsymmetric + stiffness_unsymmetric.T)
+    critical = basis.T @ (
+        weights[:, None] * kc[:, None] * basis
+    )
+
+    critical_eigenvalues = np.linalg.eigvalsh(critical)
+    tolerance = max(
+        np.max(np.abs(critical_eigenvalues)), 1.0
+    ) * 1e-12
+    if critical_eigenvalues[0] <= tolerance:
+        raise ValueError(
+            "The projected critical-stiffness matrix is not positive definite; "
+            "restrict the basis to the velocity-weakening region."
+        )
+    ratios, coefficient_modes = eigh(stiffness, critical)
+    spatial_modes = basis @ coefficient_modes
+    scales = np.max(np.abs(spatial_modes), axis=0)
+    spatial_modes /= scales
+    coefficient_modes /= scales
+    for column in range(spatial_modes.shape[1]):
+        peak = int(np.argmax(np.abs(spatial_modes[:, column])))
+        if spatial_modes[peak, column] < 0.0:
+            spatial_modes[:, column] *= -1.0
+            coefficient_modes[:, column] *= -1.0
+
+    tau_modes = response.tau @ coefficient_modes
+    sigma_modes = response.sigma_effective @ coefficient_modes
+    coulomb_modes = tau_modes - mu[:, None] * sigma_modes
+    antisymmetric = 0.5 * (
+        stiffness_unsymmetric - stiffness_unsymmetric.T
+    )
+    antisymmetric_fraction = float(
+        np.linalg.norm(antisymmetric)
+        / max(np.linalg.norm(stiffness), np.finfo(float).tiny)
+    )
+    return NucleationStiffnessResult(
+        y=y.copy(),
+        basis=basis.copy(),
+        mass_matrix=mass,
+        elastic_stiffness_matrix=stiffness,
+        critical_stiffness_matrix=critical,
+        stiffness_ratios=ratios,
+        coefficient_modes=coefficient_modes,
+        spatial_modes=spatial_modes,
+        tau_responses=tau_modes,
+        sigma_effective_responses=sigma_modes,
+        coulomb_responses=coulomb_modes,
+        friction_coefficient=mu.copy(),
+        critical_stiffness=kc.copy(),
+        antisymmetric_fraction=antisymmetric_fraction,
+    )
+
+
 def solve_fault_traction_response(
     params: ModelParameters,
     fault_rate: np.ndarray,
@@ -322,6 +525,38 @@ def rate_state_friction_coefficient(
     exponent = (mu0 + b * np.log(V0 * theta / L)) / a
     log_argument = np.log(velocity) - np.log(2.0 * V0) + exponent
     return a * _asinh_exponential(float(log_argument))
+
+
+def signed_rate_state_friction_coefficient_profile(
+    velocity: np.ndarray,
+    theta: np.ndarray,
+    *,
+    a: np.ndarray,
+    b: np.ndarray,
+    mu0: float,
+    V0: float,
+    L: float,
+) -> np.ndarray:
+    """Vectorized signed BP3 friction coefficient without overflow."""
+    velocity = np.asarray(velocity, dtype=float)
+    theta = np.asarray(theta, dtype=float)
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    if not (velocity.shape == theta.shape == a.shape == b.shape):
+        raise ValueError("velocity, theta, a, and b must have identical shapes.")
+    if np.any(theta <= 0.0) or np.any(a <= 0.0):
+        raise ValueError("theta and a must be positive.")
+    speed = np.maximum(np.abs(velocity), np.finfo(float).tiny)
+    exponent = (mu0 + b * np.log(V0 * theta / L)) / a
+    log_argument = np.log(speed / (2.0 * V0)) + exponent
+    asinh_argument = np.empty_like(log_argument)
+    large = log_argument > 20.0
+    asinh_argument[large] = (
+        log_argument[large]
+        + np.log1p(np.sqrt(1.0 + np.exp(-2.0 * log_argument[large])))
+    )
+    asinh_argument[~large] = np.arcsinh(np.exp(log_argument[~large]))
+    return np.sign(velocity) * a * asinh_argument
 
 
 def critical_stiffness(*, sigma0: float, a: float, b: float, L: float) -> float:

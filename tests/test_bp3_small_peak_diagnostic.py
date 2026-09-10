@@ -3,15 +3,99 @@
 import numpy as np
 
 from examples.run_bp3_small_peak_diagnostic import build_small_bp3_parameters
+from fastslippy.pre_processing.grid import Grid
 from fastslippy.utilities.bp3_small_peak import (
     build_fault_traction_response,
     critical_stiffness,
+    diagnose_nucleation_stiffness,
     gaussian_fault_mode,
+    localized_gaussian_basis,
     rate_state_friction_coefficient,
     simulate_modal_pulse,
+    signed_rate_state_friction_coefficient_profile,
+    solve_fault_mode_response,
     solve_fault_loading_response,
     solve_fault_traction_response,
 )
+
+
+def test_signed_friction_profile_matches_scalar_rate_state_law():
+    velocity = np.array([-1e-3, -1e-9, 1e-40, 1e-9, 1e-3])
+    theta = np.full(velocity.shape, 0.008 / 1e-9)
+    a = np.full(velocity.shape, 0.01)
+    b = np.full(velocity.shape, 0.015)
+    actual = signed_rate_state_friction_coefficient_profile(
+        velocity, theta, a=a, b=b, mu0=0.6, V0=1e-6, L=0.008
+    )
+    expected = np.array([
+        np.sign(value) * rate_state_friction_coefficient(
+            abs(value), theta[index], a=a[index], b=b[index],
+            mu0=0.6, V0=1e-6, L=0.008,
+        )
+        for index, value in enumerate(velocity)
+    ])
+    np.testing.assert_allclose(actual, expected, rtol=2e-15, atol=0.0)
+
+
+def test_low_rank_nucleation_modes_match_full_fault_operator():
+    params = build_small_bp3_parameters()
+    full = build_fault_traction_response(params)
+    basis = localized_gaussian_basis(
+        full.y, top=2e3, bottom=7e3, spacing=2e3, width=1e3
+    )
+    low_rank = solve_fault_mode_response(params, basis)
+
+    np.testing.assert_allclose(
+        low_rank.tau, full.tau @ basis, rtol=2e-9, atol=2e-3
+    )
+    np.testing.assert_allclose(
+        low_rank.sigma_effective,
+        full.sigma_effective @ basis,
+        rtol=2e-9,
+        atol=2e-3,
+    )
+
+
+def test_reduced_nucleation_stiffness_modes_satisfy_eigenproblem():
+    params = build_small_bp3_parameters()
+    y = Grid(params).y
+    basis = localized_gaussian_basis(
+        y, top=2e3, bottom=7e3, spacing=1e3, width=0.75e3
+    )
+    response = solve_fault_mode_response(params, basis)
+    mu = np.full(params.Ny, params.mu0)
+    kc = np.full(
+        params.Ny,
+        critical_stiffness(
+            sigma0=params.sigma0,
+            a=params.a0,
+            b=params.b0,
+            L=params.L,
+        ),
+    )
+    result = diagnose_nucleation_stiffness(
+        response,
+        friction_coefficient=mu,
+        critical_stiffness_profile=kc,
+    )
+
+    assert np.all(np.diff(result.stiffness_ratios) >= 0.0)
+    assert np.all(np.isfinite(result.stiffness_ratios))
+    assert np.all(result.spatial_modes[y < 2e3] == 0.0)
+    assert np.all(result.spatial_modes[y >= 7e3] == 0.0)
+    for index, ratio in enumerate(result.stiffness_ratios):
+        coefficients = result.coefficient_modes[:, index]
+        residual = (
+            result.elastic_stiffness_matrix @ coefficients
+            - ratio * result.critical_stiffness_matrix @ coefficients
+        )
+        scale = max(
+            np.linalg.norm(
+                result.elastic_stiffness_matrix @ coefficients
+            ),
+            1.0,
+        )
+        assert np.linalg.norm(residual) / scale < 2e-10
 
 
 def test_condensed_fault_response_matches_full_2d_solve():
