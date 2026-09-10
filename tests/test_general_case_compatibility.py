@@ -8,6 +8,7 @@ from fastslippy.pre_processing.model_parameters import (
     CaseType,
     ModelParameters,
     SlipRateSolver,
+    TimeIntegrator,
 )
 from fastslippy.solver.fault_state import FaultState
 from fastslippy.solver.stress_state import StressState
@@ -72,6 +73,7 @@ def test_case_type_and_default_lab_friction_are_general(case_value):
     np.testing.assert_allclose(friction.b, params.b0)
     np.testing.assert_allclose(fault.theta, params.L / params.V0)
     assert params.slip_rate_solver is SlipRateSolver.NEWTON_V2
+    assert params.time_integrator is TimeIntegrator.EULER
 
 
 @pytest.mark.parametrize(
@@ -89,6 +91,23 @@ def test_slip_rate_solver_input_is_normalized(value, expected):
 def test_unknown_slip_rate_solver_is_rejected():
     with pytest.raises(ValueError, match="slip_rate_solver"):
         _lab_parameters(slip_rate_solver="unknown")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("euler", TimeIntegrator.EULER),
+        ("RK2_MIDPOINT", TimeIntegrator.RK2_MIDPOINT),
+    ],
+)
+def test_time_integrator_input_is_normalized(value, expected):
+    params = _lab_parameters(time_integrator=value)
+    assert params.time_integrator is expected
+
+
+def test_unknown_time_integrator_is_rejected():
+    with pytest.raises(ValueError, match="time_integrator"):
+        _lab_parameters(time_integrator="unknown")
 
 
 def test_ksi_scale_only_scales_the_adaptive_fault_limit():
@@ -186,7 +205,9 @@ def test_short_lab_run_uses_newton_v2_on_uniform_and_stretched_mesh(
     model.run()
 
     np.testing.assert_allclose(model.output.tm, [1e-4, 2e-4, 3e-4])
-    assert len(calls) == 3
+    # One solve advances the state and one re-solves the end-of-step algebraic
+    # variables used by synchronized output/logging.
+    assert len(calls) == 6
     assert np.all(np.isfinite(model.fault.V))
     assert np.all(np.isfinite(model.fault.theta))
     assert np.all(np.isfinite(model.fault.sigma))

@@ -37,6 +37,10 @@ class SlipRateSolver(str, Enum):
     NEWTON_V2 = "newton_v2"
     BISECTION = "bisection"
 
+class TimeIntegrator(str, Enum):
+    EULER = "euler"
+    RK2_MIDPOINT = "rk2_midpoint"
+
 class BCType(str, Enum):
     FIXED = "fixed"
     FREE = "free"
@@ -217,6 +221,10 @@ class ModelParameters:
     tfinal: float = np.inf        # Optional final physical time [s]
     friction_tolerance: float = 5.0  # Friction residual tolerance [Pa]
     slip_rate_solver: SlipRateSolver = SlipRateSolver.NEWTON_V2
+    # ``euler`` preserves the original staggered explicit coupling.  The
+    # midpoint option evaluates both the friction law and elastic velocity at
+    # a predicted half-step before advancing every differential state.
+    time_integrator: TimeIntegrator = TimeIntegrator.EULER
 
     # --- Output intervals ---
     output_interval: int = 10
@@ -293,6 +301,19 @@ class ModelParameters:
             supported = ", ".join(solver.value for solver in SlipRateSolver)
             raise ValueError(
                 f"slip_rate_solver must be one of: {supported}."
+            ) from exc
+
+        time_integrator = (
+            self.time_integrator.value
+            if isinstance(self.time_integrator, TimeIntegrator)
+            else str(self.time_integrator).lower()
+        )
+        try:
+            self.time_integrator = TimeIntegrator(time_integrator)
+        except ValueError as exc:
+            supported = ", ".join(method.value for method in TimeIntegrator)
+            raise ValueError(
+                f"time_integrator must be one of: {supported}."
             ) from exc
 
         if self.iterative_rtol <= 0.0:

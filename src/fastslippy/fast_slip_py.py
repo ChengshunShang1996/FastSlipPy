@@ -25,6 +25,7 @@ from fastslippy.pre_processing.model_parameters import (
     CaseType,
     ModelParameters,
     SlipRateSolver,
+    TimeIntegrator,
 )
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.pre_processing.frictional_zones import FrictionalZones
@@ -186,6 +187,149 @@ class FastSlipPy:
 
     def before_run(self):
         pass
+
+    def _solve_fault_slip_rate(self, tauqs_col: Optional[np.ndarray] = None):
+        """Solve the algebraic rate-and-state equation at one time level."""
+        if tauqs_col is None:
+            tauqs_col = self.tauqs[:, self.p.Nx // 2]
+        if self.p.slip_rate_solver is SlipRateSolver.NEWTON_V2:
+            self.fault.solve_slip_rate_newton_v2(
+                tauqs_col, self.stress, self.fric
+            )
+        else:
+            self.fault.solve_slip_rate_bisection(
+                tauqs_col, self.stress, self.fric
+            )
+
+    def _solve_elastic_velocity(
+        self, dPdt: float, fault_velocity: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return ``(vx, vy)`` for a supplied fault-rate stage."""
+        p = self.p
+        RH = self.RH_builder.build_RH(dPdt, fault_velocity)
+        solution = self._solve(RH)
+        vpx = np.reshape(
+            solution[0::2], (p.Nx + 1, p.Ny + 1), order="C"
+        ).T
+        vpy = np.reshape(
+            solution[1::2], (p.Nx + 1, p.Ny + 1), order="C"
+        ).T
+        return vpx[:, :p.Nx], vpy[:p.Ny, :]
+
+    def _stress_from_displacement(
+        self, uy: np.ndarray, ux: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Recover quasistatic stresses and fault effective normal stress."""
+        p = self.p
+        Nx, Ny = p.Nx, p.Ny
+        tauqs, sigmaqs = self.stress_calculator.compute_stress_fields(
+            uy, ux, self.grid.dx, self.grid.dy,
+            p.lam, p.G, self.grid.cosa, self.grid.sina, Ny, Nx,
+            x=self.grid.x, y=self.grid.y,
+            xp=self.grid.xp, yp=self.grid.yp,
+        )
+        mid_l = (Nx - 1) // 2 - 1
+        mid_r = (Nx - 1) // 2
+        sigmal, sigmar = self.stress_calculator.recover_fault_normal_stress(
+            sigmaqs,
+            self.grid.x,
+            self.grid.y,
+            self.grid.xp,
+            self.grid.yp,
+            mid_l,
+            mid_r,
+        )
+        sigma_fault = self.stress.sigman0 - 0.5 * (sigmal + sigmar)
+        return tauqs, sigmaqs, sigma_fault
+
+    def _advance_euler_coupling(self, dt: float, dPdt: float):
+        """Advance one step with the original first-order coupling."""
+        mid = self.p.Nx // 2
+        self.fault.advance(dt, self.tauqs[:, mid], self.stress)
+        self.vx, self.vy = self._solve_elastic_velocity(dPdt, self.fault.V)
+        self.uy += self.vy * dt
+        self.ux += self.vx * dt
+        self.tauqs, self.sigmaqs, self.fault.sigma = (
+            self._stress_from_displacement(self.uy, self.ux)
+        )
+
+    def _advance_rk2_midpoint_coupling(self, dt: float, dPdt: float):
+        """Advance all coupled BP3 states using the explicit midpoint rule.
+
+        The first elastic solve predicts displacement and aging state at
+        ``t + dt/2``.  The friction equation is then solved again on that
+        midpoint state, and its velocity drives the full update of displacement,
+        slip, and state.  Stress and effective normal stress are recovered from
+        the accepted end-of-step displacement.
+        """
+        theta0 = self.fault.theta.copy()
+        slip0 = self.fault.U.copy()
+        ux0 = self.ux.copy()
+        uy0 = self.uy.copy()
+        velocity0 = self.fault.V.copy()
+
+        vx0, vy0 = self._solve_elastic_velocity(dPdt, velocity0)
+        half_dt = 0.5 * dt
+        ux_mid = ux0 + half_dt * vx0
+        uy_mid = uy0 + half_dt * vy0
+        theta_mid = self.fault.theta_after_constant_velocity(
+            theta0, velocity0, half_dt
+        )
+        tau_mid, _, sigma_mid = self._stress_from_displacement(
+            uy_mid, ux_mid
+        )
+
+        self.fault.theta = theta_mid
+        self.fault.sigma = sigma_mid
+        self._solve_fault_slip_rate(tau_mid[:, self.p.Nx // 2])
+        velocity_mid = self.fault.V.copy()
+        vx_mid, vy_mid = self._solve_elastic_velocity(dPdt, velocity_mid)
+
+        self.ux = ux0 + dt * vx_mid
+        self.uy = uy0 + dt * vy_mid
+        self.fault.U = slip0 + dt * velocity_mid
+        self.fault.theta = self.fault.theta_after_constant_velocity(
+            theta0, velocity_mid, dt
+        )
+        self.fault.V = velocity_mid
+        self.vx, self.vy = vx_mid, vy_mid
+        self.tauqs, self.sigmaqs, self.fault.sigma = (
+            self._stress_from_displacement(self.uy, self.ux)
+        )
+        self.fault.tau = (
+            tau_mid[:, self.p.Nx // 2]
+            + self.stress.tau0
+            - self.p.eta * velocity_mid
+        )
+
+    def _synchronized_output_state(
+        self, dPdt: float, *, include_velocity_fields: bool
+    ):
+        """Evaluate an end-of-step algebraic snapshot without changing stages.
+
+        ``V`` and ``tau`` are algebraic variables.  In the legacy Euler method
+        the stored stage rate belongs to the beginning of the accepted step,
+        while ``u``, ``U``, ``theta`` and ``sigma`` belong to its end.  This
+        helper re-solves friction on the end state for output/checkpoints, then
+        restores the integrator's stage value so the Euler trajectory remains
+        backward compatible.
+        """
+        stage_velocity = self.fault.V.copy()
+        try:
+            self._solve_fault_slip_rate()
+            velocity = self.fault.V.copy()
+        finally:
+            self.fault.V = stage_velocity
+        traction = (
+            self.tauqs[:, self.p.Nx // 2]
+            + self.stress.tau0
+            - self.p.eta * velocity
+        )
+        if include_velocity_fields:
+            vx, vy = self._solve_elastic_velocity(dPdt, velocity)
+        else:
+            vx, vy = None, None
+        return velocity, traction, vx, vy
     
     def run(self):
         t0_all = time.perf_counter()
@@ -241,16 +385,8 @@ class FastSlipPy:
                 t2    = 0.0
                 phase = 2
 
-            # ── velocity solve (rate-and-state) ──
-            mid = Nx // 2
-            if p.slip_rate_solver is SlipRateSolver.NEWTON_V2:
-                self.fault.solve_slip_rate_newton_v2(
-                    self.tauqs[:, mid], self.stress, self.fric
-                )
-            else:
-                self.fault.solve_slip_rate_bisection(
-                    self.tauqs[:, mid], self.stress, self.fric
-                )
+            # Algebraic slip rate at the accepted beginning-of-step state.
+            self._solve_fault_slip_rate()
 
             # ── adaptive time step ──
             V_inner, ksi_inner = self._select_adaptive_fault_window()
@@ -270,55 +406,13 @@ class FastSlipPy:
                 dt    = p.loading.tload - t
                 phase = 1
 
-            # ── aging law + fault advance ──
-            self.fault.advance(dt, self.tauqs[:, mid], self.stress)
-
             if p.case_type == "lab":
                 self.set_lab_case_velocity_bc(p, t)
 
-            # ── update RH with current slip velocities ──
-            RH = self.RH_builder.build_RH(dPdt, self.fault.V)
-            # Inject velocity BC at fault column
-            #fault_rows = (np.arange(1, Ny - 1) + (Nx // 2) * (Ny + 1)) * 2 + 1
-            #RH[fault_rows] = self.fault.V[1: Ny - 1]
-
-            # ── elastic solve ──
-            S   = self._solve(RH)
-            # vpx = np.reshape(S[0::2], (p.Nx+1, p.Ny+1), order='C').T
-            # vpy = np.reshape(S[1::2], (p.Ny+1, p.Nx+1), order='C').T
-            # self.vy = vpy[:Ny, :]
-            # self.vx = vpx[:, :Nx]
-
-            vpx = np.reshape(S[0::2], (p.Nx+1, p.Ny+1), order='C').T
-            vpy = np.reshape(S[1::2], (p.Nx+1, p.Ny+1), order='C').T
-            self.vy = vpy[:Ny, :]
-            self.vx = vpx[:, :Nx]
-
-            # ── integrate displacements ──
-            self.uy += self.vy * dt
-            self.ux += self.vx * dt
-
-            # ── compute stress ──
-            self.tauqs, self.sigmaqs = self.stress_calculator.compute_stress_fields(
-                self.uy, self.ux, self.grid.dx, self.grid.dy,
-                p.lam, p.G, self.grid.cosa, self.grid.sina, Ny, Nx,
-                x=self.grid.x, y=self.grid.y,
-                xp=self.grid.xp, yp=self.grid.yp,
-            )
-
-            # Update effective normal stress from sigmaqs
-            mid_l = (Nx - 1) // 2 - 1
-            mid_r = (Nx - 1) // 2
-            sigmal, sigmar = self.stress_calculator.recover_fault_normal_stress(
-                self.sigmaqs,
-                self.grid.x,
-                self.grid.y,
-                self.grid.xp,
-                self.grid.yp,
-                mid_l,
-                mid_r,
-            )
-            self.fault.sigma = self.stress.sigman0 - 0.5 * (sigmal + sigmar)
+            if p.time_integrator is TimeIntegrator.EULER:
+                self._advance_euler_coupling(dt, dPdt)
+            else:
+                self._advance_rk2_midpoint_coupling(dt, dPdt)
 
             # ── pressure update ──
             if p.case_type == "groningen":
@@ -328,37 +422,62 @@ class FastSlipPy:
             if phase == 2:
                 t2 += dt
 
+            reached_final_time = t >= p.tfinal
+            needs_velocity_fields = (
+                it % p.output_interval == 0
+                or it % p.checkpoint_interval == 0
+                or reached_final_time
+                or it == p.Nt
+            )
+            output_V, output_tau, output_vx, output_vy = (
+                self._synchronized_output_state(
+                    dPdt, include_velocity_fields=needs_velocity_fields
+                )
+            )
+
             # ── logging ──
             self.output.log(it, t2 if phase == 2 else t, dt,
-                            self.fault.V, self.fault.U, self.checkpointer)
+                            output_V, self.fault.U, self.checkpointer)
 
             if it % p.output_interval == 0:
                 self.output.write_memory(
-                    it, self.fault.U, self.fault.V, self.fault.tau,
+                    it, self.fault.U, output_V, output_tau,
                     self.fault.sigma, self.stress.P, self.fault.theta,
                     dt, t, self.tauqs, self.sigmaqs,
-                    self.uy, self.vy, self.ux, self.vx, self.stress.tau0)
+                    self.uy, output_vy, self.ux, output_vx, self.stress.tau0)
                 if p.case_type == "california":
                     self.output.record_bp3_surface(
-                        it, t, self.grid, self.ux, self.uy, self.vx, self.vy
+                        it, t, self.grid, self.ux, self.uy,
+                        output_vx, output_vy
                     )
 
             if it % p.checkpoint_interval == 0:
                 self.output.save_checkpoint(
                     it, self.checkpointer, self.fault,
                     self.tauqs, self.sigmaqs,
-                    self.uy, self.vy, self.ux, self.vx, dt, t)
+                    self.uy, output_vy, self.ux, output_vx, dt, t,
+                    fault_velocity=output_V,
+                    fault_traction=output_tau,
+                    pressure=self.stress.P)
                 self.output.save_all()
                 print(f"  Checkpoint it={it}, elapsed {time.perf_counter()-t0_all:.1f}s")
                 
                 if p.output_vtk_option:
-                    self.output.write_vtk(
-                        it, self.grid,
-                        self.ux, self.uy, self.vx, self.vy,
-                        self.tauqs, self.sigmaqs,
-                        self.fault, t)
+                    stage_velocity = self.fault.V
+                    stage_traction = self.fault.tau
+                    try:
+                        self.fault.V = output_V
+                        self.fault.tau = output_tau
+                        self.output.write_vtk(
+                            it, self.grid,
+                            self.ux, self.uy, output_vx, output_vy,
+                            self.tauqs, self.sigmaqs,
+                            self.fault, t)
+                    finally:
+                        self.fault.V = stage_velocity
+                        self.fault.tau = stage_traction
 
-            if t >= p.tfinal:
+            if reached_final_time:
                 break
 
         if p.run_mode == "debug":
@@ -370,7 +489,10 @@ class FastSlipPy:
         self.output.save_checkpoint(
                     it, self.checkpointer, self.fault,
                     self.tauqs, self.sigmaqs,
-                    self.uy, self.vy, self.ux, self.vx, dt, t)
+                    self.uy, output_vy, self.ux, output_vx, dt, t,
+                    fault_velocity=output_V,
+                    fault_traction=output_tau,
+                    pressure=self.stress.P)
         self.output.save_all()
         if p.case_type == "california":
             self.output.write_bp3_outputs(self.grid)

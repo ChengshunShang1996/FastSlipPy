@@ -347,14 +347,29 @@ class OutputManager:
 
     def save_checkpoint(self, it: int, checkpointer: int,
                         fault: "FaultState", tauqs, sigmaqs,
-                        uy, vy, ux, vx, dt: float, t: float):
+                        uy, vy, ux, vx, dt: float, t: float,
+                        *, fault_velocity=None, fault_traction=None,
+                        pressure=None):
+        """Save a restartable, single-time-level state.
+
+        The optional algebraic fields are used by coupled integrators to save
+        the end-of-step friction solution while retaining their internal stage
+        values.  Calls using the historical signature remain valid.
+        """
         fname = self.out / f"data_{checkpointer + it}.npz"
+        velocity = fault.V if fault_velocity is None else fault_velocity
+        traction = fault.tau if fault_traction is None else fault_traction
+        pore_pressure = (
+            np.zeros_like(fault.U) if pressure is None else pressure
+        )
         np.savez(fname,
-                 U=fault.U, V=fault.V, tau=fault.tau, sigma=fault.sigma,
-                 P=np.zeros_like(fault.U),  # placeholder; update as needed
+                 U=fault.U, V=velocity, tau=traction, sigma=fault.sigma,
+                 P=pore_pressure,
                  theta=fault.theta, dt=dt, t=t,
                  tauqs=tauqs, sigmaqs=sigmaqs,
-                 uy=uy, vy=vy, ux=ux, vx=vx)
+                 uy=uy, vy=vy, ux=ux, vx=vx,
+                 time_integrator=np.asarray(self.p.time_integrator.value),
+                 state_time_level=np.asarray("end"))
 
     def save_all(self):
         fname = self.out / "dataall.npz"

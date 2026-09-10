@@ -63,6 +63,9 @@ def build_bp3_parameters() -> ModelParameters:
         friction_tolerance = 5.0,
         # "newton_v2" (default) or signed "bisection".
         slip_rate_solver = "newton_v2",
+        # "euler" preserves the original coupling; "rk2_midpoint" evaluates
+        # friction and elasticity again on a predicted half-step state.
+        time_integrator = "euler",
         output_vtk_option = True,
         Vi = 1e-9,  # magnitude; internal sign is applied automatically
         flash_heating_option = False,

@@ -300,22 +300,37 @@ class FaultState:
         self.V[:] = solved
     
     # ------------------------------------------------------------------
-    def advance(self, dt: float, tauqs_col: np.ndarray, stress: StressState):
-        """Update theta, U, tau after the velocity solve."""
+    def theta_after_constant_velocity(
+        self,
+        theta: np.ndarray,
+        velocity: np.ndarray,
+        dt: float,
+    ) -> np.ndarray:
+        """Return the aging-law state after ``dt`` at constant velocity.
+
+        This is a pure helper so a coupled integrator can construct a midpoint
+        without modifying the accepted state.  The small-argument branch is
+        intentionally identical to the original Euler fallback in
+        :meth:`advance`, preserving the legacy Euler path.
+        """
         p = self.p
-        
-        # self.theta = self.theta + dt * (1 - self.V * self.theta / p.L)
-        # TODO: this one is better
-        speed = np.abs(self.V)
+        speed = np.abs(velocity)
         x = speed * dt / p.L
         expo = x > 1e-6
-        theta_new = np.empty_like(self.theta)
+        theta_new = np.empty_like(theta)
         theta_new[expo] = (
             p.L / speed[expo] * (1.0 - np.exp(-x[expo]))
-            + self.theta[expo] * np.exp(-x[expo]))
-        theta_new[~expo] = (self.theta[~expo]
-            + dt * (1.0 - speed[~expo] * self.theta[~expo] / p.L))
-        self.theta = theta_new
+            + theta[expo] * np.exp(-x[expo]))
+        theta_new[~expo] = (theta[~expo]
+            + dt * (1.0 - speed[~expo] * theta[~expo] / p.L))
+        return theta_new
+
+    def advance(self, dt: float, tauqs_col: np.ndarray, stress: StressState):
+        """Update theta, U, tau with the original explicit Euler coupling."""
+        p = self.p
+        self.theta = self.theta_after_constant_velocity(
+            self.theta, self.V, dt
+        )
 
         self.tau   = tauqs_col + stress.tau0 - p.eta * self.V
         self.U     = self.U + dt * self.V

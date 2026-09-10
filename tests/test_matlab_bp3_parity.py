@@ -390,7 +390,9 @@ def test_short_bp3_run_advances_to_exact_final_time(
     model.run()
 
     np.testing.assert_allclose(model.output.tm, [1.0, 2.0, 3.0])
-    assert len(calls) == 3
+    # One solve advances the state and one re-solves the end-of-step algebraic
+    # variables used by synchronized output/logging.
+    assert len(calls) == 6
     assert np.all(np.isfinite(model.fault.V))
     assert np.all(np.isfinite(model.fault.sigma))
 
