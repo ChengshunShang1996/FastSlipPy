@@ -10,13 +10,99 @@ from fastslippy.utilities.bp3_small_peak import (
     diagnose_nucleation_stiffness,
     gaussian_fault_mode,
     localized_gaussian_basis,
+    project_fault_history_onto_modes,
     rate_state_friction_coefficient,
+    reduced_rate_state_jacobian,
     simulate_modal_pulse,
+    signed_rate_state_friction_derivatives_profile,
     signed_rate_state_friction_coefficient_profile,
     solve_fault_mode_response,
     solve_fault_loading_response,
     solve_fault_traction_response,
 )
+
+
+def test_modal_history_projection_recovers_coefficients_and_residual():
+    y = np.linspace(0.0, 10.0, 21)
+    modes = np.column_stack((
+        np.sin(np.pi * y / 10.0),
+        np.sin(2.0 * np.pi * y / 10.0),
+    ))
+    coefficients = np.array([[0.0, 2.0, -1.0], [0.0, -0.5, 3.0]])
+    history = 7.0 + modes @ coefficients
+    result = project_fault_history_onto_modes(
+        y, modes, history, reference_index=0,
+    )
+
+    np.testing.assert_allclose(result.coefficients, coefficients, atol=2e-15)
+    np.testing.assert_allclose(result.captured_fraction[1:], 1.0, atol=2e-15)
+    assert result.captured_fraction[0] == 0.0
+
+
+def test_rate_state_friction_derivatives_match_finite_differences():
+    velocity = np.array([1e-12, 1e-9, 1e-5])
+    theta = np.array([3e7, 8e6, 2e3])
+    a = np.full(3, 0.01)
+    b = np.full(3, 0.015)
+    friction, derivative_velocity, derivative_theta = (
+        signed_rate_state_friction_derivatives_profile(
+            velocity, theta, a=a, b=b, mu0=0.6, V0=1e-6, L=0.008
+        )
+    )
+    velocity_step = velocity * 1e-6
+    theta_step = theta * 1e-6
+    friction_velocity_plus = signed_rate_state_friction_coefficient_profile(
+        velocity + velocity_step, theta, a=a, b=b,
+        mu0=0.6, V0=1e-6, L=0.008,
+    )
+    friction_velocity_minus = signed_rate_state_friction_coefficient_profile(
+        velocity - velocity_step, theta, a=a, b=b,
+        mu0=0.6, V0=1e-6, L=0.008,
+    )
+    friction_theta_plus = signed_rate_state_friction_coefficient_profile(
+        velocity, theta + theta_step, a=a, b=b,
+        mu0=0.6, V0=1e-6, L=0.008,
+    )
+    friction_theta_minus = signed_rate_state_friction_coefficient_profile(
+        velocity, theta - theta_step, a=a, b=b,
+        mu0=0.6, V0=1e-6, L=0.008,
+    )
+
+    assert np.all(np.isfinite(friction))
+    np.testing.assert_allclose(
+        derivative_velocity,
+        (friction_velocity_plus - friction_velocity_minus) / (2 * velocity_step),
+        rtol=2e-8,
+    )
+    np.testing.assert_allclose(
+        derivative_theta,
+        (friction_theta_plus - friction_theta_minus) / (2 * theta_step),
+        rtol=2e-8,
+    )
+
+
+def test_reduced_rate_state_jacobian_has_expected_shape_and_is_finite():
+    y = np.linspace(0.0, 10.0, 21)
+    modes = np.column_stack((
+        np.sin(np.pi * y / 10.0),
+        np.sin(2.0 * np.pi * y / 10.0),
+    ))
+    tau_responses = -3e7 * modes
+    sigma_responses = 1e5 * modes
+    velocity = np.full(y.shape, 1e-9)
+    theta = np.full(y.shape, 0.008 / 1e-9)
+    sigma = np.full(y.shape, 50e6)
+    a = np.full(y.shape, 0.01)
+    b = np.full(y.shape, 0.015)
+    jacobian = reduced_rate_state_jacobian(
+        y, modes, tau_responses, sigma_responses,
+        velocity=velocity, theta=theta, sigma_effective=sigma,
+        a=a, b=b, mu0=0.6, V0=1e-6, L=0.008,
+        eta=4.6e6, metric_profile=np.full(y.shape, 1.0),
+    )
+
+    assert jacobian.shape == (4, 4)
+    assert np.all(np.isfinite(jacobian))
 
 
 def test_signed_friction_profile_matches_scalar_rate_state_law():

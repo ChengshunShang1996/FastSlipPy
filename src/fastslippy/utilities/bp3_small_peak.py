@@ -135,6 +135,21 @@ class NucleationStiffnessResult:
 
 
 @dataclass(frozen=True)
+class ModalHistoryProjection:
+    """Projection of a fault-history perturbation onto spatial modes.
+
+    ``coefficients`` has shape ``(number_of_modes, number_of_times)`` and
+    retains the units of the supplied history.  ``captured_fraction`` is the
+    fraction of the weighted squared norm represented by the modal subspace;
+    it is zero at the reference snapshot, where the perturbation vanishes.
+    """
+
+    coefficients: np.ndarray
+    captured_fraction: np.ndarray
+    reference_index: int
+
+
+@dataclass(frozen=True)
 class PulseResult:
     """Time history and classification of a near-critical modal pulse."""
 
@@ -170,6 +185,74 @@ def _trapezoidal_node_weights(coordinates: np.ndarray) -> np.ndarray:
     weights[-1] = 0.5 * spacing[-1]
     weights[1:-1] = 0.5 * (spacing[:-1] + spacing[1:])
     return weights
+
+
+def project_fault_history_onto_modes(
+    y: np.ndarray,
+    modes: np.ndarray,
+    history: np.ndarray,
+    *,
+    reference_index: int,
+    metric_profile: np.ndarray | None = None,
+) -> ModalHistoryProjection:
+    """Project changes in an on-fault history onto a fixed modal subspace.
+
+    The projection is a weighted least-squares fit of
+    ``history[:, t] - history[:, reference_index]``.  A positive
+    ``metric_profile`` can be supplied to use, for example, the critical
+    weakening-energy metric associated with the stiffness modes.
+    """
+
+    coordinates = np.asarray(y, dtype=float)
+    spatial_modes = np.asarray(modes, dtype=float)
+    values = np.asarray(history, dtype=float)
+    if spatial_modes.ndim != 2 or spatial_modes.shape[0] != coordinates.size:
+        raise ValueError("modes must have shape (len(y), number_of_modes).")
+    if values.ndim != 2 or values.shape[0] != coordinates.size:
+        raise ValueError("history must have shape (len(y), number_of_times).")
+    if not 0 <= reference_index < values.shape[1]:
+        raise ValueError("reference_index is outside the history.")
+    if np.any(~np.isfinite(spatial_modes)) or np.any(~np.isfinite(values)):
+        raise ValueError("modes and history must be finite.")
+
+    weights = _trapezoidal_node_weights(coordinates)
+    if metric_profile is not None:
+        metric = np.asarray(metric_profile, dtype=float)
+        if metric.shape != coordinates.shape or np.any(~np.isfinite(metric)):
+            raise ValueError("metric_profile must be finite and match y.")
+        support = np.any(spatial_modes != 0.0, axis=1)
+        if np.any(metric[support] <= 0.0):
+            raise ValueError("metric_profile must be positive on modal support.")
+        weights = weights * np.where(support, metric, 0.0)
+
+    gram = spatial_modes.T @ (weights[:, None] * spatial_modes)
+    gram_eigenvalues = np.linalg.eigvalsh(0.5 * (gram + gram.T))
+    tolerance = max(float(np.max(np.abs(gram_eigenvalues))), 1.0) * 1e-12
+    if gram_eigenvalues[0] <= tolerance:
+        raise ValueError("The supplied modes are linearly dependent in the metric.")
+
+    perturbation = values - values[:, [reference_index]]
+    coefficients = np.linalg.solve(
+        gram,
+        spatial_modes.T @ (weights[:, None] * perturbation),
+    )
+    reconstruction = spatial_modes @ coefficients
+    total_norm_squared = np.sum(weights[:, None] * perturbation**2, axis=0)
+    residual_norm_squared = np.sum(
+        weights[:, None] * (perturbation - reconstruction) ** 2,
+        axis=0,
+    )
+    captured = np.zeros(values.shape[1], dtype=float)
+    nonzero = total_norm_squared > np.finfo(float).tiny
+    captured[nonzero] = 1.0 - (
+        residual_norm_squared[nonzero] / total_norm_squared[nonzero]
+    )
+    captured = np.clip(captured, 0.0, 1.0)
+    return ModalHistoryProjection(
+        coefficients=coefficients,
+        captured_fraction=captured,
+        reference_index=int(reference_index),
+    )
 
 
 def _unpack_velocity(solution: np.ndarray, params: ModelParameters):
@@ -557,6 +640,159 @@ def signed_rate_state_friction_coefficient_profile(
     )
     asinh_argument[~large] = np.arcsinh(np.exp(log_argument[~large]))
     return np.sign(velocity) * a * asinh_argument
+
+
+def signed_rate_state_friction_derivatives_profile(
+    velocity: np.ndarray,
+    theta: np.ndarray,
+    *,
+    a: np.ndarray,
+    b: np.ndarray,
+    mu0: float,
+    V0: float,
+    L: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return ``f``, ``df/dV`` and ``df/dtheta`` for the BP3 friction law."""
+
+    velocity = np.asarray(velocity, dtype=float)
+    theta = np.asarray(theta, dtype=float)
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    if not (velocity.shape == theta.shape == a.shape == b.shape):
+        raise ValueError("velocity, theta, a, and b must have identical shapes.")
+    if np.any(velocity == 0.0):
+        raise ValueError("The friction derivatives require nonzero velocity.")
+    if np.any(theta <= 0.0) or np.any(a <= 0.0) or V0 <= 0.0 or L <= 0.0:
+        raise ValueError("theta, a, V0, and L must be positive.")
+
+    speed = np.abs(velocity)
+    log_q_abs = (
+        np.log(speed / (2.0 * V0))
+        + (mu0 + b * np.log(V0 * theta / L)) / a
+    )
+    q_over_hypot = np.empty_like(log_q_abs)
+    nonnegative = log_q_abs >= 0.0
+    q_over_hypot[nonnegative] = 1.0 / np.sqrt(
+        1.0 + np.exp(-2.0 * log_q_abs[nonnegative])
+    )
+    q_over_hypot[~nonnegative] = np.exp(log_q_abs[~nonnegative]) / np.sqrt(
+        1.0 + np.exp(2.0 * log_q_abs[~nonnegative])
+    )
+    q_over_hypot *= np.sign(velocity)
+    friction = signed_rate_state_friction_coefficient_profile(
+        velocity,
+        theta,
+        a=a,
+        b=b,
+        mu0=mu0,
+        V0=V0,
+        L=L,
+    )
+    derivative_velocity = a * q_over_hypot / velocity
+    derivative_theta = b * q_over_hypot / theta
+    return friction, derivative_velocity, derivative_theta
+
+
+def reduced_rate_state_jacobian(
+    y: np.ndarray,
+    modes: np.ndarray,
+    tau_responses: np.ndarray,
+    sigma_effective_responses: np.ndarray,
+    *,
+    velocity: np.ndarray,
+    theta: np.ndarray,
+    sigma_effective: np.ndarray,
+    a: np.ndarray,
+    b: np.ndarray,
+    mu0: float,
+    V0: float,
+    L: float,
+    eta: float,
+    metric_profile: np.ndarray | None = None,
+) -> np.ndarray:
+    r"""Linearize the coupled aging-law dynamics in a spatial modal basis.
+
+    The state is ``[delta slip coefficients, delta theta coefficients]``.
+    The algebraic radiation-damped friction equation is differentiated first,
+    then the resulting velocity perturbation is inserted into
+    ``delta U dot = delta V`` and
+    ``theta dot = 1 - abs(V) theta / L``.
+
+    This is an instantaneous reduced Jacobian along a non-steady trajectory.
+    Its eigenvalues diagnose local growth but do not replace finite-time
+    integration of the time-dependent tangent system.
+    """
+
+    coordinates = np.asarray(y, dtype=float)
+    spatial_modes = np.asarray(modes, dtype=float)
+    tau_modes = np.asarray(tau_responses, dtype=float)
+    sigma_modes = np.asarray(sigma_effective_responses, dtype=float)
+    expected = spatial_modes.shape
+    if spatial_modes.ndim != 2 or spatial_modes.shape[0] != coordinates.size:
+        raise ValueError("modes must have shape (len(y), number_of_modes).")
+    if tau_modes.shape != expected or sigma_modes.shape != expected:
+        raise ValueError("traction responses must have the same shape as modes.")
+
+    profiles = [velocity, theta, sigma_effective, a, b]
+    velocity, theta, sigma_effective, a, b = (
+        np.asarray(profile, dtype=float) for profile in profiles
+    )
+    if any(profile.shape != coordinates.shape for profile in (
+        velocity, theta, sigma_effective, a, b
+    )):
+        raise ValueError("All state and friction profiles must match y.")
+    if np.any(sigma_effective <= 0.0) or eta < 0.0:
+        raise ValueError("Effective normal stress must be positive and eta nonnegative.")
+
+    weights = _trapezoidal_node_weights(coordinates)
+    if metric_profile is not None:
+        metric = np.asarray(metric_profile, dtype=float)
+        if metric.shape != coordinates.shape:
+            raise ValueError("metric_profile must match y.")
+        support = np.any(spatial_modes != 0.0, axis=1)
+        if np.any(~np.isfinite(metric)) or np.any(metric[support] <= 0.0):
+            raise ValueError("metric_profile must be finite and positive on support.")
+        weights *= np.where(support, metric, 0.0)
+    gram = spatial_modes.T @ (weights[:, None] * spatial_modes)
+    projector = np.linalg.solve(gram, spatial_modes.T * weights)
+
+    friction, friction_velocity, friction_theta = (
+        signed_rate_state_friction_derivatives_profile(
+            velocity,
+            theta,
+            a=a,
+            b=b,
+            mu0=mu0,
+            V0=V0,
+            L=L,
+        )
+    )
+    algebraic_denominator = sigma_effective * friction_velocity + eta
+    if np.any(algebraic_denominator <= 0.0):
+        raise ValueError("The linearized algebraic friction slope is not positive.")
+
+    slip_to_velocity = (
+        tau_modes - friction[:, None] * sigma_modes
+    ) / algebraic_denominator[:, None]
+    theta_to_velocity = -(
+        sigma_effective * friction_theta / algebraic_denominator
+    )[:, None] * spatial_modes
+
+    slip_rate_from_slip = projector @ slip_to_velocity
+    slip_rate_from_theta = projector @ theta_to_velocity
+    aging_velocity_slope = -(theta / L) * np.sign(velocity)
+    aging_theta_slope = -np.abs(velocity) / L
+    theta_rate_from_slip = projector @ (
+        aging_velocity_slope[:, None] * slip_to_velocity
+    )
+    theta_rate_from_theta = projector @ (
+        aging_velocity_slope[:, None] * theta_to_velocity
+        + aging_theta_slope[:, None] * spatial_modes
+    )
+    return np.block([
+        [slip_rate_from_slip, slip_rate_from_theta],
+        [theta_rate_from_slip, theta_rate_from_theta],
+    ])
 
 
 def critical_stiffness(*, sigma0: float, a: float, b: float, L: float) -> float:
