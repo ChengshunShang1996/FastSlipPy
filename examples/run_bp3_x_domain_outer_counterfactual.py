@@ -17,9 +17,11 @@ off-diagonal cases separate the domain effect from the outer-resolution effect
 that are mixed when only the two production configurations are compared.
 
 For each mesh, the complete loading response (side loading plus the frozen
-fault velocity) is used to predict ``d(log|V|)/dt``.  A second set of solves
-applies the frozen nucleation-band velocity shape with homogeneous fault data;
-this supplies an effective Coulomb stiffness independent of side loading.
+fault velocity) is used to predict ``d(log|V|)/dt``.  Additional right-hand
+sides partition the response into side-boundary loading, shallow locked,
+nucleation-band, lower-seismogenic, and deep-creep contributions.  Their sum
+must reconstruct the complete response.  The nucleation-band contribution also
+supplies an effective Coulomb stiffness independent of side loading.
 Sparse factorizations are released between cases, so production runs are
 intended to execute sequentially on an HPC node.
 
@@ -78,6 +80,13 @@ DEFAULT_CASES = (
     XDomainOuterCase("x600_o483", 600.0, 483),
 )
 
+FAULT_LOADING_COMPONENTS = (
+    "shallow_locked",
+    "nucleation_band",
+    "lower_seismogenic",
+    "deep_creep",
+)
+
 
 def resolve_dataall(path: Path) -> Path:
     path = path.resolve()
@@ -87,7 +96,10 @@ def resolve_dataall(path: Path) -> Path:
     raise FileNotFoundError(f"Cannot find dataall.npz below {path}")
 
 
-def build_parameters(args: argparse.Namespace, case: XDomainOuterCase) -> ModelParameters:
+def build_parameters(
+    args: argparse.Namespace,
+    case: XDomainOuterCase,
+) -> ModelParameters:
     """Build the production BP3 configuration for one x-mesh."""
 
     p = ModelParameters(
@@ -150,7 +162,7 @@ def select_snapshot_indices(
     exclusion_years: float,
     runaway_threshold: float,
 ) -> dict[str, int]:
-    """Select a precursor peak, its following minimum, and runaway onset."""
+    """Select peak, strongest decay, following minimum, and runaway onset."""
 
     events = event_windows(velocity, event_threshold)
     if event_index < 0 or event_index + 1 >= len(events):
@@ -183,6 +195,10 @@ def select_snapshot_indices(
     best = int(np.argmax(properties["prominences"]))
     peak = int(start + peaks[best])
     minimum = int(peak + np.argmin(np.abs(velocity[iy, peak:second.start])))
+    local_log_acceleration = np.gradient(log_rate, time, edge_order=2)
+    maximum_decay = int(
+        peak + np.argmin(local_log_acceleration[peak : minimum + 1])
+    )
 
     activity = np.max(np.abs(velocity), axis=0)
     candidates = np.flatnonzero(
@@ -195,6 +211,7 @@ def select_snapshot_indices(
     runaway = int(peak + candidates[0])
     return {
         "precursor_peak": peak,
+        "maximum_decay": maximum_decay,
         "following_minimum": minimum,
         "runaway_onset": runaway,
     }
@@ -231,6 +248,55 @@ def _weighted_average(values: np.ndarray, weights: np.ndarray) -> float:
     if denominator <= np.finfo(float).tiny:
         return float("nan")
     return float(np.sum(weights * values) / denominator)
+
+
+def split_fault_velocity_components(
+    y: np.ndarray,
+    velocity: np.ndarray,
+    *,
+    band_top: float,
+    band_bottom: float,
+    creep_start: float,
+) -> dict[str, np.ndarray]:
+    """Partition a fault-rate history into exhaustive depth regions.
+
+    ``lower_seismogenic`` is retained explicitly because the requested
+    shallow/nucleation/deep-creep split otherwise leaves the interval between
+    the bottom of the nucleation band and ``W_f`` unassigned.  The masks are
+    mutually exclusive and their sum reconstructs the input exactly.
+    """
+
+    coordinates = np.asarray(y, dtype=float)
+    rates = np.asarray(velocity, dtype=float)
+    if rates.ndim == 1:
+        rates = rates[:, None]
+    if coordinates.ndim != 1 or rates.ndim != 2:
+        raise ValueError(
+            "y must be one-dimensional and velocity one- or two-dimensional."
+        )
+    if rates.shape[0] != coordinates.size:
+        raise ValueError("velocity's first dimension must match y.")
+    if not 0.0 <= band_top < band_bottom < creep_start <= coordinates[-1]:
+        raise ValueError(
+            "Require 0 <= band_top < band_bottom < creep_start <= max(y)."
+        )
+    masks = {
+        "shallow_locked": coordinates < band_top,
+        "nucleation_band": (
+            (coordinates >= band_top) & (coordinates <= band_bottom)
+        ),
+        "lower_seismogenic": (
+            (coordinates > band_bottom) & (coordinates < creep_start)
+        ),
+        "deep_creep": coordinates >= creep_start,
+    }
+    coverage = np.sum(np.column_stack(list(masks.values())), axis=1)
+    if not np.all(coverage == 1):
+        raise RuntimeError("Fault-loading component masks are not an exact partition.")
+    return {
+        name: np.where(mask[:, None], rates, 0.0)
+        for name, mask in masks.items()
+    }
 
 
 def _factorial_effects(
@@ -380,7 +446,14 @@ def main() -> None:
     if not np.any(band):
         raise ValueError("The requested diagnostic band contains no y nodes.")
     node_weights = _node_weights(y)
-    frozen_modes = np.where(band[:, None], frozen_velocity, 0.0)
+    velocity_components = split_fault_velocity_components(
+        y,
+        frozen_velocity,
+        band_top=args.band_top_km * 1e3,
+        band_bottom=args.band_bottom_km * 1e3,
+        creep_start=args.wf_km * 1e3,
+    )
+    frozen_modes = velocity_components["nucleation_band"].copy()
     frozen_modes[[0, -1], :] = 0.0
     if np.any(np.sum(node_weights[:, None] * frozen_modes**2, axis=0) <= 0.0):
         raise ValueError("A frozen nucleation-band velocity mode is identically zero.")
@@ -405,6 +478,9 @@ def main() -> None:
         "observed_acceleration": observed_acceleration[:, indices],
         "frozen_band_modes": frozen_modes,
     }
+    for component_name, component_velocity in velocity_components.items():
+        saved_arrays[f"velocity_{component_name}"] = component_velocity
+    decomposition_rows: list[dict] = []
 
     for case in selected:
         params = build_parameters(args, case)
@@ -416,12 +492,17 @@ def main() -> None:
             flush=True,
         )
         # Columns: complete frozen states, one zero-fault state retaining side
-        # loading, and pure band modes.  Subtracting the zero column removes
-        # the affine side-loading contribution from the modal stiffness.
+        # loading, then four mutually exclusive fault-depth components.  The
+        # latter reconstruct the complete fault rate exactly.  Subtracting the
+        # zero column removes affine side loading from each fault contribution.
+        component_rate_columns = np.concatenate(
+            [velocity_components[name] for name in FAULT_LOADING_COMPONENTS],
+            axis=1,
+        )
         solve_rates = np.column_stack((
             frozen_velocity,
             np.zeros(params.Ny),
-            frozen_modes,
+            component_rate_columns,
         ))
         response = solve_fault_loading_responses(params, solve_rates)
         count = len(snapshot_names)
@@ -429,11 +510,38 @@ def main() -> None:
         sigma_rate = response.sigma_effective_rate[:, :count]
         base_tau_rate = response.tau_rate[:, count]
         base_sigma_rate = response.sigma_effective_rate[:, count]
-        mode_tau = response.tau_rate[:, count + 1 :] - base_tau_rate[:, None]
-        mode_sigma = (
-            response.sigma_effective_rate[:, count + 1 :]
-            - base_sigma_rate[:, None]
+        component_tau: dict[str, np.ndarray] = {}
+        component_sigma: dict[str, np.ndarray] = {}
+        component_start = count + 1
+        for component_index, component_name in enumerate(
+            FAULT_LOADING_COMPONENTS
+        ):
+            start = component_start + component_index * count
+            stop = start + count
+            component_tau[component_name] = (
+                response.tau_rate[:, start:stop] - base_tau_rate[:, None]
+            )
+            component_sigma[component_name] = (
+                response.sigma_effective_rate[:, start:stop]
+                - base_sigma_rate[:, None]
+            )
+        mode_tau = component_tau["nucleation_band"]
+        mode_sigma = component_sigma["nucleation_band"]
+
+        reconstructed_tau = base_tau_rate[:, None] + sum(
+            component_tau.values(), start=np.zeros_like(tau_rate)
         )
+        reconstructed_sigma = base_sigma_rate[:, None] + sum(
+            component_sigma.values(), start=np.zeros_like(sigma_rate)
+        )
+        traction_decomposition_closure = {
+            "tau_relative_l2": _relative_l2(
+                reconstructed_tau - tau_rate, tau_rate
+            ),
+            "sigma_relative_l2": _relative_l2(
+                reconstructed_sigma - sigma_rate, sigma_rate
+            ),
+        }
 
         friction = FrictionalZones(params, y)
         snapshot_metrics: dict[str, dict] = {}
@@ -494,6 +602,114 @@ def main() -> None:
                 np.dot(node_weights * mode * mode, critical_profile) / denominator
             )
 
+            shear_acceleration_components = {
+                "side_boundary": base_tau_rate / budget.denominator_pa,
+            }
+            normal_acceleration_components = {
+                "side_boundary": (
+                    -budget.friction_coefficient * base_sigma_rate
+                    / budget.denominator_pa
+                ),
+            }
+            for component_name in FAULT_LOADING_COMPONENTS:
+                shear_acceleration_components[component_name] = (
+                    component_tau[component_name][:, column]
+                    / budget.denominator_pa
+                )
+                normal_acceleration_components[component_name] = (
+                    -budget.friction_coefficient
+                    * component_sigma[component_name][:, column]
+                    / budget.denominator_pa
+                )
+            shear_acceleration_components["full_fault"] = sum(
+                (
+                    shear_acceleration_components[name]
+                    for name in FAULT_LOADING_COMPONENTS
+                ),
+                start=np.zeros(params.Ny),
+            )
+            normal_acceleration_components["full_fault"] = sum(
+                (
+                    normal_acceleration_components[name]
+                    for name in FAULT_LOADING_COMPONENTS
+                ),
+                start=np.zeros(params.Ny),
+            )
+            acceleration_components = {
+                component_name: (
+                    shear_acceleration_components[component_name]
+                    + normal_acceleration_components[component_name]
+                )
+                for component_name in (
+                    "side_boundary", *FAULT_LOADING_COMPONENTS, "full_fault"
+                )
+            }
+            reconstructed_acceleration = (
+                acceleration_components["side_boundary"]
+                + acceleration_components["full_fault"]
+                + budget.state_evolution
+            )
+            acceleration_closure = budget.predicted - reconstructed_acceleration
+            loading_decomposition: dict[str, dict[str, float]] = {}
+            for component_name in (
+                "side_boundary",
+                *FAULT_LOADING_COMPONENTS,
+                "full_fault",
+                "state_evolution",
+            ):
+                contribution = (
+                    budget.state_evolution
+                    if component_name == "state_evolution"
+                    else acceleration_components[component_name]
+                )
+                shear_contribution = (
+                    np.zeros(params.Ny)
+                    if component_name == "state_evolution"
+                    else shear_acceleration_components[component_name]
+                )
+                normal_contribution = (
+                    np.zeros(params.Ny)
+                    if component_name == "state_evolution"
+                    else normal_acceleration_components[component_name]
+                )
+                loading_decomposition[component_name] = {
+                    "focus_shear_per_year": float(
+                        shear_contribution[focus] * SECONDS_PER_YEAR
+                    ),
+                    "focus_normal_per_year": float(
+                        normal_contribution[focus] * SECONDS_PER_YEAR
+                    ),
+                    "focus_dlnV_per_year": float(
+                        contribution[focus] * SECONDS_PER_YEAR
+                    ),
+                    "mode_weighted_shear_per_year": float(
+                        _weighted_average(
+                            shear_contribution[band], speed_weights
+                        ) * SECONDS_PER_YEAR
+                    ),
+                    "mode_weighted_normal_per_year": float(
+                        _weighted_average(
+                            normal_contribution[band], speed_weights
+                        ) * SECONDS_PER_YEAR
+                    ),
+                    "mode_weighted_dlnV_per_year": float(
+                        _weighted_average(
+                            contribution[band], speed_weights
+                        ) * SECONDS_PER_YEAR
+                    ),
+                }
+                decomposition_rows.append({
+                    "snapshot": name,
+                    "time_years": time[index] / SECONDS_PER_YEAR,
+                    "case": case.name,
+                    "xsize_km": case.xsize_km,
+                    "outer_intervals_per_side": (
+                        case.outer_intervals_per_side
+                    ),
+                    "component": component_name,
+                    **loading_decomposition[component_name],
+                })
+
             snapshot_metrics[name] = {
                 "time_years": float(time[index] / SECONDS_PER_YEAR),
                 "focus_depth_km": float(y[focus] / 1e3),
@@ -535,6 +751,10 @@ def main() -> None:
                 "critical_stiffness_pa_per_m": critical_stiffness,
                 "effective_over_critical_stiffness": float(
                     effective_stiffness / critical_stiffness
+                ),
+                "loading_decomposition": loading_decomposition,
+                "acceleration_decomposition_max_abs_per_year": float(
+                    np.max(np.abs(acceleration_closure)) * SECONDS_PER_YEAR
                 ),
                 "tau_rate_vs_history_relative_l2": _relative_l2(
                     tau_rate[band, column] - observed_tau_rate[band, index],
@@ -594,6 +814,9 @@ def main() -> None:
         summaries[case.name] = {
             "case": asdict(case),
             "geometry": geometry,
+            "traction_decomposition_closure": (
+                traction_decomposition_closure
+            ),
             "snapshots": snapshot_metrics,
         }
         geometry_rows.append({
@@ -609,6 +832,15 @@ def main() -> None:
         saved_arrays[f"{case.name}_sigma_rate"] = sigma_rate
         saved_arrays[f"{case.name}_mode_tau"] = mode_tau
         saved_arrays[f"{case.name}_mode_sigma"] = mode_sigma
+        saved_arrays[f"{case.name}_side_tau_rate"] = base_tau_rate
+        saved_arrays[f"{case.name}_side_sigma_rate"] = base_sigma_rate
+        for component_name in FAULT_LOADING_COMPONENTS:
+            saved_arrays[f"{case.name}_{component_name}_tau_rate"] = (
+                component_tau[component_name]
+            )
+            saved_arrays[f"{case.name}_{component_name}_sigma_rate"] = (
+                component_sigma[component_name]
+            )
         saved_arrays[f"{case.name}_predicted_acceleration"] = predicted
         saved_arrays[f"{case.name}_shear_term"] = shear_terms
         saved_arrays[f"{case.name}_normal_term"] = normal_terms
@@ -617,9 +849,11 @@ def main() -> None:
             json.dumps(summaries[case.name], indent=2), encoding="utf-8"
         )
         del (
-            params, grid, solve_rates, response, tau_rate, sigma_rate,
+            params, grid, component_rate_columns, solve_rates, response,
+            tau_rate, sigma_rate,
             base_tau_rate, base_sigma_rate, mode_tau, mode_sigma, predicted,
-            shear_terms, normal_terms, state_terms,
+            component_tau, component_sigma, reconstructed_tau,
+            reconstructed_sigma, shear_terms, normal_terms, state_terms,
         )
         gc.collect()
 
@@ -635,6 +869,7 @@ def main() -> None:
             "x_inner_km": args.x_inner_km,
             "x_inner_points": args.x_inner_points,
             "core_dx_m": args.x_inner_km * 1e3 / (args.x_inner_points - 1),
+            "fault_loading_components": list(FAULT_LOADING_COMPONENTS),
         },
         "selected_snapshots": {
             name: {
@@ -677,6 +912,14 @@ def main() -> None:
         writer = csv.DictWriter(handle, fieldnames=list(geometry_rows[0]))
         writer.writeheader()
         writer.writerows(geometry_rows)
+    with (args.output_dir / "loading_decomposition.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as handle:
+        writer = csv.DictWriter(
+            handle, fieldnames=list(decomposition_rows[0])
+        )
+        writer.writeheader()
+        writer.writerows(decomposition_rows)
     np.savez_compressed(
         args.output_dir / "counterfactual_profiles.npz", **saved_arrays
     )
@@ -712,6 +955,28 @@ def main() -> None:
         "",
         "Finite two-factor contrasts are stored in `summary.json`; full depth "
         "profiles are in `counterfactual_profiles.npz`.",
+        "",
+        "## Loading decomposition closure",
+        "",
+        "| case | tau relative L2 | sigma relative L2 | max acceleration closure |",
+        "|---|---:|---:|---:|",
+    ])
+    for case in selected:
+        closure = summaries[case.name]["traction_decomposition_closure"]
+        maximum_acceleration_closure = max(
+            item["acceleration_decomposition_max_abs_per_year"]
+            for item in summaries[case.name]["snapshots"].values()
+        )
+        lines.append(
+            f"| {case.name} | {closure['tau_relative_l2']:.6e} | "
+            f"{closure['sigma_relative_l2']:.6e} | "
+            f"{maximum_acceleration_closure:.6e} /yr |"
+        )
+    lines.extend([
+        "",
+        "Component contributions are stored in `loading_decomposition.csv`. "
+        "`lower_seismogenic` covers the otherwise unassigned interval between "
+        "the nucleation band and W_f.",
     ])
     (args.output_dir / "diagnostic_summary.md").write_text(
         "\n".join(lines) + "\n", encoding="utf-8"

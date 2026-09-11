@@ -61,6 +61,23 @@ def test_factorial_effects_recover_main_effects_and_interaction():
     assert item["interaction"] == 4.0
 
 
+def test_fault_velocity_components_are_exhaustive_and_disjoint():
+    y = np.arange(0.0, 7.0)
+    velocity = np.column_stack((y + 1.0, 2.0 * y + 3.0))
+    components = runner.split_fault_velocity_components(
+        y,
+        velocity,
+        band_top=2.0,
+        band_bottom=3.0,
+        creep_start=5.0,
+    )
+
+    assert tuple(components) == runner.FAULT_LOADING_COMPONENTS
+    np.testing.assert_array_equal(sum(components.values()), velocity)
+    active_counts = sum(component != 0.0 for component in components.values())
+    np.testing.assert_array_equal(active_counts, np.ones_like(velocity))
+
+
 def test_small_counterfactual_runs_full_factorial(monkeypatch, tmp_path):
     cases = (
         runner.XDomainOuterCase("x20_o5", 20.0, 5),
@@ -100,7 +117,10 @@ def test_small_counterfactual_runs_full_factorial(monkeypatch, tmp_path):
     payload = json.loads((output / "summary.json").read_text())
     assert set(payload["cases"]) == {case.name for case in cases}
     assert set(payload["factorial_effects"]) == {
-        "precursor_peak", "following_minimum", "runaway_onset"
+        "precursor_peak",
+        "maximum_decay",
+        "following_minimum",
+        "runaway_onset",
     }
     for case in cases:
         item = payload["cases"][case.name]
@@ -111,7 +131,18 @@ def test_small_counterfactual_runs_full_factorial(monkeypatch, tmp_path):
             assert np.isfinite(metrics["mode_weighted_dlnV_per_year"])
             assert np.isfinite(metrics["effective_over_critical_stiffness"])
             assert 0.0 <= metrics["velocity_weighted_arrest_fraction"] <= 1.0
+            assert set(metrics["loading_decomposition"]) == {
+                "side_boundary",
+                *runner.FAULT_LOADING_COMPONENTS,
+                "full_fault",
+                "state_evolution",
+            }
+            assert metrics["acceleration_decomposition_max_abs_per_year"] < 1e-6
+        closure = item["traction_decomposition_closure"]
+        assert closure["tau_relative_l2"] < 1e-10
+        assert closure["sigma_relative_l2"] < 1e-10
     assert (output / "counterfactual_profiles.npz").is_file()
     assert (output / "probe_comparison.csv").is_file()
     assert (output / "mesh_geometry.csv").is_file()
+    assert (output / "loading_decomposition.csv").is_file()
     assert (output / "diagnostic_summary.md").is_file()
