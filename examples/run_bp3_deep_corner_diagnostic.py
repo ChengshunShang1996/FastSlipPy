@@ -217,9 +217,23 @@ def main() -> None:
                 sigma_effective=transfer.sigma_effective_current,
             )
         )
+        # Persist the expensive solve before computing presentation metrics.
+        # A later reporting failure must not require another sparse LU.
+        np.savez_compressed(
+            args.output_dir / f"{case.name}_profiles.npz",
+            y=transfer.y,
+            source_labels=np.asarray(labels),
+            source_modes=transfer.source_modes,
+            tau=transfer.tau,
+            sigma_effective_current=transfer.sigma_effective_current,
+            sigma_effective_direct=transfer.sigma_effective_direct,
+            coulomb_current=coulomb_current,
+            coulomb_direct=coulomb_direct,
+            reciprocity_work=reciprocity.work_matrix,
+        )
         case_summary = {
             "case": asdict(case),
-            "dof_count": int(params.N),
+            "dof_count": int(grid.N),
             "max_dx_m": float(np.max(grid.dx_edges)),
             "max_dy_m": float(np.max(grid.dy_edges)),
             "source_metrics": _source_metrics(
@@ -253,18 +267,9 @@ def main() -> None:
             / max(np.linalg.norm(production[band]), np.finfo(float).tiny)
         )
         summaries[case.name] = case_summary
-
-        np.savez_compressed(
-            args.output_dir / f"{case.name}_profiles.npz",
-            y=transfer.y,
-            source_labels=np.asarray(labels),
-            source_modes=transfer.source_modes,
-            tau=transfer.tau,
-            sigma_effective_current=transfer.sigma_effective_current,
-            sigma_effective_direct=transfer.sigma_effective_direct,
-            coulomb_current=coulomb_current,
-            coulomb_direct=coulomb_direct,
-            reciprocity_work=reciprocity.work_matrix,
+        (args.output_dir / f"{case.name}_summary.json").write_text(
+            json.dumps(case_summary, indent=2),
+            encoding="utf-8",
         )
         print(
             f"[{case.name}] reciprocity antisymmetric/max-pair: "
