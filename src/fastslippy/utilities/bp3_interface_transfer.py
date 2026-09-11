@@ -323,6 +323,114 @@ def _node_weights(y: np.ndarray) -> np.ndarray:
     return weights
 
 
+def deep_corner_source_modes(
+    y: np.ndarray,
+    w_f: float,
+    *,
+    fixed_deep_depth: float = 150e3,
+    equivalent_width: float = 1e3,
+) -> tuple[tuple[str, ...], np.ndarray]:
+    """Build work-comparable sources that isolate the deep fault corner.
+
+    Every column is normalised so that ``integral(abs(mode), y)`` equals
+    ``equivalent_width``.  Consequently, receiver projections can be compared
+    directly without conflating source width with elastic transfer strength.
+
+    The fixed-depth sources remain at the same physical depth when ``L_z`` is
+    changed.  ``near_bottom_smooth`` instead follows the deep boundary while
+    vanishing at the endpoint.  Comparing those modes separates source depth
+    from proximity to the artificial traction-free boundary.
+    """
+
+    coordinates = np.asarray(y, dtype=float)
+    if coordinates.ndim != 1 or coordinates.size < 5:
+        raise ValueError("y must be a one-dimensional array with >= 5 nodes")
+    if np.any(np.diff(coordinates) <= 0.0):
+        raise ValueError("y must be strictly increasing")
+    if not 0.0 < w_f < coordinates[-1]:
+        raise ValueError("w_f must lie inside the fault grid")
+    if equivalent_width <= 0.0 or not np.isfinite(equivalent_width):
+        raise ValueError("equivalent_width must be finite and positive")
+
+    def endpoint(index: int) -> np.ndarray:
+        mode = np.zeros_like(coordinates)
+        mode[index] = 1.0
+        return mode
+
+    def compact_cosine(centre: float, half_width: float) -> np.ndarray:
+        distance = np.abs(coordinates - centre)
+        mode = np.zeros_like(coordinates)
+        inside = distance < half_width
+        mode[inside] = 0.5 * (
+            1.0 + np.cos(np.pi * distance[inside] / half_width)
+        )
+        return mode
+
+    surface_width = min(2e3, 0.2 * coordinates[-1])
+    surface_smooth = np.zeros_like(coordinates)
+    surface_mask = coordinates < surface_width
+    surface_smooth[surface_mask] = 0.5 * (
+        1.0 + np.cos(np.pi * coordinates[surface_mask] / surface_width)
+    )
+
+    deep_spacing = max(
+        coordinates[-1] - coordinates[-2],
+        float(np.median(np.diff(coordinates))),
+    )
+    fixed_depth = min(
+        float(fixed_deep_depth), coordinates[-1] - 3.0 * deep_spacing
+    )
+    if fixed_depth <= w_f:
+        fixed_depth = 0.5 * (w_f + coordinates[-1])
+    fixed_index = int(np.argmin(np.abs(coordinates - fixed_depth)))
+    fixed_index = min(max(fixed_index, 1), coordinates.size - 2)
+
+    fixed_node = endpoint(fixed_index)
+    fixed_smooth = compact_cosine(float(coordinates[fixed_index]), 5e3)
+    fixed_smooth[[0, -1]] = 0.0
+
+    near_bottom_centre = coordinates[-1] - max(10e3, 5.0 * deep_spacing)
+    near_bottom_half_width = coordinates[-1] - near_bottom_centre
+    near_bottom_smooth = compact_cosine(
+        float(near_bottom_centre), float(near_bottom_half_width)
+    )
+    near_bottom_smooth[[0, -1]] = 0.0
+
+    wf_width = min(2e3, 0.2 * (coordinates[-1] - w_f))
+    wf_rs = compact_cosine(w_f, wf_width)
+    wf_rs[coordinates > w_f] = 0.0
+
+    labels = (
+        "nucleation_10km",
+        "surface_endpoint",
+        "surface_smooth",
+        "wf_rs_side",
+        "bottom_endpoint",
+        "deep_fixed_node",
+        "deep_fixed_smooth",
+        "near_bottom_smooth",
+    )
+    modes = np.column_stack(
+        (
+            compact_cosine(10e3, 2e3),
+            endpoint(0),
+            surface_smooth,
+            wf_rs,
+            endpoint(-1),
+            fixed_node,
+            fixed_smooth,
+            near_bottom_smooth,
+        )
+    )
+    weights = _node_weights(coordinates)
+    integrals = np.sum(weights[:, None] * np.abs(modes), axis=0)
+    if np.any(integrals <= 0.0):
+        missing = [labels[index] for index in np.flatnonzero(integrals <= 0.0)]
+        raise ValueError(f"source modes are unresolved: {missing}")
+    modes *= equivalent_width / integrals[None, :]
+    return labels, modes
+
+
 def _project_receivers(
     y: np.ndarray, receivers: np.ndarray, response: np.ndarray
 ) -> np.ndarray:

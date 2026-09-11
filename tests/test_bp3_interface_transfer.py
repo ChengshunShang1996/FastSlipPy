@@ -5,6 +5,7 @@ import numpy as np
 from examples.run_bp3_small_peak_diagnostic import build_small_bp3_parameters
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.utilities.bp3_interface_transfer import (
+    deep_corner_source_modes,
     diagnose_bp3_interface_transfer,
     direct_fault_normal_stress,
 )
@@ -109,3 +110,34 @@ def test_custom_source_and_receiver_modes_are_supported():
     )
     assert result.transfer.projected_tau.shape == (1, 1)
     assert np.isfinite(result.transfer.projected_tau[0, 0])
+
+
+def test_deep_corner_modes_have_equal_integrated_strength_and_separate_endpoints():
+    params = build_small_bp3_parameters()
+    params.W_f = 12e3
+    y = Grid(params).y
+    labels, modes = deep_corner_source_modes(
+        y,
+        params.W_f,
+        fixed_deep_depth=10e3,
+        equivalent_width=1e3,
+    )
+
+    weights = np.empty_like(y)
+    spacing = np.diff(y)
+    weights[0] = 0.5 * spacing[0]
+    weights[-1] = 0.5 * spacing[-1]
+    weights[1:-1] = 0.5 * (spacing[:-1] + spacing[1:])
+    integrals = np.sum(weights[:, None] * np.abs(modes), axis=0)
+
+    assert modes.shape == (params.Ny, len(labels))
+    np.testing.assert_allclose(integrals, 1e3, rtol=1e-13)
+    bottom = labels.index("bottom_endpoint")
+    deep_node = labels.index("deep_fixed_node")
+    deep_smooth = labels.index("deep_fixed_smooth")
+    near_bottom = labels.index("near_bottom_smooth")
+    assert np.count_nonzero(modes[:, bottom]) == 1
+    assert modes[-1, bottom] != 0.0
+    assert modes[-1, deep_node] == 0.0
+    assert modes[-1, deep_smooth] == 0.0
+    assert modes[-1, near_bottom] == 0.0
