@@ -5,9 +5,11 @@ import numpy as np
 from examples.run_bp3_small_peak_diagnostic import build_small_bp3_parameters
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.utilities.bp3_interface_transfer import (
+    current_fault_shear_stress,
     deep_corner_source_modes,
     diagnose_bp3_interface_transfer,
     direct_fault_normal_stress,
+    direct_fault_shear_stress,
 )
 from fastslippy.utilities.bp3_operator_consistency import pack_staggered_fields
 from fastslippy.utilities.stress_cal_util import StressCalUtil
@@ -63,6 +65,30 @@ def test_direct_fault_normal_recovery_is_exact_for_affine_field():
     )
     np.testing.assert_allclose(left, expected, rtol=2e-12, atol=1e-3)
     np.testing.assert_allclose(right, expected, rtol=2e-12, atol=1e-3)
+
+
+def test_direct_fault_shear_recovery_is_exact_for_affine_field():
+    params = build_small_bp3_parameters()
+    grid = Grid(params)
+    a, b, c, d = 0.12, -0.07, 0.05, 0.09
+    ux = a * grid.x[None, :] + b * grid.yp[:, None]
+    uy = c * grid.xp[None, :] + d * grid.y[:, None]
+    solution = pack_staggered_fields(params, ux, uy)
+
+    direct = direct_fault_shear_stress(params, grid, solution)
+    expected = params.G / grid.sina * (
+        c
+        + (1.0 - 2.0 * grid.cosa**2) * b
+        + grid.cosa * (a - d)
+    )
+    np.testing.assert_allclose(direct.left, expected, rtol=2e-12, atol=1e-3)
+    np.testing.assert_allclose(direct.right, expected, rtol=2e-12, atol=1e-3)
+
+    current = current_fault_shear_stress(
+        params, grid, StressCalUtil(prefer_numba=False), solution
+    )
+    np.testing.assert_allclose(current.left, expected, rtol=2e-12, atol=1e-3)
+    np.testing.assert_allclose(current.right, expected, rtol=2e-12, atol=1e-3)
 
 
 def test_interface_transfer_separates_wf_endpoint_conventions():

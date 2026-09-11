@@ -45,6 +45,27 @@ class NormalTractionRecovery:
 
 
 @dataclass(frozen=True)
+class ShearTractionRecovery:
+    """Shear stress recovered independently on the two fault faces.
+
+    Both values use the same traction orientation, so a correctly satisfied
+    interface-continuity condition gives ``left == right``.  These are stress
+    recoveries, not Lagrange multipliers or exact discrete reaction forces.
+    """
+
+    left: np.ndarray
+    right: np.ndarray
+
+    @property
+    def average(self) -> np.ndarray:
+        return 0.5 * (self.left + self.right)
+
+    @property
+    def jump(self) -> np.ndarray:
+        return self.left - self.right
+
+
+@dataclass(frozen=True)
 class FaultTransferResponse:
     """Low-rank endpoint-to-nucleation traction-transfer response."""
 
@@ -244,6 +265,132 @@ def direct_fault_normal_stress(
         + common
     )
     return NormalTractionRecovery(left=left, right=right)
+
+
+def current_fault_shear_stress(
+    params: ModelParameters,
+    grid: Grid,
+    stress_util: StressCalUtil,
+    solution: np.ndarray,
+) -> ShearTractionRecovery:
+    """Return the two shear-stress columns used by the interface row.
+
+    The production value at ``tauqs[:, mid]`` is the arithmetic mean of these
+    two columns.  For BP3 the companion interface row is assembled from the
+    same recovered expressions, so this function directly audits whether that
+    row is being satisfied before any averaging can hide a face mismatch.
+    """
+
+    ux, uy = _unpack_velocity(np.asarray(solution, dtype=float), params)
+    tau, _ = stress_util.compute_stress_fields(
+        uy,
+        ux,
+        grid.dx,
+        grid.dy,
+        params.lam,
+        params.G,
+        grid.cosa,
+        grid.sina,
+        params.Ny,
+        params.Nx,
+        x=grid.x,
+        y=grid.y,
+        xp=grid.xp,
+        yp=grid.yp,
+    )
+    mid = params.Nx // 2
+    return ShearTractionRecovery(
+        left=np.asarray(tau[:, mid - 1]).copy(),
+        right=np.asarray(tau[:, mid + 1]).copy(),
+    )
+
+
+def direct_fault_shear_stress(
+    params: ModelParameters,
+    grid: Grid,
+    solution: np.ndarray,
+) -> ShearTractionRecovery:
+    """Extrapolate shear stress independently to the physical fault trace.
+
+    FastSlipPy stores the two tangential fault-face displacement values on the
+    staggered ``xp`` grid.  Separate quadratic-exact, one-sided stencils are
+    therefore required: no derivative is ever taken across the allowed slip
+    jump.  All four terms use the same continuum expression as
+    :class:`StressCalUtil`, evaluated at ``x=0`` and at every physical fault
+    node, including one-sided depth derivatives at both endpoints.
+
+    This is an independent consistency check.  Because the strong-form matrix
+    is assembled by replacing rows, this recovery is not claimed to be the
+    exact work-conjugate reaction of the jump constraint.
+    """
+
+    ux, uy = _unpack_velocity(np.asarray(solution, dtype=float), params)
+    mid = params.Nx // 2
+    if mid < 2 or params.Nx - mid < 3 or params.Ny < 3:
+        raise ValueError("the direct fault recovery requires at least 5 x nodes")
+
+    x = np.asarray(grid.x, dtype=float)
+    xp = np.asarray(grid.xp, dtype=float)
+    y = np.asarray(grid.y, dtype=float)
+    yp = np.asarray(grid.yp, dtype=float)
+    x_fault = float(x[mid])
+
+    left_x = _nearest_stencil(
+        x, x_fault, allowed=np.arange(0, mid + 1, dtype=int)
+    )
+    right_x = _nearest_stencil(
+        x, x_fault, allowed=np.arange(mid, params.Nx, dtype=int)
+    )
+    wx_left = finite_difference_weights(x_fault, x[left_x], 1)
+    wx_right = finite_difference_weights(x_fault, x[right_x], 1)
+    ux_x_left = _evaluate_rows_at_targets(
+        ux[:, left_x] @ wx_left, yp, y, derivative=0
+    )
+    ux_x_right = _evaluate_rows_at_targets(
+        ux[:, right_x] @ wx_right, yp, y, derivative=0
+    )
+
+    ux_y_fault = _evaluate_rows_at_targets(
+        ux[:, mid], yp, y, derivative=1
+    )
+
+    left_xp = _nearest_stencil(
+        xp, x_fault, allowed=np.arange(0, mid + 1, dtype=int)
+    )
+    right_xp = _nearest_stencil(
+        xp,
+        x_fault,
+        allowed=np.arange(mid + 1, params.Nx + 1, dtype=int),
+    )
+    wxp_left_value = finite_difference_weights(
+        x_fault, xp[left_xp], 0
+    )
+    wxp_right_value = finite_difference_weights(
+        x_fault, xp[right_xp], 0
+    )
+    wxp_left_derivative = finite_difference_weights(
+        x_fault, xp[left_xp], 1
+    )
+    wxp_right_derivative = finite_difference_weights(
+        x_fault, xp[right_xp], 1
+    )
+    uy_x_left = uy[:, left_xp] @ wxp_left_derivative
+    uy_x_right = uy[:, right_xp] @ wxp_right_derivative
+
+    uy_y = _differentiate_columns_at_nodes(uy, y)
+    uy_y_left = uy_y[:, left_xp] @ wxp_left_value
+    uy_y_right = uy_y[:, right_xp] @ wxp_right_value
+
+    a2 = 1.0 - 2.0 * grid.cosa * grid.cosa
+    scale = params.G / grid.sina
+    common = a2 * ux_y_fault
+    left = scale * (
+        uy_x_left + common + grid.cosa * (ux_x_left - uy_y_left)
+    )
+    right = scale * (
+        uy_x_right + common + grid.cosa * (ux_x_right - uy_y_right)
+    )
+    return ShearTractionRecovery(left=left, right=right)
 
 
 def _gaussian(y: np.ndarray, centre: float, width: float) -> np.ndarray:
