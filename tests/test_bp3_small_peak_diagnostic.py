@@ -5,8 +5,10 @@ import numpy as np
 from examples.run_bp3_small_peak_diagnostic import build_small_bp3_parameters
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.utilities.bp3_small_peak import (
+    FaultModeResponse,
     build_fault_traction_response,
     critical_stiffness,
+    diagnose_fault_reciprocity,
     diagnose_nucleation_stiffness,
     gaussian_fault_mode,
     localized_gaussian_basis,
@@ -20,6 +22,35 @@ from fastslippy.utilities.bp3_small_peak import (
     solve_fault_loading_response,
     solve_fault_traction_response,
 )
+
+
+def test_fault_reciprocity_uses_pure_shear_work_matrix():
+    y = np.array([0.0, 1.0, 3.0, 6.0])
+    modes = np.eye(y.size)
+    spacing = np.diff(y)
+    weights = np.empty_like(y)
+    weights[0] = 0.5 * spacing[0]
+    weights[-1] = 0.5 * spacing[-1]
+    weights[1:-1] = 0.5 * (spacing[:-1] + spacing[1:])
+    symmetric_work = np.array([
+        [4.0, -1.0, 0.5, 0.0],
+        [-1.0, 3.0, 0.25, 0.1],
+        [0.5, 0.25, 2.0, -0.2],
+        [0.0, 0.1, -0.2, 1.0],
+    ])
+    response = FaultModeResponse(
+        y=y,
+        modes=modes,
+        tau=symmetric_work / weights[:, None],
+        # Deliberately nonsymmetric normal coupling must not contaminate the
+        # elastic reciprocity metric.
+        sigma_effective=np.triu(np.ones_like(symmetric_work)),
+    )
+    result = diagnose_fault_reciprocity(response)
+
+    np.testing.assert_allclose(result.work_matrix, symmetric_work)
+    assert result.antisymmetric_fraction < 1e-15
+    assert result.maximum_pairwise_fraction < 1e-15
 
 
 def test_modal_history_projection_recovers_coefficients_and_residual():
