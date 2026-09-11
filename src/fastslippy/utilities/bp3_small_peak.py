@@ -91,6 +91,19 @@ class FaultLoadingResponse:
 
 
 @dataclass(frozen=True)
+class FaultLoadingBatchResponse:
+    """Traction rates for several frozen fault-rate profiles.
+
+    Arrays have shape ``(Ny, number_of_profiles)``.  All profiles share one
+    sparse factorization, which is important for production BP3 meshes.
+    """
+
+    y: np.ndarray
+    tau_rate: np.ndarray
+    sigma_effective_rate: np.ndarray
+
+
+@dataclass(frozen=True)
 class ModalTractionResponse:
     """Scalar coefficients for one projected fault-slip mode."""
 
@@ -630,6 +643,43 @@ def solve_fault_loading_response(
         y=grid.y.copy(),
         tau_rate=tau_rate,
         sigma_effective_rate=sigma_effective_rate,
+    )
+
+
+def solve_fault_loading_responses(
+    params: ModelParameters,
+    fault_rates: np.ndarray,
+) -> FaultLoadingBatchResponse:
+    """Solve several full BP3 loading states with one sparse factorization."""
+
+    if params.case_type != CaseType.CALIFORNIA:
+        raise ValueError("The BP3 loading response requires case_type='california'.")
+    rates = np.asarray(fault_rates, dtype=float)
+    if rates.ndim == 1:
+        rates = rates[:, None]
+    if rates.ndim != 2 or rates.shape[0] != params.Ny:
+        raise ValueError(
+            "fault_rates must have shape "
+            f"({params.Ny}, number_of_profiles), got {rates.shape}."
+        )
+    if rates.shape[1] == 0 or np.any(~np.isfinite(rates)):
+        raise ValueError("fault_rates must contain at least one finite profile.")
+
+    grid = Grid(params)
+    builder = MatrixBuilder(params, grid)
+    solve = factorized(builder.build_LH().tocsc())
+    stress_util = StressCalUtil(prefer_numba=False)
+    tau_rates = np.empty_like(rates)
+    sigma_rates = np.empty_like(rates)
+    for column in range(rates.shape[1]):
+        solution = solve(builder.build_RH(0.0, rates[:, column]).copy())
+        tau_rates[:, column], sigma_rates[:, column] = _fault_tractions(
+            params, grid, stress_util, solution
+        )
+    return FaultLoadingBatchResponse(
+        y=grid.y.copy(),
+        tau_rate=tau_rates,
+        sigma_effective_rate=sigma_rates,
     )
 
 

@@ -20,8 +20,25 @@ from fastslippy.utilities.bp3_small_peak import (
     signed_rate_state_friction_coefficient_profile,
     solve_fault_mode_response,
     solve_fault_loading_response,
+    solve_fault_loading_responses,
     solve_fault_traction_response,
 )
+
+
+def test_batched_loading_response_matches_individual_solves():
+    params = build_small_bp3_parameters()
+    y = Grid(params).y
+    rates = np.column_stack((
+        1e-9 * np.ones_like(y),
+        1e-9 * (1.0 + 0.2 * np.sin(np.pi * y / y[-1])),
+    ))
+    batch = solve_fault_loading_responses(params, rates)
+    for column in range(rates.shape[1]):
+        single = solve_fault_loading_response(params, rates[:, column])
+        np.testing.assert_allclose(batch.tau_rate[:, column], single.tau_rate)
+        np.testing.assert_allclose(
+            batch.sigma_effective_rate[:, column], single.sigma_effective_rate
+        )
 
 
 def test_fault_reciprocity_uses_pure_shear_work_matrix():
