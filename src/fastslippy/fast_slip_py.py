@@ -355,6 +355,25 @@ class FastSlipPy:
             self.ux = ckpt["ux"];  self.vx = ckpt["vx"]
             dt = float(ckpt["dt"])
             t = float(ckpt["t"])
+            if p.case_type == "groningen":
+                if "Pl" in ckpt and "Pr" in ckpt:
+                    self.stress.Pl = ckpt["Pl"]
+                    self.stress.Pr = ckpt["Pr"]
+                    self.stress.P = np.where(
+                        self.grid.y < 1000, self.stress.Pl, self.stress.Pr
+                    )
+                else:
+                    self.stress.update_pressure(min(t, p.loading.tload), p.loading.dPdt_pre)
+                    self.stress.update_pressure(max(0.0, t - p.loading.tload), p.loading.dPdt_post)
+            elif "P" in ckpt:
+                self.stress.P = ckpt["P"]
+            if t >= p.tfinal or p.Nt <= 0:
+                self.output.close()
+                print("No additional time steps requested; existing output retained.")
+                return
+            self.output.restore_history(t, self.checkpointer, self.stress.tau0)
+            if p.case_type == "groningen" and t == p.loading.tload:
+                dt = p.dt_init
             dPdt = (
                 p.loading.dPdt_post
                 if p.case_type == "groningen" and t >= p.loading.tload
@@ -363,7 +382,7 @@ class FastSlipPy:
             self._build_and_factor_LH(dPdt)
 
         dt_max = p.dt_max
-        t2     = 0.0
+        t2 = max(0.0, t - p.loading.tload) if p.case_type == "groningen" else t
         phase = (
             0
             if p.case_type == "groningen" and t < p.loading.tload
@@ -375,6 +394,7 @@ class FastSlipPy:
 
         # ── time loop ────────────────────────────────────────────────
         for it in range(1, p.Nt + 1):
+            global_it = self.checkpointer + it
 
             # Phase transition: pre → post depletion
             if phase == 1:
@@ -424,8 +444,8 @@ class FastSlipPy:
 
             reached_final_time = t >= p.tfinal
             needs_velocity_fields = (
-                it % p.output_interval == 0
-                or it % p.checkpoint_interval == 0
+                global_it % p.output_interval == 0
+                or global_it % p.checkpoint_interval == 0
                 or reached_final_time
                 or it == p.Nt
             )
@@ -439,7 +459,7 @@ class FastSlipPy:
             self.output.log(it, t2 if phase == 2 else t, dt,
                             output_V, self.fault.U, self.checkpointer)
 
-            if it % p.output_interval == 0:
+            if global_it % p.output_interval == 0:
                 self.output.write_memory(
                     it, self.fault.U, output_V, output_tau,
                     self.fault.sigma, self.stress.P, self.fault.theta,
@@ -451,16 +471,17 @@ class FastSlipPy:
                         output_vx, output_vy
                     )
 
-            if it % p.checkpoint_interval == 0:
+            if global_it % p.checkpoint_interval == 0:
                 self.output.save_checkpoint(
                     it, self.checkpointer, self.fault,
                     self.tauqs, self.sigmaqs,
                     self.uy, output_vy, self.ux, output_vx, dt, t,
                     fault_velocity=output_V,
                     fault_traction=output_tau,
-                    pressure=self.stress.P)
+                    pressure=self.stress.P,
+                    pressure_left=self.stress.Pl, pressure_right=self.stress.Pr)
                 self.output.save_all()
-                print(f"  Checkpoint it={it}, elapsed {time.perf_counter()-t0_all:.1f}s")
+                print(f"  Checkpoint it={global_it}, elapsed {time.perf_counter()-t0_all:.1f}s")
                 
                 if p.output_vtk_option:
                     stage_velocity = self.fault.V
@@ -469,7 +490,7 @@ class FastSlipPy:
                         self.fault.V = output_V
                         self.fault.tau = output_tau
                         self.output.write_vtk(
-                            it, self.grid,
+                            global_it, self.grid,
                             self.ux, self.uy, output_vx, output_vy,
                             self.tauqs, self.sigmaqs,
                             self.fault, t)
@@ -492,7 +513,8 @@ class FastSlipPy:
                     self.uy, output_vy, self.ux, output_vx, dt, t,
                     fault_velocity=output_V,
                     fault_traction=output_tau,
-                    pressure=self.stress.P)
+                    pressure=self.stress.P,
+                    pressure_left=self.stress.Pl, pressure_right=self.stress.Pr)
         self.output.save_all()
         if p.case_type == "california":
             self.output.write_bp3_outputs(self.grid)

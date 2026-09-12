@@ -49,6 +49,8 @@ class OutputManager:
         # self.vxmall     = np.zeros((Ny+1, Nx, n))
         self.tau0   = np.zeros((Ny, n))
         self._written_count = 0
+        self._history_count = 0
+        self._iteration_offset = 0
         self._bp3_surface_x = None
         self._bp3_surface_disp1 = np.zeros((8, n))
         self._bp3_surface_disp2 = np.zeros((8, n))
@@ -68,7 +70,7 @@ class OutputManager:
     def write_memory(self, it: int,
                      U, V, tau, sigma, P, theta, dt, t,
                      tauqs, sigmaqs, uy, vy, ux, vx, tau0):
-        idx = it // self.p.output_interval - 1
+        idx = self._history_index(it)
         self.Um[:, idx]     = U
         self.Vm[:, idx]     = V
         self.taum[:, idx]   = tau
@@ -95,9 +97,9 @@ class OutputManager:
 
     def record_bp3_surface(self, it: int, t: float, grid, ux, uy, vx, vy):
         """Record the eight SEAS BP3 free-surface stations."""
-        if self.p.case_type != "california" or it % self.p.output_interval:
+        if self.p.case_type != "california" or (it + self._iteration_offset) % self.p.output_interval:
             return
-        idx = it // self.p.output_interval - 1
+        idx = self._history_index(it)
         if idx < 0 or idx >= self._bp3_surface_disp1.shape[1]:
             return
 
@@ -349,7 +351,7 @@ class OutputManager:
                         fault: "FaultState", tauqs, sigmaqs,
                         uy, vy, ux, vx, dt: float, t: float,
                         *, fault_velocity=None, fault_traction=None,
-                        pressure=None):
+                        pressure=None, pressure_left=None, pressure_right=None):
         """Save a restartable, single-time-level state.
 
         The optional algebraic fields are used by coupled integrators to save
@@ -362,6 +364,9 @@ class OutputManager:
         pore_pressure = (
             np.zeros_like(fault.U) if pressure is None else pressure
         )
+        extra = {}
+        if pressure_left is not None and pressure_right is not None:
+            extra.update(Pl=pressure_left, Pr=pressure_right)
         np.savez(fname,
                  U=fault.U, V=velocity, tau=traction, sigma=fault.sigma,
                  P=pore_pressure,
@@ -369,7 +374,48 @@ class OutputManager:
                  tauqs=tauqs, sigmaqs=sigmaqs,
                  uy=uy, vy=vy, ux=ux, vx=vx,
                  time_integrator=np.asarray(self.p.time_integrator.value),
-                 state_time_level=np.asarray("end"))
+                 state_time_level=np.asarray("end"), **extra)
+
+    def _history_index(self, it):
+        interval = self.p.output_interval
+        return (self._history_count
+                + (it + self._iteration_offset) // interval
+                - self._iteration_offset // interval - 1)
+
+    def restore_history(self, checkpoint_time, iteration, tau0):
+        """Retain accepted samples through the restart time, then reserve new slots."""
+        self._iteration_offset = iteration
+        names = ("Um", "Vm", "taum", "sigmam", "Pm", "thetam", "dtm", "tm", "tau0")
+        surfaces = ("bp3_surface_disp1", "bp3_surface_disp2",
+                    "bp3_surface_vel1", "bp3_surface_vel2")
+        path = self.out / "dataall.npz"
+        old = {}
+        if path.exists():
+            with np.load(path) as saved:
+                old = {key: saved[key] for key in saved.files}
+        times = old.get("tm", np.empty(0))
+        # Older files include unused zero-filled columns.
+        keep = np.flatnonzero(np.isfinite(times) & (times > 0) & (times <= checkpoint_time))
+        if keep.size and np.any(np.diff(times[keep]) <= 0):
+            raise ValueError("Checkpoint history times must be strictly increasing.")
+        self._history_count = self._written_count = keep.size
+        interval = self.p.output_interval
+        capacity = keep.size + (iteration + self.p.Nt) // interval - iteration // interval
+        for name in names:
+            current = getattr(self, name)
+            restored = np.zeros(current.shape[:-1] + (capacity,))
+            if keep.size:
+                if name == "tau0" and name not in old:
+                    restored[..., :keep.size] = tau0[:, None]
+                else:
+                    restored[..., :keep.size] = old[name][..., keep]
+            setattr(self, name, restored)
+        for name in surfaces:
+            restored = np.full((8, capacity), np.nan)
+            if name in old:
+                restored[:, :keep.size] = old[name][:, keep]
+            setattr(self, "_" + name, restored)
+        self._bp3_surface_x = old.get("bp3_surface_x")
 
     def save_all(self):
         fname = self.out / "dataall.npz"
@@ -377,6 +423,7 @@ class OutputManager:
             Um=self.Um, Vm=self.Vm, taum=self.taum,
             sigmam=self.sigmam, Pm=self.Pm, thetam=self.thetam,
             dtm=self.dtm, tm=self.tm,
+            tau0=self.tau0,
         )
         # Surface histories are small compared with the fault histories and
         # are especially useful when a long BP3 calculation is interrupted
@@ -389,6 +436,9 @@ class OutputManager:
                 bp3_surface_vel1=self._bp3_surface_vel1,
                 bp3_surface_vel2=self._bp3_surface_vel2,
             )
+        arrays = {name: value if name == "bp3_surface_x"
+                  else value[..., :self._written_count]
+                  for name, value in arrays.items()}
         np.savez(fname, **arrays)
 
     def close(self):
@@ -396,7 +446,8 @@ class OutputManager:
 
     def load_checkpoint(self, checkpointer: int) -> dict:
         fname = self.out / f"data_{checkpointer}.npz"
-        return dict(np.load(fname))
+        with np.load(fname) as checkpoint:
+            return dict(checkpoint)
 
     def write_vtk_old(self, it: int, grid, ux, uy, vx, vy,
                   tauqs, sigmaqs, fault, t: float):

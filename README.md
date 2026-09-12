@@ -163,6 +163,31 @@ There are two examples in the [examples][examples_link] folder. Here are the exa
 
 Please read this README.md for information.
 
+### Restarting a Simulation
+
+Use the same model configuration and output directory to resume a checkpoint:
+
+```python
+model = FastSlipPy(params=params, output_dir="output", checkpointer=1000)
+model.run()
+```
+
+This reads `output/data_1000.npz`. `params.Nt` specifies additional steps;
+`params.tfinal` remains the absolute end time. Output and checkpoint intervals
+use cumulative step numbers, including VTK filenames.
+
+On restart, `dataall.npz` retains samples through the checkpoint time and
+appends new samples. Samples after an earlier restart point are replaced.
+BP3 surface histories and exported station files follow the same history.
+Only written samples are saved, without unused zero-filled columns. Keep
+`dataall.npz` alongside the checkpoint: missing or previously overwritten
+history cannot be reconstructed from a single checkpoint. Older histories
+without surface data retain missing surface samples as NaN.
+
+Restarting at or beyond `tfinal` leaves existing result files untouched.
+Groningen checkpoints now include both pore-pressure fields; older checkpoints
+reconstruct them from elapsed time and the configured loading schedule.
+
 ## How to Contribute
 
 Please check the [contribution guidelines][contribute_link].

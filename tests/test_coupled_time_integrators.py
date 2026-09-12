@@ -99,6 +99,116 @@ def test_checkpoint_restart_matches_uninterrupted_run(tmp_path, integrator):
         assert restarted["state_time_level"].item() == "end"
         assert restarted["time_integrator"].item() == integrator
 
+    with np.load(tmp_path / "full" / "dataall.npz") as uninterrupted, np.load(
+        restart_dir / "dataall.npz"
+    ) as restarted:
+        assert set(restarted.files) == set(uninterrupted.files)
+        for name in uninterrupted.files:
+            np.testing.assert_allclose(
+                restarted[name], uninterrupted[name], rtol=2e-12, atol=2e-12
+            )
+
+
+def test_restart_truncates_future_history_and_keeps_global_sampling(tmp_path):
+    def run(directory, steps, checkpoint=0):
+        model = FastSlipPy(
+            _small_bp3_parameters(Nt=steps, tfinal=10.0, output_interval=2),
+            output_dir=str(directory), checkpointer=checkpoint,
+        )
+        _disable_figures(model)
+        model.run()
+        return model
+
+    run(tmp_path / "full", 8)
+    directory = tmp_path / "restart"
+    run(directory, 3)
+    run(directory, 5, 3)
+    # Restart from the earlier, non-output-aligned checkpoint a second time.
+    run(directory, 3, 3)
+    with np.load(directory / "dataall.npz") as actual, np.load(
+        tmp_path / "full" / "dataall.npz"
+    ) as expected:
+        np.testing.assert_array_equal(actual["tm"], [2.0, 4.0, 6.0])
+        for name in expected.files:
+            reference = expected[name]
+            if name != "bp3_surface_x":
+                reference = reference[..., :3]
+            np.testing.assert_allclose(actual[name], reference, rtol=2e-12, atol=2e-12)
+
+
+def test_restart_at_final_time_preserves_output(tmp_path):
+    model = FastSlipPy(_small_bp3_parameters(), output_dir=str(tmp_path))
+    _disable_figures(model)
+    model.run()
+    before = {path.name: path.read_bytes() for path in tmp_path.glob("*.npz")}
+    resumed = FastSlipPy(
+        _small_bp3_parameters(), output_dir=str(tmp_path), checkpointer=4
+    )
+    _disable_figures(resumed)
+    resumed.run()
+    after = {path.name: path.read_bytes() for path in tmp_path.glob("*.npz")}
+    assert before == after
+
+
+def test_restart_reads_legacy_padded_history(tmp_path):
+    model = FastSlipPy(_small_bp3_parameters(Nt=2), output_dir=str(tmp_path))
+    _disable_figures(model)
+    model.run()
+    path = tmp_path / "dataall.npz"
+    with np.load(path) as saved:
+        legacy = {
+            key: np.pad(saved[key], [(0, 0)] * (saved[key].ndim - 1) + [(0, 3)])
+            for key in saved.files
+            if key != "tau0" and not key.startswith("bp3_surface_")
+        }
+    np.savez(path, **legacy)
+    resumed = FastSlipPy(
+        _small_bp3_parameters(Nt=2), output_dir=str(tmp_path), checkpointer=2
+    )
+    _disable_figures(resumed)
+    logged_times = []
+    resumed.output.log = lambda it, t, *args: logged_times.append(t)
+    resumed.run()
+    assert logged_times == [3.0, 4.0]
+    with np.load(path) as saved:
+        np.testing.assert_array_equal(saved["tm"], [1.0, 2.0, 3.0, 4.0])
+        np.testing.assert_array_equal(saved["Um"][:, :2], legacy["Um"][:, :2])
+        assert np.isnan(saved["bp3_surface_disp1"][:, :2]).all()
+        np.testing.assert_allclose(saved["tau0"][:, 0], resumed.stress.tau0)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_groningen_restart_restores_pressure_and_transition(tmp_path, legacy):
+    def run(directory, steps, checkpoint=0):
+        params = _small_bp3_parameters(
+            case_type="groningen", ysize=1500.0, Nt=steps, tfinal=20.0,
+            dt_init=0.5, dt_growth=1.5, dt_max=2.0,
+        )
+        params.loading.tload = 1.875
+        params.loading.dPdt_pre = -100.0
+        params.loading.dPdt_post = -20.0
+        model = FastSlipPy(params, output_dir=str(directory), checkpointer=checkpoint)
+        _disable_figures(model)
+        model.run()
+        return model
+
+    full = run(tmp_path / "full", 5)
+    directory = tmp_path / "restart"
+    run(directory, 2)
+    if legacy:
+        path = directory / "data_2.npz"
+        with np.load(path) as checkpoint:
+            data = {key: checkpoint[key] for key in checkpoint.files if key not in ("Pl", "Pr")}
+        np.savez(path, **data)
+    resumed = run(directory, 3, 2)
+    for name in ("P", "Pl", "Pr"):
+        np.testing.assert_allclose(getattr(resumed.stress, name), getattr(full.stress, name))
+    with np.load(directory / "dataall.npz") as actual, np.load(
+        tmp_path / "full" / "dataall.npz"
+    ) as expected:
+        for name in expected.files:
+            np.testing.assert_allclose(actual[name], expected[name], rtol=2e-12, atol=2e-12)
+
 
 @pytest.mark.parametrize("integrator", ["euler", "rk2_midpoint"])
 def test_saved_fault_fields_are_at_the_same_time_level(tmp_path, integrator):
