@@ -91,6 +91,30 @@ FAULT_LOADING_COMPONENTS = (
 )
 
 
+def _snap_boundary(coordinates: np.ndarray, value: float) -> float:
+    """Snap a nominal boundary to a coincident node within roundoff.
+
+    Piecewise stretched coordinates can represent, for example, 15 km as
+    ``15000.000000000002`` on one otherwise identical mesh.  Strict floating
+    comparisons must not move that physical node between diagnostic regions.
+    """
+
+    coordinates = np.asarray(coordinates, dtype=float)
+    index = int(np.argmin(np.abs(coordinates - value)))
+    tolerance = 64.0 * np.finfo(float).eps * max(abs(value), 1.0)
+    if abs(coordinates[index] - value) <= tolerance:
+        return float(coordinates[index])
+    return float(value)
+
+
+def _closed_interval_mask(
+    coordinates: np.ndarray, lower: float, upper: float
+) -> np.ndarray:
+    lower_node = _snap_boundary(coordinates, lower)
+    upper_node = _snap_boundary(coordinates, upper)
+    return (coordinates >= lower_node) & (coordinates <= upper_node)
+
+
 def resolve_dataall(path: Path) -> Path:
     """Resolve a case directory, output directory, or explicit history."""
 
@@ -265,21 +289,28 @@ def split_fault_velocity_components(
         raise ValueError(
             "Require band_top < band_bottom < W_f < deep_split_1 < deep_split_2."
         )
+    band_top_node = _snap_boundary(coordinates, band_top)
+    band_bottom_node = _snap_boundary(coordinates, band_bottom)
+    creep_start_node = _snap_boundary(coordinates, creep_start)
+    deep_split_1_node = _snap_boundary(coordinates, deep_split_1)
+    deep_split_2_node = _snap_boundary(coordinates, deep_split_2)
     masks = {
-        "shallow_locked": coordinates < band_top,
+        "shallow_locked": coordinates < band_top_node,
         "nucleation_band": (
-            (coordinates >= band_top) & (coordinates <= band_bottom)
+            (coordinates >= band_top_node) & (coordinates <= band_bottom_node)
         ),
         "lower_seismogenic": (
-            (coordinates > band_bottom) & (coordinates < creep_start)
+            (coordinates > band_bottom_node) & (coordinates < creep_start_node)
         ),
         "deep_creep_near": (
-            (coordinates >= creep_start) & (coordinates <= deep_split_1)
+            (coordinates >= creep_start_node)
+            & (coordinates <= deep_split_1_node)
         ),
         "deep_creep_middle": (
-            (coordinates > deep_split_1) & (coordinates <= deep_split_2)
+            (coordinates > deep_split_1_node)
+            & (coordinates <= deep_split_2_node)
         ),
-        "deep_creep_far": coordinates > deep_split_2,
+        "deep_creep_far": coordinates > deep_split_2_node,
     }
     coverage = np.sum(np.column_stack(list(masks.values())), axis=1)
     if not np.all(coverage == 1):
@@ -527,9 +558,10 @@ def main() -> None:
 
         friction = FrictionalZones(params, grid.y)
         weights = _node_weights(grid.y)
-        band = (
-            (grid.y >= args.band_top_km * 1e3)
-            & (grid.y <= args.band_bottom_km * 1e3)
+        band = _closed_interval_mask(
+            grid.y,
+            args.band_top_km * 1e3,
+            args.band_bottom_km * 1e3,
         )
         focus = int(np.argmin(np.abs(grid.y - args.precursor_depth_km * 1e3)))
         snapshot_payload: dict[str, dict] = {}

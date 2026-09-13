@@ -57,6 +57,26 @@ def test_deep_creep_components_are_exhaustive_and_identify_added_depth():
     assert np.all(components["deep_creep_far"][y > 7.0] != 0.0)
 
 
+def test_nominal_boundary_node_is_not_lost_to_floating_roundoff():
+    y = np.array([
+        0.0, 10e3, 15e3 + 2e-12, 20e3, 40e3, 100e3, 160e3,
+    ])
+    velocity = np.ones((y.size, 1))
+    components = runner.split_fault_velocity_components(
+        y,
+        velocity,
+        band_top=10e3,
+        band_bottom=15e3,
+        creep_start=40e3,
+        deep_split_1=100e3,
+        deep_split_2=160e3,
+    )
+    assert components["nucleation_band"][2, 0] == 1.0
+    assert components["lower_seismogenic"][2, 0] == 0.0
+    mask = runner._closed_interval_mask(y, 10e3, 15e3)
+    np.testing.assert_array_equal(mask, [False, True, True, False, False, False, False])
+
+
 def test_interpolation_extends_prescribed_creep_below_source_domain():
     source_y = np.array([0.0, 1.0, 2.0, 3.0])
     target_y = np.arange(0.0, 7.0)
