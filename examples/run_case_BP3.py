@@ -35,10 +35,8 @@ def build_bp3_parameters() -> ModelParameters:
         auto_motion_sign = True,
         xsize = 80e3,
         ysize = 45e3,
-        # 200 m uniform core plus quadratic far-field stretching.
-        # MATLAB equivalent:
-        #   element_size=200; x_core=10e3; y_core=20e3;
-        #   nx_stretch=40; ny_stretch=36; stretch_r=2;
+        # 200 m uniform core plus quadratic far-field stretching: a 10 km
+        # horizontal core, a 20 km vertical core, and 40/36 outer intervals.
         Nx = 181, Ny = 137,
         Nt = 10,
         output_interval = 10,

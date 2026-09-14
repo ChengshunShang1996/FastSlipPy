@@ -152,10 +152,9 @@ or with your preferred way to run Python scripts. The simulation will start, and
 ## Examples
 
 The examples folder contains the supported quick-start cases for Groningen,
-laboratory shear, BP3, stretched meshes, and iterative solving. Production-size
-reproducibility configurations live under [`benchmarks/`](benchmarks), while
-BP3 development diagnostics, convergence studies, and plotting runners live
-under [`tools/bp3/`](tools/bp3).
+laboratory shear, BP3, stretched meshes, and iterative solving. BP3 development
+diagnostics, convergence studies, and plotting runners live under
+[`tools/bp3/`](tools/bp3).
 
 * **Groningen case**
 

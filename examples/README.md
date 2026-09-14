@@ -14,7 +14,6 @@ Run them from the repository root, for example:
 python examples/run_case_BP3.py
 ```
 
-The production-size BP3 reproducibility case is kept in
-[`benchmarks/bp3/`](../benchmarks/bp3). Development diagnostics, convergence
-studies, and plotting runners are kept in [`tools/bp3/`](../tools/bp3), so they
-are not presented as part of the public quick-start examples.
+Development diagnostics, convergence studies, and plotting runners are kept in
+[`tools/bp3/`](../tools/bp3), so they are not presented as part of the public
+quick-start examples.
