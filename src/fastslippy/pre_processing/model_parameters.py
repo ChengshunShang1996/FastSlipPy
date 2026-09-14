@@ -264,6 +264,10 @@ class ModelParameters:
     # appended after the established inputs to preserve positional API order.
     fault_reaches_surface: Optional[bool] = None
     fault_reaches_bottom: Optional[bool] = None
+    # ``None`` preserves the historical checkpoint-based VTK cadence.  Set an
+    # explicit positive interval to decouple visualization from checkpoints.
+    # Appended here to preserve the positional constructor API.
+    vtk_interval: Optional[int] = None
 
     def __post_init__(self):
         case_value = (
@@ -321,6 +325,27 @@ class ModelParameters:
                 raise ValueError(f"{name} must be a boolean or None.")
             else:
                 setattr(self, name, bool(value))
+
+        for name in ("output_interval", "checkpoint_interval"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, (bool, np.bool_))
+                or not isinstance(value, (int, np.integer))
+                or value < 1
+            ):
+                raise ValueError(f"{name} must be a positive integer.")
+            setattr(self, name, int(value))
+
+        if self.vtk_interval is None:
+            self.vtk_interval = self.checkpoint_interval
+        elif (
+            isinstance(self.vtk_interval, (bool, np.bool_))
+            or not isinstance(self.vtk_interval, (int, np.integer))
+            or self.vtk_interval < 1
+        ):
+            raise ValueError("vtk_interval must be a positive integer or None.")
+        else:
+            self.vtk_interval = int(self.vtk_interval)
 
         time_integrator = (
             self.time_integrator.value

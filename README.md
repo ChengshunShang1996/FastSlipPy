@@ -138,7 +138,15 @@ By default, `linear_solver="direct"` is kept for backward compatibility. If dire
 
 * **Output files**:
 
-The output files are generated in the specified output directory [output] and can be visualized using Paraview or Matplotlib. The Matplotlib visualization is used by default, and the Paraview visualization can be enabled by setting the parameter `output_vtk_option` to `True`.
+The output files are generated in the specified output directory [output] and
+can be visualized using ParaView or Matplotlib. Matplotlib visualization is used
+by default. Enable ParaView output with `output_vtk_option=True`; set
+`vtk_interval` to control its cadence independently of checkpoints. The final
+accepted state is always written when VTK output is enabled, and
+`vtu_results/results.pvd` records the physical time of every frame.
+Open that PVD file in ParaView to load the left domain, right domain, and fault
+as one time-aware collection. Domain displacement, velocity, and quasi-static
+shear stress are point data; quasi-static normal stress is quad cell data.
 
 ### Running Simulations
 

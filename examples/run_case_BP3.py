@@ -41,6 +41,7 @@ def build_bp3_parameters() -> ModelParameters:
         Nt = 10,
         output_interval = 10,
         checkpoint_interval = 10,
+        vtk_interval = 10,
         rho = 2670.0,
         cs = 3464,
         mu0 = 0.6,

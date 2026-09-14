@@ -62,6 +62,24 @@ def _disable_figures(model):
     model.figure_creator.plot_results = lambda *args, **kwargs: None
 
 
+def test_vtk_cadence_is_independent_and_includes_final_state(tmp_path):
+    params = _small_bp3_parameters(
+        Nt=3,
+        tfinal=3.0,
+        checkpoint_interval=100,
+        vtk_interval=2,
+        output_vtk_option=True,
+    )
+    model = FastSlipPy(params, output_dir=str(tmp_path))
+    _disable_figures(model)
+    calls = []
+    model.output.write_vtk = lambda *args: calls.append((args[0], args[-1]))
+
+    model.run()
+
+    assert calls == [(2, 2.0), (3, 3.0)]
+
+
 @pytest.mark.parametrize("integrator", ["euler", "rk2_midpoint"])
 def test_checkpoint_restart_matches_uninterrupted_run(tmp_path, integrator):
     full_params = _small_bp3_parameters(time_integrator=integrator)

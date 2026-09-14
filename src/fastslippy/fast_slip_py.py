@@ -335,6 +335,9 @@ class FastSlipPy:
         t0_all = time.perf_counter()
         p = self.p
         Nx, Ny = p.Nx, p.Ny
+        vtk_interval = p.vtk_interval
+        if vtk_interval is None:
+            raise RuntimeError("vtk_interval was not initialized.")
 
         # ── initialise / load checkpoint ──
         if not self.checkpointer:
@@ -446,6 +449,10 @@ class FastSlipPy:
             needs_velocity_fields = (
                 global_it % p.output_interval == 0
                 or global_it % p.checkpoint_interval == 0
+                or (
+                    p.output_vtk_option
+                    and global_it % vtk_interval == 0
+                )
                 or reached_final_time
                 or it == p.Nt
             )
@@ -482,21 +489,26 @@ class FastSlipPy:
                     pressure_left=self.stress.Pl, pressure_right=self.stress.Pr)
                 self.output.save_all()
                 print(f"  Checkpoint it={global_it}, elapsed {time.perf_counter()-t0_all:.1f}s")
-                
-                if p.output_vtk_option:
-                    stage_velocity = self.fault.V
-                    stage_traction = self.fault.tau
-                    try:
-                        self.fault.V = output_V
-                        self.fault.tau = output_tau
-                        self.output.write_vtk(
-                            global_it, self.grid,
-                            self.ux, self.uy, output_vx, output_vy,
-                            self.tauqs, self.sigmaqs,
-                            self.fault, t)
-                    finally:
-                        self.fault.V = stage_velocity
-                        self.fault.tau = stage_traction
+            should_write_vtk = p.output_vtk_option and (
+                global_it % vtk_interval == 0
+                or reached_final_time
+                or it == p.Nt
+            )
+            if should_write_vtk:
+                stage_velocity = self.fault.V
+                stage_traction = self.fault.tau
+                try:
+                    self.fault.V = output_V
+                    self.fault.tau = output_tau
+                    self.output.write_vtk(
+                        global_it, self.grid,
+                        self.ux, self.uy, output_vx, output_vy,
+                        self.tauqs, self.sigmaqs,
+                        self.fault, t,
+                    )
+                finally:
+                    self.fault.V = stage_velocity
+                    self.fault.tau = stage_traction
 
             if reached_final_time:
                 break
