@@ -7,7 +7,7 @@ friction coefficient from ``V`` and ``theta``.
 
 Example::
 
-    python run_bp3_interface_transfer_diagnostic.py output/data_23000.npz \
+    python -m tools.bp3.diagnostics.run_bp3_interface_transfer_diagnostic output/data_23000.npz \
       --xsize-km 320 --ysize-km 160 \
       --x-inner-km 20 --y-inner-km 20 \
       --x-inner-points 401 --y-inner-points 401

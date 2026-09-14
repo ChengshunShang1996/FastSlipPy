@@ -7,7 +7,7 @@ integrator/ksi combination, so the source calculation is never modified.
 
 Example (PowerShell)::
 
-    python examples/run_bp3_checkpoint_integrator_convergence.py `
+    python -m tools.bp3.studies.run_bp3_checkpoint_integrator_convergence `
       "E:\...\x-small-...-60degree\output\data_6000.npz" `
       --integrators euler rk2_midpoint --ksi-scales 1 0.5 `
       --final-year 195

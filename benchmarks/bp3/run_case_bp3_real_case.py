@@ -33,7 +33,7 @@ class RunFastSlipPy(FastSlipPy):
 
 
 def build_bp3_90_parameters() -> ModelParameters:
-    """Return the reproducible 90-degree BP3-QD comparison case.
+    """Return the reproducible production-size 90-degree BP3-QD case.
 
     The complete 40 km rate-and-state fault is kept inside the 100 m uniform
     down-dip core.  Coarsening the mesh inside that interval can turn one

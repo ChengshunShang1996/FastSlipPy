@@ -1,4 +1,4 @@
-"""Run the fast 60-degree BP3 near-critical small-peak diagnostic."""
+"""Run the compact 60-degree BP3 near-critical small-peak diagnostic."""
 
 import numpy as np
 

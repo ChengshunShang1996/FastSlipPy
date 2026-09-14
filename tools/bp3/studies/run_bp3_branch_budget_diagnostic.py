@@ -6,7 +6,7 @@ normal-stress, and state-evolution terms.  It performs no elastic solve.
 
 Example::
 
-    python examples/run_bp3_branch_budget_diagnostic.py CASE/output \
+    python -m tools.bp3.studies.run_bp3_branch_budget_diagnostic CASE/output \
       --reference-dir CASE/output \
       --output-dir artifacts/bp3_branch_budget_60
 """

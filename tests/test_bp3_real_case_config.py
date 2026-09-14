@@ -1,6 +1,6 @@
 import numpy as np
 
-from examples.run_case_bp3_real_case import YR, build_bp3_90_parameters
+from benchmarks.bp3.run_case_bp3_real_case import YR, build_bp3_90_parameters
 from fastslippy.pre_processing.grid import Grid
 
 

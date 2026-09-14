@@ -1,4 +1,4 @@
-r"""Low-rank spatial effective-stiffness diagnostic for BP3-QD nucleation.
+r"""Run the low-rank effective-stiffness study for BP3-QD nucleation.
 
 The script reads a fault state from a checkpoint, applies a compact Gaussian
 basis in the velocity-weakening nucleation band, and solves a reduced

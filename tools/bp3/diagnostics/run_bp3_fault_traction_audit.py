@@ -13,7 +13,7 @@ left/right recovery mismatch from a deeper interface/corner inconsistency.
 
 Example::
 
-    python run_bp3_fault_traction_audit.py \
+    python -m tools.bp3.diagnostics.run_bp3_fault_traction_audit \
       --output-dir artifacts/bp3_fault_traction_audit
 """
 

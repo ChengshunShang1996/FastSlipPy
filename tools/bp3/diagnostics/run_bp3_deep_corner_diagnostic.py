@@ -7,7 +7,7 @@ No earthquake-cycle integration or checkpoint is required.
 
 Example::
 
-    python run_bp3_deep_corner_diagnostic.py \
+    python -m tools.bp3.diagnostics.run_bp3_deep_corner_diagnostic \
       --output-dir artifacts/bp3_deep_corner
 """
 

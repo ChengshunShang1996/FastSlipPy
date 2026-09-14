@@ -5,7 +5,7 @@ import sys
 
 import numpy as np
 
-from examples import run_bp3_x_domain_outer_counterfactual as runner
+from tools.bp3.studies import run_bp3_x_domain_outer_counterfactual as runner
 
 
 def _write_synthetic_history(path, ny):

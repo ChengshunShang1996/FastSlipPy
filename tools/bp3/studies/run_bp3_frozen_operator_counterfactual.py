@@ -1,4 +1,4 @@
-r"""Apply several x-core elastic operators to identical saved BP3 fault states.
+r"""Compare several x-core elastic operators on identical saved BP3 fault states.
 
 The script selects three second-cycle snapshots from ``dataall.npz``:
 
@@ -26,7 +26,7 @@ import numpy as np
 from scipy.signal import find_peaks
 
 try:
-    from examples.run_bp3_x_core_convergence import (
+    from tools.bp3.studies.run_bp3_x_core_convergence import (
         CORE_CASES,
         DEPTH_CASE,
         XCoreCase,

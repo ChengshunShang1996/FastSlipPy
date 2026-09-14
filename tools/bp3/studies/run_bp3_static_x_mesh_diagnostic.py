@@ -1,4 +1,4 @@
-"""Separate BP3 x-domain and stretched-outer-mesh effects without cycling.
+"""Study BP3 x-domain and stretched-outer-mesh effects without cycling.
 
 The diagnostic reads a fault slip-rate profile from ``dataall.npz`` and solves
 one instantaneous 60-degree BP3 elasticity problem for each x mesh:

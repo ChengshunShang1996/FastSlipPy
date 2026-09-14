@@ -11,7 +11,7 @@ new elastic solve.
 
 Example::
 
-    python run_bp3_operator_consistency_diagnostic.py output/data_23000.npz \
+    python -m tools.bp3.diagnostics.run_bp3_operator_consistency_diagnostic output/data_23000.npz \
       --mode-files ../BP3-nucleation-stiffness-2/output/*_stiffness_modes.npz
 """
 

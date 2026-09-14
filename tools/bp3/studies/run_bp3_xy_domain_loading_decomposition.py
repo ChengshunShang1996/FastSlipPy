@@ -11,7 +11,7 @@ long dynamic run:
 The default comparison is deliberately small enough to answer whether a
 ``320 x 100 km`` domain can arrest the precursor because of its aspect ratio::
 
-    python run_bp3_xy_domain_loading_decomposition.py CASE600/output \
+    python -m tools.bp3.studies.run_bp3_xy_domain_loading_decomposition CASE600/output \
       --output-dir artifacts/bp3_xy_domain_loading
 
 The input history defaults to the production ``600 x 160 km``, 50 m-core

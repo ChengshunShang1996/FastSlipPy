@@ -142,15 +142,20 @@ The output files are generated in the specified output directory [output] and ca
 
 ### Running Simulations
 
-To run a simulation, you can use the provided example scripts in the [examples][examples_link] folder. As running other Python scripts, you can run the example script in the command line:
+To run a simulation, use one of the short, self-contained scripts in the
+[examples][examples_link] folder. For example:
 
-> python run_case_groningen.py
+> python examples/run_case_groningen.py
 
 or with your preferred way to run Python scripts. The simulation will start, and the output files will be generated in the specified output directory.
 
 ## Examples
 
-There are two examples in the [examples][examples_link] folder. Here are the example results:
+The examples folder contains the supported quick-start cases for Groningen,
+laboratory shear, BP3, stretched meshes, and iterative solving. Production-size
+reproducibility configurations live under [`benchmarks/`](benchmarks), while
+BP3 development diagnostics, convergence studies, and plotting runners live
+under [`tools/bp3/`](tools/bp3).
 
 * **Groningen case**
 

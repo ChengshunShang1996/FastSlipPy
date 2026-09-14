@@ -3,7 +3,9 @@
 import numpy as np
 from scipy.sparse.linalg import spsolve
 
-from examples.run_bp3_small_peak_diagnostic import build_small_bp3_parameters
+from tools.bp3.diagnostics.run_bp3_small_peak_diagnostic import (
+    build_small_bp3_parameters,
+)
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.solver.matrix_builder import MatrixBuilder
 from fastslippy.utilities.bp3_operator_consistency import (

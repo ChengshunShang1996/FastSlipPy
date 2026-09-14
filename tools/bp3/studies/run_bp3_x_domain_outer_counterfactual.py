@@ -28,11 +28,11 @@ intended to execute sequentially on an HPC node.
 Recommended reciprocal runs::
 
     # Failing 320 km history (precursor is clearest near 12 km)
-    python run_bp3_x_domain_outer_counterfactual.py CASE320/output \
+    python -m tools.bp3.studies.run_bp3_x_domain_outer_counterfactual CASE320/output \
       --precursor-depth-km 12 --output-dir artifacts/from_x320
 
     # Arresting 600 km history (precursor is clearest near 10 km)
-    python run_bp3_x_domain_outer_counterfactual.py CASE600/output \
+    python -m tools.bp3.studies.run_bp3_x_domain_outer_counterfactual CASE600/output \
       --precursor-depth-km 10 --output-dir artifacts/from_x600
 """
 

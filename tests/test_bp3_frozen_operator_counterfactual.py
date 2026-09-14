@@ -3,7 +3,7 @@ import sys
 
 import numpy as np
 
-from examples import run_bp3_frozen_operator_counterfactual as runner
+from tools.bp3.studies import run_bp3_frozen_operator_counterfactual as runner
 
 
 def test_frozen_operator_counterfactual_smoke(monkeypatch, tmp_path):

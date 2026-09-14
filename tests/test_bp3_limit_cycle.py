@@ -12,7 +12,7 @@ from fastslippy.utilities.bp3_limit_cycle import (
     load_fastslippy_station,
     representative_reference_cycle,
 )
-from examples.plot_bp3_limit_cycle_evolution import (
+from tools.bp3.plotting.plot_bp3_limit_cycle_evolution import (
     DEFAULT_600_CASE,
     DEFAULT_800_CASE,
     DEFAULT_REFERENCE_DIR,

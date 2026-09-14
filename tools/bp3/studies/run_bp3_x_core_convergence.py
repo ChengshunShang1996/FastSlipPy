@@ -7,7 +7,7 @@ next sparse factorization is built.
 
 Example::
 
-    python run_bp3_x_core_convergence.py \
+    python -m tools.bp3.studies.run_bp3_x_core_convergence \
       --output-dir artifacts/bp3_x_core_convergence
 """
 
@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 try:
-    from examples.run_bp3_fault_traction_audit import (
+    from tools.bp3.diagnostics.run_bp3_fault_traction_audit import (
         DepthCase,
         build_parameters,
         run_case,

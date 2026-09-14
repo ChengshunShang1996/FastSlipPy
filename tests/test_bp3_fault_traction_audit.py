@@ -5,7 +5,7 @@ import sys
 
 import numpy as np
 
-from examples import run_bp3_fault_traction_audit as runner
+from tools.bp3.diagnostics import run_bp3_fault_traction_audit as runner
 
 
 def test_fault_traction_audit_writes_unsymmetrized_recoveries(

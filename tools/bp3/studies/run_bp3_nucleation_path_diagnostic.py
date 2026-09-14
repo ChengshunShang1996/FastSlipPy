@@ -1,4 +1,4 @@
-r"""Project an existing BP3-QD cycle onto nucleation stiffness modes.
+r"""Project an existing BP3-QD cycle onto saved nucleation stiffness modes.
 
 No elastic factorization or earthquake-cycle integration is performed.  The
 script combines an existing ``dataall.npz`` with a stiffness-mode ``.npz`` and

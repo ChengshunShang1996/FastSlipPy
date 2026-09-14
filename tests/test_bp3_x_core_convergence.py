@@ -3,7 +3,7 @@
 import json
 import sys
 
-from examples import run_bp3_x_core_convergence as runner
+from tools.bp3.studies import run_bp3_x_core_convergence as runner
 
 
 def test_x_core_convergence_runs_cases_sequentially(monkeypatch, tmp_path):

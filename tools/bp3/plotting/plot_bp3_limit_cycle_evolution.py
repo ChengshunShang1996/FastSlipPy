@@ -2,7 +2,7 @@
 
 Example
 -------
-python examples/plot_bp3_limit_cycle_evolution.py \
+python -m tools.bp3.plotting.plot_bp3_limit_cycle_evolution \
   --case "800x160 km" /path/to/800-case/output/dataall.npz tab:green \
   --case "600x160 km" /path/to/600-case/output/dataall.npz tab:blue \
   --reference-dir /path/to/dfra/files
@@ -50,12 +50,9 @@ PANEL_ATTRIBUTES = (
 )
 
 
-# IDE-friendly defaults for the comparison that motivated this script.  Keep
-# these together so another machine or result tree needs only one edit.
-DEFAULT_RESULTS_ROOT = Path(
-    r"E:\1_UU\1-FastSlipPy-cases\results"
-    r"\BP3-stretched-mesh-fixBC-matlab-v3-bottom-free-v2"
-)
+# Repository-relative IDE defaults.  Supply explicit command-line paths for
+# production data, or place the comparison histories below this directory.
+DEFAULT_RESULTS_ROOT = Path("artifacts") / "bp3_limit_cycle_inputs"
 DEFAULT_800_CASE = DEFAULT_RESULTS_ROOT / (
     "x-small-benchmark-bp3-QD-hpc-50-1e-9-fix-v-"
     "800-160-xy-less-60degree"
@@ -66,7 +63,7 @@ DEFAULT_600_CASE = DEFAULT_RESULTS_ROOT / (
 )
 DEFAULT_REFERENCE_DIR = DEFAULT_800_CASE / "output"
 DEFAULT_OUTPUT_DIR = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parents[3]
     / "artifacts"
     / "bp3_limit_cycle_800_vs_600"
 )

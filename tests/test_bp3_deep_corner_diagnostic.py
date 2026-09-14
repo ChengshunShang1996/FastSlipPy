@@ -3,7 +3,7 @@
 import json
 import sys
 
-from examples import run_bp3_deep_corner_diagnostic as runner
+from tools.bp3.diagnostics import run_bp3_deep_corner_diagnostic as runner
 
 
 def test_deep_corner_runner_writes_profiles_and_incremental_summary(
