@@ -256,6 +256,15 @@ class ModelParameters:
     loading: LoadingConditions = field(default_factory=LoadingConditions)
     layers: LayerParameters = field(default_factory=LayerParameters)
 
+    # --- Fault topology ---
+    # Whether the central fault owns the jump/continuity rows where it meets
+    # the horizontal domain boundaries.  ``None`` preserves the historical
+    # case defaults: BP3/California includes both endpoints, while the lab and
+    # Groningen setups let the outer boundary condition own them.  These are
+    # appended after the established inputs to preserve positional API order.
+    fault_reaches_surface: Optional[bool] = None
+    fault_reaches_bottom: Optional[bool] = None
+
     def __post_init__(self):
         case_value = (
             self.case_type.value
@@ -302,6 +311,16 @@ class ModelParameters:
             raise ValueError(
                 f"slip_rate_solver must be one of: {supported}."
             ) from exc
+
+        default_fault_endpoints = self.case_type is CaseType.CALIFORNIA
+        for name in ("fault_reaches_surface", "fault_reaches_bottom"):
+            value = getattr(self, name)
+            if value is None:
+                setattr(self, name, default_fault_endpoints)
+            elif not isinstance(value, (bool, np.bool_)):
+                raise ValueError(f"{name} must be a boolean or None.")
+            else:
+                setattr(self, name, bool(value))
 
         time_integrator = (
             self.time_integrator.value

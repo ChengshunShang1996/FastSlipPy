@@ -11,6 +11,7 @@ from fastslippy.pre_processing.model_parameters import (
     TimeIntegrator,
 )
 from fastslippy.solver.fault_state import FaultState
+from fastslippy.solver.matrix_builder import MatrixBuilder
 from fastslippy.solver.stress_state import StressState
 
 
@@ -74,6 +75,46 @@ def test_case_type_and_default_lab_friction_are_general(case_value):
     np.testing.assert_allclose(fault.theta, params.L / params.V0)
     assert params.slip_rate_solver is SlipRateSolver.NEWTON_V2
     assert params.time_integrator is TimeIntegrator.EULER
+
+
+@pytest.mark.parametrize(
+    ("case_type", "expected"),
+    [
+        (CaseType.CALIFORNIA, True),
+        (CaseType.LAB, False),
+        (CaseType.GRONINGEN, False),
+    ],
+)
+def test_fault_endpoint_defaults_preserve_existing_cases(case_type, expected):
+    params = ModelParameters(case_type=case_type, Nx=11, Ny=11)
+
+    assert params.fault_reaches_surface is expected
+    assert params.fault_reaches_bottom is expected
+
+
+def test_fault_endpoint_ownership_can_be_configured_independently_of_case():
+    params = ModelParameters(
+        case_type=CaseType.LAB,
+        Nx=11,
+        Ny=11,
+        fault_reaches_surface=True,
+        fault_reaches_bottom=True,
+    )
+    grid = Grid(params)
+
+    builder = MatrixBuilder(params, grid)
+    velocity = np.linspace(1.0, 2.0, params.Ny)
+    rhs = builder.build_RH(0.0, velocity)
+    mid = params.Nx // 2
+
+    assert rhs[builder._kuy[0, mid]] == velocity[0]
+    assert rhs[builder._kuy[-1, mid]] == velocity[-1]
+
+
+@pytest.mark.parametrize("name", ["fault_reaches_surface", "fault_reaches_bottom"])
+def test_fault_endpoint_ownership_rejects_non_boolean_values(name):
+    with pytest.raises(ValueError, match=name):
+        ModelParameters(Nx=11, Ny=11, **{name: "yes"})
 
 
 @pytest.mark.parametrize(

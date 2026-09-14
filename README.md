@@ -119,6 +119,13 @@ Stretched mesh support in the elastic solver is currently experimental. To run w
 
 If stretched mesh is enabled without this explicit opt-in, FastSlipPy now raises an error to prevent silently unreliable results.
 
+Fault endpoint ownership is configurable independently of the named benchmark
+with `fault_reaches_surface` and `fault_reaches_bottom`. Leaving either value as
+`None` preserves the established defaults: both endpoints belong to the fault
+for the California/BP3 case and to the outer boundary for the Lab and Groningen
+cases. Traction-free and fault-interface stress operators themselves are shared
+by all cases on both uniform and stretched meshes.
+
 For large-scale runs that hit memory limits during sparse LU factorization, you can switch to the iterative linear solver in [model_parameters.py][model_parameters]:
 
 - `linear_solver="iterative"`

@@ -254,7 +254,7 @@ class FastSlipPy:
         )
 
     def _advance_rk2_midpoint_coupling(self, dt: float, dPdt: float):
-        """Advance all coupled BP3 states using the explicit midpoint rule.
+        """Advance all coupled states using the explicit midpoint rule.
 
         The first elastic solve predicts displacement and aging state at
         ``t + dt/2``.  The friction equation is then solved again on that

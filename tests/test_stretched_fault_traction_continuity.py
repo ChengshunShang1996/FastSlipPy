@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from scipy.sparse.linalg import spsolve
 
 from fastslippy.pre_processing.grid import Grid
@@ -7,11 +8,12 @@ from fastslippy.solver.matrix_builder import MatrixBuilder
 from fastslippy.utilities.stress_cal_util import StressCalUtil
 
 
-def test_stretched_inclined_fault_uses_recovered_traction_at_interface():
+@pytest.mark.parametrize("case_type", ["california", "lab", "groningen"])
+def test_stretched_inclined_fault_uses_recovered_traction_at_interface(case_type):
     """Inclined-fault matrix rows must constrain the recovered tractions."""
     for alpha in (30.0, 60.0):
         params = ModelParameters(
-            case_type="california",
+            case_type=case_type,
             alpha=alpha,
             xsize=80e3,
             ysize=80e3,
@@ -62,7 +64,8 @@ def test_stretched_inclined_fault_uses_recovered_traction_at_interface():
         mid = params.Nx // 2
         residual = matrix @ solution - rhs
         interface_rows = []
-        for iy in range(params.Ny - 1):
+        shear_start = 0 if params.fault_reaches_surface else 1
+        for iy in range(shear_start, params.Ny - 1):
             _, shear_row = builder._dofs(mid + 1, iy, params.Ny)
             interface_rows.append(shear_row)
         for iy in range(1, params.Ny):
@@ -75,10 +78,10 @@ def test_stretched_inclined_fault_uses_recovered_traction_at_interface():
         # used by the friction law.
         assert np.max(np.abs(residual[interface_rows])) < 1e-18
 
-        shear_left = tau[:, mid - 1]
-        shear_right = tau[:, mid + 1]
+        shear_left = tau[shear_start:-1, mid - 1]
+        shear_right = tau[shear_start:-1, mid + 1]
         np.testing.assert_allclose(
-            shear_left[:-1], shear_right[:-1], rtol=1e-8, atol=1e-11
+            shear_left, shear_right, rtol=1e-8, atol=1e-11
         )
 
         recovered_left, recovered_right = StressCalUtil(
@@ -93,5 +96,6 @@ def test_stretched_inclined_fault_uses_recovered_traction_at_interface():
             right_column=mid,
         )
         np.testing.assert_allclose(
-            recovered_left, recovered_right, rtol=1e-8, atol=1e-11
+            recovered_left[1:-1], recovered_right[1:-1],
+            rtol=1e-8, atol=1e-11
         )

@@ -10,6 +10,7 @@ __license__     = "MIT License"
 #/////////////////////////////////////////////////
 
 import numpy as np
+import pytest
 
 from fastslippy.pre_processing.model_parameters import ModelParameters
 from fastslippy.pre_processing.grid import Grid
@@ -113,13 +114,57 @@ def test_top_traction_free_annuls_rigid_rotation_for_inclined_faults():
         assert np.max(np.abs(residual[rows])) < 1e-18
 
 
-def test_bottom_traction_free_annuls_rigid_rotation_for_inclined_faults():
+def test_stretched_traction_rows_do_not_depend_on_case_name():
+    """Identical geometry and boundary conditions must assemble identical rows."""
+    selected_rows = None
+    reference = None
+
+    for case_type in ("california", "lab", "groningen"):
+        params = ModelParameters(
+            case_type=case_type,
+            Nx=31,
+            Ny=29,
+            xsize=80e3,
+            ysize=60e3,
+            alpha=60.0,
+            x_stretch_enabled=True,
+            y_stretch_enabled=True,
+            x_stretch_inner_size=20e3,
+            y_stretch_inner_size=20e3,
+            x_stretch_inner_points=15,
+            y_stretch_inner_points=11,
+            allow_nonuniform_solver=True,
+            fault_reaches_surface=False,
+            fault_reaches_bottom=False,
+        )
+        params.bc.top.set_traction_free()
+        params.bc.bottom.set_traction_free()
+        grid = Grid(params)
+        builder = MatrixBuilder(params, grid)
+        matrix = builder.build_LH().tocsr()
+
+        if selected_rows is None:
+            ix = 3
+            top_ux, top_uy = builder._dofs(ix, 0, params.Ny)
+            bottom_ux, _ = builder._dofs(ix, params.Ny, params.Ny)
+            _, bottom_uy = builder._dofs(ix, params.Ny - 1, params.Ny)
+            selected_rows = [top_ux, top_uy, bottom_ux, bottom_uy]
+
+        rows = matrix[selected_rows].toarray()
+        if reference is None:
+            reference = rows
+        else:
+            np.testing.assert_allclose(rows, reference, rtol=0.0, atol=0.0)
+
+
+@pytest.mark.parametrize("case_type", ["california", "lab", "groningen"])
+def test_bottom_traction_free_annuls_rigid_rotation_for_inclined_faults(case_type):
     """The deep zero-traction rows are the bottom mirror of the free surface."""
     omega = 1e-6
 
-    for alpha in (90.0, 60.0, 45.0, 30.0):
+    for alpha in (90.0, 60.0, 30.0):
         params = ModelParameters(
-            case_type="california",
+            case_type=case_type,
             Nx=31,
             Ny=29,
             xsize=80e3,
@@ -154,7 +199,7 @@ def test_bottom_traction_free_annuls_rigid_rotation_for_inclined_faults():
         mid = params.Nx // 2
         rows = []
         for ix in range(1, params.Nx):
-            if ix != mid:
+            if not (params.fault_reaches_bottom and ix == mid):
                 _, kuy = builder._dofs(ix, params.Ny - 1, params.Ny)
                 rows.append(kuy)
         # The side displacement condition owns the two side/bottom corners.

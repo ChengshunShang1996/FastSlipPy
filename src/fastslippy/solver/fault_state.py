@@ -70,7 +70,7 @@ class FaultState:
         values: np.ndarray,
         creep_start: int,
     ) -> None:
-        """Close the BP3 fault at the free surface by interior extrapolation.
+        """Close a surface-reaching fault by interior extrapolation.
 
         For a vertical fault, the fault shear traction at ``y=0`` is also a
         free-surface traction and is therefore identically zero.  Applying the
@@ -79,7 +79,7 @@ class FaultState:
         physical fault value is represented by the one-sided interior limit.
         """
         if (
-            self.p.case_type == "california"
+            self.p.fault_reaches_surface
             and self.p.extrapolate_surface_fault_rate
             and creep_start > 1
         ):
