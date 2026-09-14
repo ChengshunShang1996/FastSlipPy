@@ -135,6 +135,31 @@ def _reference_build_rh(p: ModelParameters, g: Grid, builder: MatrixBuilder,
                         if yv == 800 and ix < mid + 1:
                             RH[kux] = -dPdt / dy_loc * dx_loc * dx_loc / G * sina * cosa
 
+    if p.case_type == "california":
+        if p.bc.left.uy.type.name == "VELOCITY":
+            for iy in range(Ny):
+                _, kuy = MatrixBuilder._dofs(0, iy, Ny)
+                RH[kuy] = 2.0 * p.bc.left.uy.value
+        if p.bc.right.uy.type.name == "VELOCITY":
+            for iy in range(Ny):
+                _, kuy = MatrixBuilder._dofs(Nx, iy, Ny)
+                RH[kuy] = 2.0 * p.bc.right.uy.value
+        for iy in range(Ny):
+            _, kuy = MatrixBuilder._dofs(mid, iy, Ny)
+            RH[kuy] = V[iy]
+
+    # A prescribed side displacement owns the side/top and side/bottom
+    # corners.  Keep the reference implementation consistent with the matrix
+    # row precedence for both displacement components.
+    if p.bc.left.ux.type.name == "VELOCITY":
+        for iy in range(Ny + 1):
+            kux, _ = MatrixBuilder._dofs(0, iy, Ny)
+            RH[kux] = p.bc.left.ux.value
+    if p.bc.right.ux.type.name == "VELOCITY":
+        for iy in range(Ny + 1):
+            kux, _ = MatrixBuilder._dofs(Nx - 1, iy, Ny)
+            RH[kux] = p.bc.right.ux.value
+
     return RH
 
 

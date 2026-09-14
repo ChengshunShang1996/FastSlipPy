@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from fastslippy.pre_processing.layer_parameters import Layer, LayerParameters
 
-class CaseType(Enum):
+class CaseType(str, Enum):
     GRONINGEN = "groningen"
     LAB = "lab"
     CALIFORNIA = "california"
@@ -32,6 +32,14 @@ class LinearSolver(str, Enum):
 class IterativeMethod(str, Enum):
     GMRES = "gmres"
     BICGSTAB = "bicgstab"
+
+class SlipRateSolver(str, Enum):
+    NEWTON_V2 = "newton_v2"
+    BISECTION = "bisection"
+
+class TimeIntegrator(str, Enum):
+    EULER = "euler"
+    RK2_MIDPOINT = "rk2_midpoint"
 
 class BCType(str, Enum):
     FIXED = "fixed"
@@ -152,6 +160,8 @@ class ModelParameters:
     
     # --- Fault geometry ---
     alpha: float = 90.0          # Fault dip angle [degrees]
+    motion_sign: int = -1        # SEAS convention: +1 thrust, -1 normal
+    auto_motion_sign: bool = True # Map BP3 loading to internal sign convention
 
     # --- Grid ---
     xsize: float = 1.0           # Horizontal model size [m]
@@ -179,6 +189,7 @@ class ModelParameters:
     g: float = 9.81              # Gravitational acceleration [m/s²]
     K0: float = 0.75             # Ratio σ_min / σ_max
     E: float = 0.0               # Young's modulus [Pa] 
+    sigma0: float = 50e6         # BP3 effective normal stress [Pa]
 
     # --- Rate-and-state defaults (used when heterogeneous profile is off) ---
     friction_law: FrictionLaw = FrictionLaw.RATE_STATE
@@ -191,6 +202,12 @@ class ModelParameters:
     Vw: float = 1e90             # Dynamic weakening velocity [m/s]
     Vi: float = 1e-30            # Initial/background slip rate [m/s]
     flash_heating_option: bool = False  # Whether to include flash heating in the friction law
+    extrapolate_surface_fault_rate: bool = False  # Whether to extrapolate the slip rate at the free-surface/fault intersection
+    # At the BP3 free-surface/fault intersection, zero surface shear traction
+    # and rate-state friction with finite effective normal stress cannot both
+    # be imposed on the same point.  Treat y=0 as a boundary trace and copy the
+    # first interior slip rate, matching the endpoint treatment used by the
+    # original FastSlipPy friction solvers.
     H: float = 0.0               # California case parameter [m]
     h: float = 0.0               # California case parameter [m]
     W_f: float = 0.0               # California case parameter [m]
@@ -199,11 +216,25 @@ class ModelParameters:
     Nt: int = 1000               # Number of time steps
     dt_init: float = 1e-5         # Initial time step [s]
     dt_max: float = 0.002          # Maximum time step [s]
+    dt_growth: float = 1.2        # Maximum multiplicative timestep growth
+    ksi_scale: float = 1.0        # Scale the adaptive fault-evolution timestep limit
+    tfinal: float = np.inf        # Optional final physical time [s]
+    friction_tolerance: float = 5.0  # Friction residual tolerance [Pa]
+    slip_rate_solver: SlipRateSolver = SlipRateSolver.NEWTON_V2
+    # ``euler`` preserves the original staggered explicit coupling.  The
+    # midpoint option evaluates both the friction law and elastic velocity at
+    # a predicted half-step before advancing every differential state.
+    time_integrator: TimeIntegrator = TimeIntegrator.EULER
 
     # --- Output intervals ---
     output_interval: int = 10
     checkpoint_interval: int = 1000
     output_vtk_option: bool = True
+
+    # --- SEAS BP3 output metadata ---
+    code_name: str = "FastSlipPy"
+    code_version: str = "0.1.2"
+    modeler: str = "Chengshun Shang"
 
     # --- Linear solver ---
     linear_solver: LinearSolver = LinearSolver.DIRECT
@@ -225,8 +256,33 @@ class ModelParameters:
     loading: LoadingConditions = field(default_factory=LoadingConditions)
     layers: LayerParameters = field(default_factory=LayerParameters)
 
+    # --- Fault topology ---
+    # Whether the central fault owns the jump/continuity rows where it meets
+    # the horizontal domain boundaries.  ``None`` preserves the historical
+    # case defaults: BP3/California includes both endpoints, while the lab and
+    # Groningen setups let the outer boundary condition own them.  These are
+    # appended after the established inputs to preserve positional API order.
+    fault_reaches_surface: Optional[bool] = None
+    fault_reaches_bottom: Optional[bool] = None
+    # ``None`` preserves the historical checkpoint-based VTK cadence.  Set an
+    # explicit positive interval to decouple visualization from checkpoints.
+    # Appended here to preserve the positional constructor API.
+    vtk_interval: Optional[int] = None
+
     def __post_init__(self):
-        
+        case_value = (
+            self.case_type.value
+            if isinstance(self.case_type, CaseType)
+            else str(self.case_type).lower()
+        )
+        try:
+            self.case_type = CaseType(case_value)
+        except ValueError as exc:
+            supported = ", ".join(case.value for case in CaseType)
+            raise ValueError(
+                f"case_type must be one of: {supported}."
+            ) from exc
+
         #self.G = self.rho * self.cs ** 2
         if self.E > 0:
             self.G = self.E / (2 * (1 + self.nu))
@@ -247,6 +303,63 @@ class ModelParameters:
             raise ValueError("iterative_method must be 'gmres' or 'bicgstab'.")
         self.iterative_method = IterativeMethod(method)
 
+        slip_rate_solver = (
+            self.slip_rate_solver.value
+            if isinstance(self.slip_rate_solver, SlipRateSolver)
+            else str(self.slip_rate_solver).lower()
+        )
+        try:
+            self.slip_rate_solver = SlipRateSolver(slip_rate_solver)
+        except ValueError as exc:
+            supported = ", ".join(solver.value for solver in SlipRateSolver)
+            raise ValueError(
+                f"slip_rate_solver must be one of: {supported}."
+            ) from exc
+
+        default_fault_endpoints = self.case_type is CaseType.CALIFORNIA
+        for name in ("fault_reaches_surface", "fault_reaches_bottom"):
+            value = getattr(self, name)
+            if value is None:
+                setattr(self, name, default_fault_endpoints)
+            elif not isinstance(value, (bool, np.bool_)):
+                raise ValueError(f"{name} must be a boolean or None.")
+            else:
+                setattr(self, name, bool(value))
+
+        for name in ("output_interval", "checkpoint_interval"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, (bool, np.bool_))
+                or not isinstance(value, (int, np.integer))
+                or value < 1
+            ):
+                raise ValueError(f"{name} must be a positive integer.")
+            setattr(self, name, int(value))
+
+        if self.vtk_interval is None:
+            self.vtk_interval = self.checkpoint_interval
+        elif (
+            isinstance(self.vtk_interval, (bool, np.bool_))
+            or not isinstance(self.vtk_interval, (int, np.integer))
+            or self.vtk_interval < 1
+        ):
+            raise ValueError("vtk_interval must be a positive integer or None.")
+        else:
+            self.vtk_interval = int(self.vtk_interval)
+
+        time_integrator = (
+            self.time_integrator.value
+            if isinstance(self.time_integrator, TimeIntegrator)
+            else str(self.time_integrator).lower()
+        )
+        try:
+            self.time_integrator = TimeIntegrator(time_integrator)
+        except ValueError as exc:
+            supported = ", ".join(method.value for method in TimeIntegrator)
+            raise ValueError(
+                f"time_integrator must be one of: {supported}."
+            ) from exc
+
         if self.iterative_rtol <= 0.0:
             raise ValueError("iterative_rtol must be > 0.")
         if self.iterative_atol < 0.0:
@@ -260,7 +373,16 @@ class ModelParameters:
         if not self.ilu_permc_spec:
             raise ValueError("ilu_permc_spec must be a non-empty string.")
         assert self.Nx % 2 == 1, "Nx must be odd (fault at centre column)."
-        assert self.Ny % 2 == 1, "Ny must be odd."
+        if self.Ny < 4:
+            raise ValueError("Ny must provide at least three stress-cell centres.")
+        if self.motion_sign not in (-1, 1):
+            raise ValueError("motion_sign must be +1 (thrust) or -1 (normal).")
+        if self.dt_growth <= 0.0:
+            raise ValueError("dt_growth must be positive.")
+        if not np.isfinite(self.ksi_scale) or self.ksi_scale <= 0.0:
+            raise ValueError("ksi_scale must be finite and positive.")
+        if self.friction_tolerance < 0.0:
+            raise ValueError("friction_tolerance must be non-negative.")
         if self.x_stretch_enabled:
             if not (0.0 < self.x_stretch_inner_size < self.xsize):
                 raise ValueError("x_stretch_inner_size must be in (0, xsize).")
@@ -295,3 +417,36 @@ class ModelParameters:
                 )
             if self.y_stretch_max_cell_size is not None and self.y_stretch_max_cell_size <= 0.0:
                 raise ValueError("y_stretch_max_cell_size must be > 0 when provided.")
+
+    def apply_bp3_motion_sign(self):
+        """Apply the SEAS motion convention to BP3 internal velocities.
+
+        SEAS uses ``+1`` for thrust and ``-1`` for normal motion, whereas the
+        internal fault jump is ``uy(+) - uy(-)``. Consequently the internal
+        velocity sign is ``-motion_sign``, matching the MATLAB reference.
+        Magnitudes supplied by the caller are preserved.
+        """
+        if self.case_type != CaseType.CALIFORNIA or not self.auto_motion_sign:
+            return
+
+        internal_sign = -float(self.motion_sign)
+        initial_magnitude = abs(float(self.Vi))
+        plate_magnitude = abs(float(self.loading.V_p))
+        creep_magnitude = abs(float(self.loading.V_L))
+        if plate_magnitude == 0.0:
+            plate_magnitude = initial_magnitude
+        if creep_magnitude == 0.0:
+            creep_magnitude = initial_magnitude
+
+        self.Vi = internal_sign * initial_magnitude
+        self.loading.V_p = internal_sign * plate_magnitude
+        self.loading.V_L = internal_sign * creep_magnitude
+
+        # These are face velocities. The California RHS doubles side values
+        # because its LHS rows average ghost and interior unknowns.
+        if self.bc.left.uy.type == BCType.VELOCITY:
+            self.bc.left.uy.value = -0.5 * self.loading.V_p
+        if self.bc.right.uy.type == BCType.VELOCITY:
+            self.bc.right.uy.value = 0.5 * self.loading.V_p
+        if self.bc.bottom.uy.type == BCType.VELOCITY:
+            self.bc.bottom.uy.value = 0.5 * self.loading.V_L

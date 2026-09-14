@@ -129,7 +129,7 @@ def test_stretched_grid_analytic_metrics_match_closed_form():
     np.testing.assert_allclose(grid.metric_yp, yp_expected, rtol=0.0, atol=1e-12)
 
 
-def test_nonuniform_matrix_builder_uses_analytic_metrics():
+def test_nonuniform_matrix_builder_uses_physical_staggered_spacings():
     params = ModelParameters(
         xsize=1200.0,
         ysize=1000.0,
@@ -146,10 +146,16 @@ def test_nonuniform_matrix_builder_uses_analytic_metrics():
     grid = Grid(params)
     builder = MatrixBuilder(params, grid)
 
-    np.testing.assert_allclose(builder._dx_xuy, grid.metric_xp, rtol=0.0, atol=0.0)
-    np.testing.assert_allclose(builder._dy_yuy, grid.metric_y, rtol=0.0, atol=0.0)
-    np.testing.assert_allclose(builder._dx_xux, grid.metric_x, rtol=0.0, atol=0.0)
-    np.testing.assert_allclose(builder._dy_yux, grid.metric_yp, rtol=0.0, atol=0.0)
+    def centred_spacing(coords):
+        diff = np.diff(coords)
+        backward = np.concatenate(([diff[0]], diff))
+        forward = np.concatenate((backward[1:], [backward[-1]]))
+        return 0.5 * (backward + forward)
+
+    np.testing.assert_allclose(builder._dx_xuy, centred_spacing(grid.xp))
+    np.testing.assert_allclose(builder._dy_yuy, centred_spacing(grid.y))
+    np.testing.assert_allclose(builder._dx_xux, centred_spacing(grid.x))
+    np.testing.assert_allclose(builder._dy_yux, centred_spacing(grid.yp))
 
 
 def test_invalid_stretch_inner_zone_is_rejected():

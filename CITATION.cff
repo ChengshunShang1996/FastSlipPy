@@ -1,11 +1,12 @@
-cff-version: 0.0.1
+cff-version: 0.1.3
 message: "If you use this software, please cite it using these metadata."
 title: "FastSlipPy"
 type: software
 authors:
   - family-names: Shang
     given-names: Chengshun
-version: 0.0.1
+    affiliation: Utrecht University
+version: 0.1.3
 date-released: "2026-05-05"
 identifiers:
   - type: doi

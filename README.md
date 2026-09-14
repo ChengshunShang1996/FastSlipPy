@@ -119,6 +119,13 @@ Stretched mesh support in the elastic solver is currently experimental. To run w
 
 If stretched mesh is enabled without this explicit opt-in, FastSlipPy now raises an error to prevent silently unreliable results.
 
+Fault endpoint ownership is configurable independently of the named benchmark
+with `fault_reaches_surface` and `fault_reaches_bottom`. Leaving either value as
+`None` preserves the established defaults: both endpoints belong to the fault
+for the California/BP3 case and to the outer boundary for the Lab and Groningen
+cases. Traction-free and fault-interface stress operators themselves are shared
+by all cases on both uniform and stretched meshes.
+
 For large-scale runs that hit memory limits during sparse LU factorization, you can switch to the iterative linear solver in [model_parameters.py][model_parameters]:
 
 - `linear_solver="iterative"`
@@ -131,19 +138,31 @@ By default, `linear_solver="direct"` is kept for backward compatibility. If dire
 
 * **Output files**:
 
-The output files are generated in the specified output directory [output] and can be visualized using Paraview or Matplotlib. The Matplotlib visualization is used by default, and the Paraview visualization can be enabled by setting the parameter `output_vtk_option` to `True`.
+The output files are generated in the specified output directory [output] and
+can be visualized using ParaView or Matplotlib. Matplotlib visualization is used
+by default. Enable ParaView output with `output_vtk_option=True`; set
+`vtk_interval` to control its cadence independently of checkpoints. The final
+accepted state is always written when VTK output is enabled, and
+`vtu_results/results.pvd` records the physical time of every frame.
+Open that PVD file in ParaView to load the left domain, right domain, and fault
+as one time-aware collection. Domain displacement, velocity, and quasi-static
+shear stress are point data; quasi-static normal stress is quad cell data.
 
 ### Running Simulations
 
-To run a simulation, you can use the provided example scripts in the [examples][examples_link] folder. As running other Python scripts, you can run the example script in the command line:
+To run a simulation, use one of the short, self-contained scripts in the
+[examples][examples_link] folder. For example:
 
-> python run_case_groningen.py
+> python examples/run_case_groningen.py
 
 or with your preferred way to run Python scripts. The simulation will start, and the output files will be generated in the specified output directory.
 
 ## Examples
 
-There are two examples in the [examples][examples_link] folder. Here are the example results:
+The examples folder contains the supported quick-start cases for Groningen,
+laboratory shear, BP3, stretched meshes, and iterative solving. BP3 development
+diagnostics, convergence studies, and plotting runners live under
+[`tools/bp3/`](tools/bp3).
 
 * **Groningen case**
 
@@ -162,6 +181,31 @@ There are two examples in the [examples][examples_link] folder. Here are the exa
 ## Documentation
 
 Please read this README.md for information.
+
+### Restarting a Simulation
+
+Use the same model configuration and output directory to resume a checkpoint:
+
+```python
+model = FastSlipPy(params=params, output_dir="output", checkpointer=1000)
+model.run()
+```
+
+This reads `output/data_1000.npz`. `params.Nt` specifies additional steps;
+`params.tfinal` remains the absolute end time. Output and checkpoint intervals
+use cumulative step numbers, including VTK filenames.
+
+On restart, `dataall.npz` retains samples through the checkpoint time and
+appends new samples. Samples after an earlier restart point are replaced.
+BP3 surface histories and exported station files follow the same history.
+Only written samples are saved, without unused zero-filled columns. Keep
+`dataall.npz` alongside the checkpoint: missing or previously overwritten
+history cannot be reconstructed from a single checkpoint. Older histories
+without surface data retain missing surface samples as NaN.
+
+Restarting at or beyond `tfinal` leaves existing result files untouched.
+Groningen checkpoints now include both pore-pressure fields; older checkpoints
+reconstruct them from elapsed time and the configured loading schedule.
 
 ## How to Contribute
 

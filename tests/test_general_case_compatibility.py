@@ -1,0 +1,304 @@
+import numpy as np
+import pytest
+
+from fastslippy import FastSlipPy
+from fastslippy.pre_processing.frictional_zones import FrictionalZones
+from fastslippy.pre_processing.grid import Grid
+from fastslippy.pre_processing.model_parameters import (
+    CaseType,
+    ModelParameters,
+    SlipRateSolver,
+    TimeIntegrator,
+)
+from fastslippy.solver.fault_state import FaultState
+from fastslippy.solver.matrix_builder import MatrixBuilder
+from fastslippy.solver.stress_state import StressState
+
+
+def _lab_parameters(*, stretched: bool = False, **overrides):
+    values = dict(
+        case_type=CaseType.LAB,
+        alpha=90.0,
+        xsize=1.0,
+        ysize=1.0,
+        Nx=11,
+        Ny=11,
+        Nt=3,
+        dt_init=1e-4,
+        dt_max=1e-4,
+        tfinal=3e-4,
+        output_interval=1,
+        checkpoint_interval=100,
+        output_vtk_option=False,
+        Vi=1e-40,
+        E=0.55e10,
+        mu0=0.72,
+        V0=1e-6,
+        a0=0.012,
+        b0=0.0135,
+    )
+    if stretched:
+        values.update(
+            x_stretch_enabled=True,
+            y_stretch_enabled=True,
+            x_stretch_inner_size=0.2,
+            y_stretch_inner_size=0.2,
+            x_stretch_inner_points=5,
+            y_stretch_inner_points=3,
+            x_stretch_power=2,
+            y_stretch_power=2,
+            allow_nonuniform_solver=True,
+        )
+    values.update(overrides)
+    params = ModelParameters(**values)
+    params.bc.left.set_fixed()
+    params.bc.right.ux.set_fixed()
+    params.bc.right.uy.set_velocity(1e-5)
+    params.bc.top.ux.set_fixed()
+    params.bc.top.uy.set_velocity(1e-5)
+    params.bc.bottom.ux.set_fixed()
+    params.bc.bottom.uy.set_velocity(1e-5)
+    return params
+
+
+@pytest.mark.parametrize("case_value", [CaseType.LAB, "lab", "LAB"])
+def test_case_type_and_default_lab_friction_are_general(case_value):
+    params = ModelParameters(case_type=case_value, Nx=11, Ny=11)
+    grid = Grid(params)
+    friction = FrictionalZones(params, grid.y)
+    stress = StressState(params, grid.y)
+    fault = FaultState(params, stress, friction, fault_y=grid.y)
+
+    assert params.case_type is CaseType.LAB
+    np.testing.assert_allclose(friction.a, params.a0)
+    np.testing.assert_allclose(friction.b, params.b0)
+    np.testing.assert_allclose(fault.theta, params.L / params.V0)
+    assert params.slip_rate_solver is SlipRateSolver.NEWTON_V2
+    assert params.time_integrator is TimeIntegrator.EULER
+
+
+@pytest.mark.parametrize(
+    ("case_type", "expected"),
+    [
+        (CaseType.CALIFORNIA, True),
+        (CaseType.LAB, False),
+        (CaseType.GRONINGEN, False),
+    ],
+)
+def test_fault_endpoint_defaults_preserve_existing_cases(case_type, expected):
+    params = ModelParameters(case_type=case_type, Nx=11, Ny=11)
+
+    assert params.fault_reaches_surface is expected
+    assert params.fault_reaches_bottom is expected
+
+
+def test_fault_endpoint_ownership_can_be_configured_independently_of_case():
+    params = ModelParameters(
+        case_type=CaseType.LAB,
+        Nx=11,
+        Ny=11,
+        fault_reaches_surface=True,
+        fault_reaches_bottom=True,
+    )
+    grid = Grid(params)
+
+    builder = MatrixBuilder(params, grid)
+    velocity = np.linspace(1.0, 2.0, params.Ny)
+    rhs = builder.build_RH(0.0, velocity)
+    mid = params.Nx // 2
+
+    assert rhs[builder._kuy[0, mid]] == velocity[0]
+    assert rhs[builder._kuy[-1, mid]] == velocity[-1]
+
+
+@pytest.mark.parametrize("name", ["fault_reaches_surface", "fault_reaches_bottom"])
+def test_fault_endpoint_ownership_rejects_non_boolean_values(name):
+    with pytest.raises(ValueError, match=name):
+        ModelParameters(Nx=11, Ny=11, **{name: "yes"})
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("newton_v2", SlipRateSolver.NEWTON_V2),
+        ("BISECTION", SlipRateSolver.BISECTION),
+    ],
+)
+def test_slip_rate_solver_input_is_normalized(value, expected):
+    params = _lab_parameters(slip_rate_solver=value)
+    assert params.slip_rate_solver is expected
+
+
+def test_unknown_slip_rate_solver_is_rejected():
+    with pytest.raises(ValueError, match="slip_rate_solver"):
+        _lab_parameters(slip_rate_solver="unknown")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("euler", TimeIntegrator.EULER),
+        ("RK2_MIDPOINT", TimeIntegrator.RK2_MIDPOINT),
+    ],
+)
+def test_time_integrator_input_is_normalized(value, expected):
+    params = _lab_parameters(time_integrator=value)
+    assert params.time_integrator is expected
+
+
+def test_unknown_time_integrator_is_rejected():
+    with pytest.raises(ValueError, match="time_integrator"):
+        _lab_parameters(time_integrator="unknown")
+
+
+def test_ksi_scale_only_scales_the_adaptive_fault_limit():
+    baseline = _lab_parameters(ksi_scale=1.0)
+    tightened = _lab_parameters(ksi_scale=0.25)
+    baseline_grid = Grid(baseline)
+    tightened_grid = Grid(tightened)
+    baseline_friction = FrictionalZones(baseline, baseline_grid.y)
+    tightened_friction = FrictionalZones(tightened, tightened_grid.y)
+    baseline_stress = StressState(baseline, baseline_grid.y)
+    tightened_stress = StressState(tightened, tightened_grid.y)
+
+    baseline_ksi = FastSlipPy._build_ksi(
+        None,
+        baseline,
+        baseline_friction,
+        baseline_stress.sigman0,
+        baseline_grid.dy_fault,
+    )
+    tightened_ksi = FastSlipPy._build_ksi(
+        None,
+        tightened,
+        tightened_friction,
+        tightened_stress.sigman0,
+        tightened_grid.dy_fault,
+    )
+
+    np.testing.assert_allclose(tightened_ksi, 0.25 * baseline_ksi)
+    assert tightened.dt_max == baseline.dt_max
+
+
+@pytest.mark.parametrize("value", [0.0, -0.5, np.inf, np.nan])
+def test_ksi_scale_must_be_finite_and_positive(value):
+    with pytest.raises(ValueError, match="ksi_scale"):
+        _lab_parameters(ksi_scale=value)
+
+
+def test_newton_v2_solves_signed_friction_roots_for_lab_case():
+    params = _lab_parameters(Ny=9)
+    grid = Grid(params)
+    friction = FrictionalZones(params, grid.y)
+    stress = StressState(params, grid.y)
+    fault = FaultState(params, stress, friction, fault_y=grid.y)
+
+    target_velocity = np.logspace(-12, -7, params.Ny)
+    target_velocity[1::2] *= -1.0
+    exponent = (
+        params.mu0
+        + friction.b * np.log(params.V0 * fault.theta / params.L)
+    ) / friction.a
+    driving_stress = (
+        fault.sigma * friction.a
+        * np.arcsinh(
+            target_velocity / (2.0 * params.V0) * np.exp(exponent)
+        )
+        + params.eta * target_velocity
+    )
+    tauqs = driving_stress - stress.tau0
+
+    fault.solve_slip_rate_newton_v2(tauqs, stress, friction)
+
+    residual = (
+        fault.sigma * friction.a
+        * np.arcsinh(fault.V / (2.0 * params.V0) * np.exp(exponent))
+        + params.eta * fault.V
+        - driving_stress
+    )
+    assert np.max(np.abs(residual)) <= params.friction_tolerance
+    np.testing.assert_allclose(fault.V, target_velocity, rtol=5e-5, atol=0.0)
+
+
+@pytest.mark.parametrize("stretched", [False, True])
+def test_short_lab_run_uses_newton_v2_on_uniform_and_stretched_mesh(
+    tmp_path, stretched
+):
+    params = _lab_parameters(stretched=stretched)
+    model = FastSlipPy(
+        params=params,
+        output_dir=str(tmp_path / ("stretched" if stretched else "uniform")),
+    )
+    assert model.grid.is_nonuniform is stretched
+
+    newton_v2 = model.fault.solve_slip_rate_newton_v2
+    calls = []
+
+    def tracked_newton_v2(*args, **kwargs):
+        calls.append(True)
+        return newton_v2(*args, **kwargs)
+
+    model.fault.solve_slip_rate_newton_v2 = tracked_newton_v2
+    model.fault.solve_slip_rate_newton = lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("general cases should use Newton v2")
+    )
+    model.figure_creator.plot_results_shear = lambda *args, **kwargs: None
+    model.run()
+
+    np.testing.assert_allclose(model.output.tm, [1e-4, 2e-4, 3e-4])
+    # One solve advances the state and one re-solves the end-of-step algebraic
+    # variables used by synchronized output/logging.
+    assert len(calls) == 6
+    assert np.all(np.isfinite(model.fault.V))
+    assert np.all(np.isfinite(model.fault.theta))
+    assert np.all(np.isfinite(model.fault.sigma))
+
+
+def test_short_groningen_run_remains_compatible_with_newton_v2(tmp_path):
+    params = ModelParameters(
+        case_type=CaseType.GRONINGEN,
+        alpha=70.0,
+        xsize=2000.0,
+        ysize=2000.0,
+        Nx=11,
+        Ny=11,
+        Nt=1,
+        dt_init=1.0,
+        dt_max=1.0,
+        tfinal=1.0,
+        output_interval=1,
+        checkpoint_interval=100,
+        output_vtk_option=False,
+        rho=2400.0,
+        rhof=1150.0,
+        rhog=200.0,
+        cs=1650.0,
+        mu0=0.3,
+        nu=0.15,
+        V0=1e-6,
+        L=0.5,
+        Vw=1e90,
+        Vi=1e-30,
+        flash_heating_option=True,
+    )
+    params.loading.tload = 1000.0 * 365.0 * 24.0 * 3600.0
+    params.loading.dPdt_pre = 0.0
+    params.loading.dPdt_post = -0.0127
+    params.bc.left.ux.set_fixed()
+    params.bc.left.uy.set_free()
+    params.bc.right.ux.set_fixed()
+    params.bc.right.uy.set_free()
+    params.bc.top.ux.set_free()
+    params.bc.top.uy.set_fixed()
+    params.bc.bottom.ux.set_free()
+    params.bc.bottom.uy.set_fixed()
+    params.layers.set_groningen()
+
+    model = FastSlipPy(params=params, output_dir=str(tmp_path / "groningen"))
+    model.figure_creator.plot_results = lambda *args, **kwargs: None
+    model.run()
+
+    np.testing.assert_allclose(model.output.tm, [1.0])
+    assert np.all(np.isfinite(model.fault.V))
+    assert np.all(np.isfinite(model.fault.theta))
+    assert np.all(np.isfinite(model.fault.sigma))

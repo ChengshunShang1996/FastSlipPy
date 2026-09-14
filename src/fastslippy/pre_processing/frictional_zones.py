@@ -45,8 +45,29 @@ class FrictionalZones:
         a = np.zeros_like(y)
         b = np.zeros_like(y)
 
+        if p.case_type == "california":
+            a.fill(p.a_max)
+            shallow = y < p.H
+            transition = (y >= p.H) & (y < p.H + p.h)
+            a[shallow] = p.a0
+            a[transition] = (
+                p.a0
+                + (p.a_max - p.a0)
+                * (y[transition] - p.H)
+                / p.h
+            )
+            b.fill(p.b0)
+            return a, b
+
         #layers = list(self.LAYERS.items())
         layers = self.p.layers.layers
+
+        # Homogeneous fallback keeps the general/default cases usable without
+        # requiring callers to construct a one-layer profile explicitly.
+        if not layers:
+            a.fill(p.a0)
+            b.fill(p.b0)
+            return a, b
 
         #for i, (name, layer) in enumerate(layers):
         for i, layer in enumerate(layers):
@@ -67,17 +88,14 @@ class FrictionalZones:
             else:
                 mask = (y > top_y) & (y <= bot_y)
 
-            if p.case_type == "california":
-                # Linear interpolation of a(y)
-                mask_zone1 = (y >= 0) & (y < p.H)
-                mask_zone2 = (y >= p.H) & (y < p.H + p.h)
-                mask_zone3 = (y >= p.H + p.h)
-                a[mask_zone1] = p.a0
-                a[mask_zone2] = p.a0 + (p.a_max - p.a0) * (y[mask_zone2] - p.H) / p.h
-                a[mask_zone3] = p.a_max
-                b[mask] = layer.b
-            else:
-                a[mask] = layer.a
-                b[mask] = layer.b
+            a[mask] = layer.a
+            b[mask] = layer.b
+
+        if np.any(a <= 0.0):
+            missing = np.flatnonzero(a <= 0.0)
+            raise ValueError(
+                "Friction layers must cover every fault node with a positive "
+                f"direct-effect coefficient a; uncovered indices: {missing.tolist()}."
+            )
 
         return a, b

@@ -1,0 +1,121 @@
+#/////////////////////////////////////////////////
+__author__      = "Chengshun Shang (Utrecht University)"
+__copyright__   = "Copyright (C) 2026-present by Chengshun Shang"
+__version__     = "0.0.1"
+__maintainer__  = "Chengshun Shang"
+__email__       = "c.shang@uu.nl"
+__status__      = "development"
+__date__        = "June 28, 2026"
+__license__     = "MIT License"
+#/////////////////////////////////////////////////
+
+import numpy as np
+
+from fastslippy import FastSlipPy
+from fastslippy.pre_processing.model_parameters import ModelParameters
+from fastslippy.pre_processing.grid import Grid
+
+class RunFastSlipPy(FastSlipPy):
+    """
+    This can be customized for specific runs.
+    """
+    def run(self):
+        super().run()
+
+        self.grid.plot_grid()
+        self.grid.plot_mesh()
+
+
+def build_bp3_parameters() -> ModelParameters:
+    """Build the stretched-grid BP3 configuration used by this example."""
+    params = ModelParameters(
+        case_type = "california",
+        alpha = 60.0,
+        motion_sign = -1,  # SEAS: -1 normal, +1 thrust
+        auto_motion_sign = True,
+        xsize = 80e3,
+        ysize = 45e3,
+        # 200 m uniform core plus quadratic far-field stretching: a 10 km
+        # horizontal core, a 20 km vertical core, and 40/36 outer intervals.
+        Nx = 181, Ny = 137,
+        Nt = 10,
+        output_interval = 10,
+        checkpoint_interval = 10,
+        vtk_interval = 10,
+        rho = 2670.0,
+        cs = 3464,
+        mu0 = 0.6,
+        nu = 0.25,
+        #E=0.55e10, #according to k_critical = sigam * (b-a) / d_c, E = 1e10
+        V0 = 1e-6,
+        a0 = 0.01,
+        a_max = 0.025,
+        b0 = 0.015,
+        L = 0.008,
+        dt_init = 1.0,
+        dt_max = 0.1 * 365 * 24 * 3600.0,
+        tfinal = 1500 * 365 * 24 * 3600.0,
+        dt_growth = 1.2,
+        # Event-timestep convergence: compare 1.0, 0.5, and 0.25 while
+        # keeping dt_max and all physical parameters unchanged.
+        ksi_scale = 1.0,
+        friction_tolerance = 5.0,
+        # "newton_v2" (default) or signed "bisection".
+        slip_rate_solver = "newton_v2",
+        # "euler" preserves the original coupling; "rk2_midpoint" evaluates
+        # friction and elasticity again on a predicted half-step state.
+        time_integrator = "euler",
+        output_vtk_option = True,
+        Vi = 1e-9,  # magnitude; internal sign is applied automatically
+        flash_heating_option = False,
+        extrapolate_surface_fault_rate = True,
+        H = 15e3,
+        h = 3e3,
+        W_f = 40e3,
+        x_stretch_enabled=True,
+        y_stretch_enabled=True,
+        x_stretch_inner_size=20e3,
+        y_stretch_inner_size=20e3,
+        x_stretch_inner_points=101,
+        y_stretch_inner_points=101,
+        x_stretch_power=2,
+        y_stretch_power=2,
+        allow_nonuniform_solver=True,
+    )
+
+    yr = 365 * 24 * 3600.0
+    params.loading.tload = 0.0 * yr
+    params.loading.dPdt_pre = 0.0
+    params.loading.dPdt_post = 0.0
+    # Supply magnitudes. FastSlipPy maps these and the velocity boundaries to
+    # internal_sign = -motion_sign before constructing the initial state.
+    params.loading.V_p = 1e-9
+    params.loading.V_L = 1e-9
+    
+    #velocity_x = params.loading.V_p * 0.5 * np.sin(params.alpha * 3.1415926 / 180.0)
+    #velocity_y = params.loading.V_p * 0.5 * np.cos(params.alpha * 3.1415926 / 180.0)
+    #velocity_x = params.loading.V_p * 0.5
+    velocity_y = params.loading.V_p * 0.5
+
+    params.bc.left.ux.set_fixed()
+    params.bc.left.uy.set_velocity(-1 * velocity_y)
+    params.bc.right.ux.set_fixed()
+    params.bc.right.uy.set_velocity(velocity_y)
+    params.bc.top.set_traction_free()
+    # Finite-domain BP3-QD truncation used by the volume codes reported as
+    # "disp, free": imposed rigid motion on the lateral boundaries and zero
+    # shear/normal traction on the deep boundary.
+    params.bc.bottom.set_traction_free()
+
+    top_of_layer = params.ysize
+    bottom_of_layer = params.ysize * 2
+    params.layers.set_homogeneous(top = top_of_layer, bottom = bottom_of_layer, a=params.a0, b=params.b0)
+
+    return params
+
+
+if __name__ == "__main__":
+    params = build_bp3_parameters()
+
+    model = RunFastSlipPy(params=params, output_dir="output")
+    model.run()

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from scipy.sparse.linalg import spsolve
 
 from fastslippy.pre_processing.grid import Grid
@@ -7,11 +8,12 @@ from fastslippy.solver.matrix_builder import MatrixBuilder
 from fastslippy.utilities.stress_cal_util import StressCalUtil
 
 
-def test_stretched_fault_has_continuous_tractions_for_all_bp3_dips():
-    """The matrix interface rows and stress recovery must use one traction stencil."""
-    for alpha in (30.0, 60.0, 90.0):
+@pytest.mark.parametrize("case_type", ["california", "lab", "groningen"])
+def test_stretched_inclined_fault_uses_recovered_traction_at_interface(case_type):
+    """Inclined-fault matrix rows must constrain the recovered tractions."""
+    for alpha in (30.0, 60.0):
         params = ModelParameters(
-            case_type="california",
+            case_type=case_type,
             alpha=alpha,
             xsize=80e3,
             ysize=80e3,
@@ -45,7 +47,9 @@ def test_stretched_fault_has_continuous_tractions_for_all_bp3_dips():
         builder = MatrixBuilder(params, grid)
         slip_rate = 1e-9 * (1.0 + 0.3 * np.sin(2.0 * np.pi * grid.y / params.W_f))
         slip_rate[grid.y >= params.W_f] = params.loading.V_L
-        solution = spsolve(builder.build_LH(), builder.build_RH(0.0, slip_rate))
+        matrix = builder.build_LH()
+        rhs = builder.build_RH(0.0, slip_rate)
+        solution = spsolve(matrix, rhs)
 
         vpx = np.reshape(solution[0::2], (params.Nx + 1, params.Ny + 1)).T
         vpy = np.reshape(solution[1::2], (params.Nx + 1, params.Ny + 1)).T
@@ -58,6 +62,40 @@ def test_stretched_fault_has_continuous_tractions_for_all_bp3_dips():
         )
 
         mid = params.Nx // 2
-        # Exclude the one-sided y stencils at the two external boundaries.
-        assert np.max(np.abs(tau[3:-3, mid - 1] - tau[3:-3, mid + 1])) < 1e-10
-        assert np.max(np.abs(sigma[3:-3, mid - 1] - sigma[3:-3, mid])) < 1e-10
+        residual = matrix @ solution - rhs
+        interface_rows = []
+        shear_start = 0 if params.fault_reaches_surface else 1
+        for iy in range(shear_start, params.Ny - 1):
+            _, shear_row = builder._dofs(mid + 1, iy, params.Ny)
+            interface_rows.append(shear_row)
+        for iy in range(1, params.Ny):
+            normal_row, _ = builder._dofs(mid, iy, params.Ny)
+            interface_rows.append(normal_row)
+
+        # A small algebraic residual only proves that the rows assembled into
+        # the matrix were solved.  The physical invariant is that those rows
+        # impose continuity on the very same discrete tractions subsequently
+        # used by the friction law.
+        assert np.max(np.abs(residual[interface_rows])) < 1e-18
+
+        shear_left = tau[shear_start:-1, mid - 1]
+        shear_right = tau[shear_start:-1, mid + 1]
+        np.testing.assert_allclose(
+            shear_left, shear_right, rtol=1e-8, atol=1e-11
+        )
+
+        recovered_left, recovered_right = StressCalUtil(
+            prefer_numba=False
+        ).recover_fault_normal_stress(
+            sigma,
+            grid.x,
+            grid.y,
+            grid.xp,
+            grid.yp,
+            left_column=mid - 1,
+            right_column=mid,
+        )
+        np.testing.assert_allclose(
+            recovered_left[1:-1], recovered_right[1:-1],
+            rtol=1e-8, atol=1e-11
+        )

@@ -10,6 +10,7 @@ __license__     = "MIT License"
 #/////////////////////////////////////////////////
 
 import numpy as np
+import pytest
 
 from fastslippy.pre_processing.model_parameters import ModelParameters
 from fastslippy.pre_processing.grid import Grid
@@ -111,3 +112,157 @@ def test_top_traction_free_annuls_rigid_rotation_for_inclined_faults():
             rows.append(kux)
 
         assert np.max(np.abs(residual[rows])) < 1e-18
+
+
+def test_stretched_traction_rows_do_not_depend_on_case_name():
+    """Identical geometry and boundary conditions must assemble identical rows."""
+    selected_rows = None
+    reference = None
+
+    for case_type in ("california", "lab", "groningen"):
+        params = ModelParameters(
+            case_type=case_type,
+            Nx=31,
+            Ny=29,
+            xsize=80e3,
+            ysize=60e3,
+            alpha=60.0,
+            x_stretch_enabled=True,
+            y_stretch_enabled=True,
+            x_stretch_inner_size=20e3,
+            y_stretch_inner_size=20e3,
+            x_stretch_inner_points=15,
+            y_stretch_inner_points=11,
+            allow_nonuniform_solver=True,
+            fault_reaches_surface=False,
+            fault_reaches_bottom=False,
+        )
+        params.bc.top.set_traction_free()
+        params.bc.bottom.set_traction_free()
+        grid = Grid(params)
+        builder = MatrixBuilder(params, grid)
+        matrix = builder.build_LH().tocsr()
+
+        if selected_rows is None:
+            ix = 3
+            top_ux, top_uy = builder._dofs(ix, 0, params.Ny)
+            bottom_ux, _ = builder._dofs(ix, params.Ny, params.Ny)
+            _, bottom_uy = builder._dofs(ix, params.Ny - 1, params.Ny)
+            selected_rows = [top_ux, top_uy, bottom_ux, bottom_uy]
+
+        rows = matrix[selected_rows].toarray()
+        if reference is None:
+            reference = rows
+        else:
+            np.testing.assert_allclose(rows, reference, rtol=0.0, atol=0.0)
+
+
+@pytest.mark.parametrize("case_type", ["california", "lab", "groningen"])
+def test_bottom_traction_free_annuls_rigid_rotation_for_inclined_faults(case_type):
+    """The deep zero-traction rows are the bottom mirror of the free surface."""
+    omega = 1e-6
+
+    for alpha in (90.0, 60.0, 30.0):
+        params = ModelParameters(
+            case_type=case_type,
+            Nx=31,
+            Ny=29,
+            xsize=80e3,
+            ysize=60e3,
+            alpha=alpha,
+            x_stretch_enabled=True,
+            y_stretch_enabled=True,
+            x_stretch_inner_size=20e3,
+            y_stretch_inner_size=20e3,
+            x_stretch_inner_points=15,
+            y_stretch_inner_points=11,
+            allow_nonuniform_solver=True,
+        )
+        params.bc.top.set_traction_free()
+        params.bc.bottom.set_traction_free()
+        grid = Grid(params)
+        builder = MatrixBuilder(params, grid)
+
+        ux = -omega * grid.Yux - grid.cosa * omega * grid.Xux / grid.sina
+        uy = omega * grid.Xuy / grid.sina
+
+        U = np.zeros(grid.N)
+        for ix in range(params.Nx + 1):
+            for iy in range(params.Ny + 1):
+                kux, kuy = builder._dofs(ix, iy, params.Ny)
+                if ix < params.Nx:
+                    U[kux] = ux[iy, ix]
+                if iy < params.Ny:
+                    U[kuy] = uy[iy, ix]
+
+        residual = builder.build_LH() @ U
+        mid = params.Nx // 2
+        rows = []
+        for ix in range(1, params.Nx):
+            if not (params.fault_reaches_bottom and ix == mid):
+                _, kuy = builder._dofs(ix, params.Ny - 1, params.Ny)
+                rows.append(kuy)
+        # The side displacement condition owns the two side/bottom corners.
+        for ix in range(1, params.Nx - 1):
+            kux, _ = builder._dofs(ix, params.Ny, params.Ny)
+            rows.append(kux)
+
+        assert np.max(np.abs(residual[rows])) < 1e-14
+
+
+def test_bottom_traction_free_accepts_nonzero_affine_free_traction():
+    """Both bottom traction components vanish for a strained affine field."""
+    for case_type, alpha in (
+        ("california", 90.0),
+        ("california", 60.0),
+        ("california", 30.0),
+        ("groningen", 60.0),
+    ):
+        params = ModelParameters(
+            case_type=case_type,
+            Nx=31,
+            Ny=29,
+            xsize=80e3,
+            ysize=60e3,
+            alpha=alpha,
+        )
+        params.bc.top.set_traction_free()
+        params.bc.bottom.set_traction_free()
+        grid = Grid(params)
+        builder = MatrixBuilder(params, grid)
+
+        exx = 2e-6
+        ux_z = 3e-6
+        uz_x = -ux_z
+        uzz = -params.lam * exx / (params.lam + 2.0 * params.G)
+        physical_z_ux = uz_x * grid.Xux + uzz * grid.Yux
+        physical_z_uy = uz_x * grid.Xuy + uzz * grid.Yuy
+        ux = (
+            exx * grid.Xux
+            + ux_z * grid.Yux
+            - grid.cosa * physical_z_ux / grid.sina
+        )
+        uy = physical_z_uy / grid.sina
+
+        U = np.zeros(grid.N)
+        for ix in range(params.Nx + 1):
+            for iy in range(params.Ny + 1):
+                kux, kuy = builder._dofs(ix, iy, params.Ny)
+                if ix < params.Nx:
+                    U[kux] = ux[iy, ix]
+                if iy < params.Ny:
+                    U[kuy] = uy[iy, ix]
+
+        residual = builder.build_LH() @ U
+        mid = params.Nx // 2
+        rows = []
+        for ix in range(1, params.Nx):
+            if case_type != "california" or ix != mid:
+                _, kuy = builder._dofs(ix, params.Ny - 1, params.Ny)
+                rows.append(kuy)
+        # The side displacement condition owns the two side/bottom corners.
+        for ix in range(1, params.Nx - 1):
+            kux, _ = builder._dofs(ix, params.Ny, params.Ny)
+            rows.append(kux)
+
+        assert np.max(np.abs(residual[rows])) < 1e-14
