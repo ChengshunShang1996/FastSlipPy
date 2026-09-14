@@ -1,7 +1,7 @@
 #/////////////////////////////////////////////////
 __author__      = "Chengshun Shang (Utrecht University)"
 __copyright__   = "Copyright (C) 2026-present by Chengshun Shang"
-__version__     = "0.0.1"
+__version__     = "0.1.3"
 __maintainer__  = "Chengshun Shang"
 __email__       = "c.shang@uu.nl"
 __status__      = "development"
