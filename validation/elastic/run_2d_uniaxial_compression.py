@@ -9,6 +9,7 @@ __date__        = "May 5, 2026"
 __license__     = "MIT License"
 #/////////////////////////////////////////////////
 
+from cProfile import label
 import time
 import numpy as np
 import matplotlib
@@ -93,20 +94,20 @@ class RunFastSlipPy(FastSlipPy):
         strain_yy = -self.p.nu * strain_xx / (1.0 - self.p.nu)
         uy_analytical = strain_yy * (y_sample - self.grid.y[0])
 
-        fig, axes = plt.subplots(2, 1, figsize=(7, 8), sharex=True)
-        axes[0].plot(times, ux_analytical, "k-", linewidth=2,
+        fig, axes = plt.subplots(1, 2, figsize=(10, 5), sharex=True)
+        axes[0].plot(times, ux_analytical, "k-", 
                      label="Analytical")
         axes[0].plot(times[plot_indices],
                      np.asarray(self.comparison_ux)[plot_indices], "o",
-                     color="tab:blue", markersize=4, label="Numerical")
+                     color="tab:blue", label="FastSlipPy")
         axes[0].set_ylabel(r"$u_x$ [m]")
         axes[0].set_title(f"Axial displacement at x = {x_sample:g} m")
 
-        axes[1].plot(times, uy_analytical, "k-", linewidth=2,
+        axes[1].plot(times, uy_analytical, "k-",
                      label="Analytical")
         axes[1].plot(times[plot_indices],
                      np.asarray(self.comparison_uy)[plot_indices], "o",
-                     color="tab:orange", markersize=4, label="Numerical")
+                     color="tab:orange", label="FastSlipPy")
         axes[1].set_xlabel("Time [s]")
         axes[1].set_ylabel(r"$u_y$ [m]")
         axes[1].set_title(f"Poisson displacement at y = {y_sample:g} m")
@@ -129,11 +130,15 @@ class RunFastSlipPy(FastSlipPy):
         strain_xx = (
             self.p.bc.right.ux.value - self.p.bc.left.ux.value
         ) * times / length
-        sigma_xx_analytical = self.p.E * strain_xx / (1.0 - self.p.nu**2)
+        sigma_xx_analytical = (
+            4.0 * self.p.G * (self.p.lam + self.p.G)
+            / (self.p.lam + 2.0 * self.p.G)
+            * strain_xx
+        )
         zero_stress = np.zeros_like(times)
         x_sample = self.grid.xp[1:self.p.Nx][ix_sigma]
 
-        fig, axes = plt.subplots(3, 1, figsize=(7, 10), sharex=True)
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5), sharex=True)
         analytical = (sigma_xx_analytical, zero_stress, zero_stress)
         numerical = (
             self.comparison_sigma_xx,
@@ -145,16 +150,24 @@ class RunFastSlipPy(FastSlipPy):
         for ax, exact, computed, label, color in zip(
             axes, analytical, numerical, labels, colors
         ):
-            ax.plot(times, exact / 1e6, "k-", linewidth=2,
-                    label="Analytical")
-            ax.plot(times[plot_indices],
-                    np.asarray(computed)[plot_indices] / 1e6, "o",
-                    color=color, markersize=4, label="Numerical")
-            ax.set_ylabel(f"{label} [MPa]")
+            if label == r"$\sigma_{yy}$":
+                ax.plot(times, exact, "k-",
+                                    label="Analytical")
+                ax.plot(times[plot_indices],
+                                np.asarray(computed)[plot_indices], "o",
+                                color=color, label="FastSlipPy")
+                ax.set_ylabel(f"{label} [Pa]")
+                ax.set_ylim(-0.1, 0.1)
+            else:
+                ax.plot(times, exact / 1e6, "k-", label="Analytical")
+                ax.plot(times[plot_indices],
+                        np.asarray(computed)[plot_indices] / 1e6, "o",
+                        color=color, label="FastSlipPy")
+                ax.set_ylabel(f"{label} [MPa]")
             ax.grid(True, alpha=0.3)
             ax.legend()
-        axes[0].set_title(f"Stress histories near x = {x_sample:g} m")
-        axes[-1].set_xlabel("Time [s]")
+            ax.set_title(f"Stress histories near x = {x_sample:g} m")
+            ax.set_xlabel("Time [s]")
         fig.tight_layout()
         path = self.output.out / "stress_comparison.png"
         fig.savefig(path, dpi=150)
