@@ -11,6 +11,10 @@ __license__     = "MIT License"
 
 import time
 import numpy as np
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 from fastslippy import FastSlipPy
 from fastslippy.pre_processing.model_parameters import ModelParameters, TimeIntegrator
@@ -19,6 +23,144 @@ class RunFastSlipPy(FastSlipPy):
     """
     This can be customized for specific runs.
     """
+    def _comparison_point_indices(self):
+        """Return staggered-grid indices near (Lx/4, Ly/2)."""
+        x_centre = 0.5 * (self.grid.x[0] + self.grid.x[-1])
+        x_target = 0.5 * (x_centre + self.grid.x[-1])
+        y_target = 0.5 * (self.grid.y[0] + self.grid.y[-1])
+
+        ix_ux = int(np.argmin(np.abs(self.grid.x - x_target)))
+        iy_ux = int(np.argmin(np.abs(self.grid.yp - y_target)))
+        ix_uy = int(np.argmin(np.abs(self.grid.xp - x_target)))
+        iy_uy = int(np.argmin(np.abs(self.grid.y - y_target)))
+        x_sigma = self.grid.xp[1:self.p.Nx]
+        y_sigma = self.grid.yp[1:self.p.Ny]
+        ix_sigma = int(np.argmin(np.abs(x_sigma - x_target)))
+        iy_sigma = int(np.argmin(np.abs(y_sigma - y_target)))
+        return iy_ux, ix_ux, iy_uy, ix_uy, iy_sigma, ix_sigma
+
+    def _record_comparison_point(self, t):
+        """Record displacement and stress at the selected interior location."""
+        iy_ux, ix_ux, iy_uy, ix_uy, iy_sigma, ix_sigma = (
+            self._comparison_point_indices()
+        )
+        self.comparison_times.append(t)
+        self.comparison_ux.append(self.ux[iy_ux, ix_ux])
+        self.comparison_uy.append(self.uy[iy_uy, ix_uy])
+        self.comparison_sigma_xx.append(self.sigmaqs[iy_sigma, ix_sigma])
+
+        dx = self.grid.x[ix_sigma + 1] - self.grid.x[ix_sigma]
+        dy = self.grid.y[iy_sigma + 1] - self.grid.y[iy_sigma]
+        strain_xx = (
+            self.ux[iy_sigma + 1, ix_sigma + 1]
+            - self.ux[iy_sigma + 1, ix_sigma]
+        ) / dx
+        strain_yy = (
+            self.uy[iy_sigma + 1, ix_sigma + 1]
+            - self.uy[iy_sigma, ix_sigma + 1]
+        ) / dy
+        sigma_yy = self.p.lam * strain_xx + (
+            self.p.lam + 2.0 * self.p.G
+        ) * strain_yy
+        self.comparison_sigma_yy.append(sigma_yy)
+
+        x_sample = self.grid.xp[1:self.p.Nx][ix_sigma]
+        y_sample = self.grid.yp[1:self.p.Ny][iy_sigma]
+        ix_tau = int(np.argmin(np.abs(self.grid.x - x_sample)))
+        iy_tau = int(np.argmin(np.abs(self.grid.y - y_sample)))
+        self.comparison_sigma_xy.append(self.tauqs[iy_tau, ix_tau])
+
+    def _comparison_plot_indices(self, max_points=20):
+        """Select sparse history samples while retaining both endpoints."""
+        count = len(self.comparison_times)
+        return np.unique(np.linspace(0, count - 1, min(count, max_points), dtype=int))
+
+    def plot_displacement_comparison(self):
+        """Compare axial and Poisson displacement histories."""
+        _, ix_ux, iy_uy, _, _, _ = self._comparison_point_indices()
+        times = np.asarray(self.comparison_times)
+        plot_indices = self._comparison_plot_indices()
+        length = self.grid.x[-1] - self.grid.x[0]
+        strain_xx = (
+            self.p.bc.right.ux.value - self.p.bc.left.ux.value
+        ) * times / length
+
+        x_sample = self.grid.x[ix_ux]
+        u_left = self.p.bc.left.ux.value * times
+        ux_analytical = u_left + strain_xx * (x_sample - self.grid.x[0])
+
+        y_sample = self.grid.y[iy_uy]
+        strain_yy = -self.p.nu * strain_xx / (1.0 - self.p.nu)
+        uy_analytical = strain_yy * (y_sample - self.grid.y[0])
+
+        fig, axes = plt.subplots(2, 1, figsize=(7, 8), sharex=True)
+        axes[0].plot(times, ux_analytical, "k-", linewidth=2,
+                     label="Analytical")
+        axes[0].plot(times[plot_indices],
+                     np.asarray(self.comparison_ux)[plot_indices], "o",
+                     color="tab:blue", markersize=4, label="Numerical")
+        axes[0].set_ylabel(r"$u_x$ [m]")
+        axes[0].set_title(f"Axial displacement at x = {x_sample:g} m")
+
+        axes[1].plot(times, uy_analytical, "k-", linewidth=2,
+                     label="Analytical")
+        axes[1].plot(times[plot_indices],
+                     np.asarray(self.comparison_uy)[plot_indices], "o",
+                     color="tab:orange", markersize=4, label="Numerical")
+        axes[1].set_xlabel("Time [s]")
+        axes[1].set_ylabel(r"$u_y$ [m]")
+        axes[1].set_title(f"Poisson displacement at y = {y_sample:g} m")
+
+        for ax in axes:
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+        fig.tight_layout()
+        path = self.output.out / "displacement_comparison.png"
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        return path
+
+    def plot_stress_comparison(self):
+        """Compare axial, transverse, and shear-stress histories."""
+        _, _, _, _, _, ix_sigma = self._comparison_point_indices()
+        times = np.asarray(self.comparison_times)
+        plot_indices = self._comparison_plot_indices()
+        length = self.grid.x[-1] - self.grid.x[0]
+        strain_xx = (
+            self.p.bc.right.ux.value - self.p.bc.left.ux.value
+        ) * times / length
+        sigma_xx_analytical = self.p.E * strain_xx / (1.0 - self.p.nu**2)
+        zero_stress = np.zeros_like(times)
+        x_sample = self.grid.xp[1:self.p.Nx][ix_sigma]
+
+        fig, axes = plt.subplots(3, 1, figsize=(7, 10), sharex=True)
+        analytical = (sigma_xx_analytical, zero_stress, zero_stress)
+        numerical = (
+            self.comparison_sigma_xx,
+            self.comparison_sigma_yy,
+            self.comparison_sigma_xy,
+        )
+        labels = (r"$\sigma_{xx}$", r"$\sigma_{yy}$", r"$\sigma_{xy}$")
+        colors = ("tab:blue", "tab:orange", "tab:green")
+        for ax, exact, computed, label, color in zip(
+            axes, analytical, numerical, labels, colors
+        ):
+            ax.plot(times, exact / 1e6, "k-", linewidth=2,
+                    label="Analytical")
+            ax.plot(times[plot_indices],
+                    np.asarray(computed)[plot_indices] / 1e6, "o",
+                    color=color, markersize=4, label="Numerical")
+            ax.set_ylabel(f"{label} [MPa]")
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+        axes[0].set_title(f"Stress histories near x = {x_sample:g} m")
+        axes[-1].set_xlabel("Time [s]")
+        fig.tight_layout()
+        path = self.output.out / "stress_comparison.png"
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        return path
+
     def run(self):
         t0_all = time.perf_counter()
         p = self.p
@@ -72,6 +214,14 @@ class RunFastSlipPy(FastSlipPy):
             )
             self._build_and_factor_LH(dPdt)
 
+        self.comparison_times = []
+        self.comparison_ux = []
+        self.comparison_uy = []
+        self.comparison_sigma_xx = []
+        self.comparison_sigma_yy = []
+        self.comparison_sigma_xy = []
+        self._record_comparison_point(t)
+
         dt_max = p.dt_max
         t2 = max(0.0, t - p.loading.tload) if p.case_type == "groningen" else t
         phase = (
@@ -105,6 +255,7 @@ class RunFastSlipPy(FastSlipPy):
                 self._advance_rk2_midpoint_coupling(dt, dPdt)
 
             t += dt
+            self._record_comparison_point(t)
             if phase == 2:
                 t2 += dt
 
@@ -189,6 +340,8 @@ class RunFastSlipPy(FastSlipPy):
         if p.case_type == "california":
             self.output.write_bp3_outputs(self.grid)
         self.output.close()
+        self.plot_displacement_comparison()
+        self.plot_stress_comparison()
         if p.case_type == "groningen":
             self.figure_creator.plot_results(Nx, shift_y=2000)
         elif p.case_type == "lab":
@@ -206,10 +359,10 @@ if __name__ == "__main__":
     params = ModelParameters(
         case_type = "lab",
         alpha = 90.0,
-        xsize = 2.0,
-        ysize = 1.0,
+        xsize = 0.1,
+        ysize = 0.05,
         Nx=41, Ny=21,
-        Nt=100,
+        Nt=200,
         output_interval=10,
         #tfinal = 10,
         checkpoint_interval=10,
@@ -221,14 +374,14 @@ if __name__ == "__main__":
         flash_heating_option = False
     )
 
-    params.bc.left.ux.set_velocity(1e-2)
+    params.bc.left.ux.set_velocity(1e-4)
     params.bc.left.uy.set_free()
-    params.bc.right.ux.set_velocity(-1e-2)
+    params.bc.right.ux.set_velocity(-1e-4)
     params.bc.right.uy.set_free()
     params.bc.top.ux.set_traction_free()
-    params.bc.top.uy.set_traction_free()
+    params.bc.top.uy.set_fixed()
     params.bc.bottom.ux.set_traction_free()
-    params.bc.bottom.uy.set_fixed()
+    params.bc.bottom.uy.set_traction_free()
 
     params.layers.set_homogeneous(top = 1, bottom = 2, a=params.a0, b=params.b0)
 

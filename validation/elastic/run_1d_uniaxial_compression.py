@@ -315,7 +315,7 @@ if __name__ == "__main__":
         dt_init=0.01,
         dt_max = 0.01,
         nu=0.25,
-        E=2e9, #according to k_critical = sigam * (b-a) / d_c, E = 1e10  ## E=0.55e10 for stick-slip pattern
+        E=1e10, #according to k_critical = sigam * (b-a) / d_c, E = 1e10  ## E=0.55e10 for stick-slip pattern
         flash_heating_option = False,
         Vi = 0.0,
     )
