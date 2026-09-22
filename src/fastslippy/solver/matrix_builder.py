@@ -243,6 +243,49 @@ class MatrixBuilder:
                 g.y, y_uy, y_target, 1, scale * cosa,
             )
 
+        def add_vertical_normal_traction(row, x_target, y_target, scale):
+            """Add ``scale * sigma_xx`` at a vertical boundary."""
+            x_ux = nearest_three_point_stencil(g.x, x_target)
+            y_ux = nearest_three_point_stencil(g.yp, y_target)
+            x_uy = nearest_three_point_stencil(g.xp, x_target)
+            y_uy = nearest_three_point_stencil(g.y, y_target)
+            add_tensor_derivative(
+                row, "ux", g.x, x_ux, x_target, 1,
+                g.yp, y_ux, y_target, 0, scale * (lam + 2.0 * G),
+            )
+            add_tensor_derivative(
+                row, "uy", g.xp, x_uy, x_target, 0,
+                g.y, y_uy, y_target, 1, scale * lam,
+            )
+            add_tensor_derivative(
+                row, "ux", g.x, x_ux, x_target, 0,
+                g.yp, y_ux, y_target, 1, -scale * 2.0 * G * cosa,
+            )
+
+        def add_vertical_shear_traction(row, x_target, y_target, scale):
+            """Add the scaled vertical shear-traction bracket."""
+            x_ux = nearest_three_point_stencil(g.x, x_target)
+            y_ux = nearest_three_point_stencil(g.yp, y_target)
+            x_uy = nearest_three_point_stencil(g.xp, x_target)
+            y_uy = nearest_three_point_stencil(g.y, y_target)
+            a2 = 1.0 - 2.0 * cosa * cosa
+            add_tensor_derivative(
+                row, "uy", g.xp, x_uy, x_target, 1,
+                g.y, y_uy, y_target, 0, scale,
+            )
+            add_tensor_derivative(
+                row, "ux", g.x, x_ux, x_target, 0,
+                g.yp, y_ux, y_target, 1, scale * a2,
+            )
+            add_tensor_derivative(
+                row, "ux", g.x, x_ux, x_target, 1,
+                g.yp, y_ux, y_target, 0, scale * cosa,
+            )
+            add_tensor_derivative(
+                row, "uy", g.xp, x_uy, x_target, 0,
+                g.y, y_uy, y_target, 1, -scale * cosa,
+            )
+
         for ix in range(Nx+1):           # 0 … Nx  (MATLAB 1 … Nx+1)
             for iy in range(Ny+1):       # 0 … Ny
 
@@ -262,6 +305,11 @@ class MatrixBuilder:
                             add(kuy, kuy, 1)
                             if is_california:
                                 add(kuy, kuy + (Ny+1)*2, 1)
+                        elif p.bc.left.uy.type == BCType.TRACTION_FREE:
+                            shear_scale = dx_loc / sina
+                            add_vertical_shear_traction(
+                                kuy, g.xp[0], g.y[iy], shear_scale
+                            )
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.left.uy.type}")
                     elif ix == Nx: #right boundary
@@ -271,6 +319,11 @@ class MatrixBuilder:
                             add(kuy, kuy, 1)
                             if is_california:
                                 add(kuy, kuy - (Ny+1)*2, 1)
+                        elif p.bc.right.uy.type == BCType.TRACTION_FREE:
+                            shear_scale = dx_loc / sina
+                            add_vertical_shear_traction(
+                                kuy, g.xp[-1], g.y[iy], shear_scale
+                            )
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.right.uy.type}")
                     elif iy == 0 and not (
@@ -586,6 +639,11 @@ class MatrixBuilder:
                             add(kux, kux, 1)
                         elif p.bc.left.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux + (Ny+1)*2, -1)
+                        elif p.bc.left.ux.type == BCType.TRACTION_FREE:
+                            normal_scale = dx_loc / G
+                            add_vertical_normal_traction(
+                                kux, g.x[0], g.yp[iy], normal_scale
+                            )
                         else:
                             raise ValueError(f"BC type: {p.bc.left.ux.type} is not supported for left boundary yet.")
                     elif ix == Nx - 1:
@@ -593,6 +651,11 @@ class MatrixBuilder:
                             add(kux, kux, 1)
                         elif p.bc.right.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux - (Ny+1)*2, -1)
+                        elif p.bc.right.ux.type == BCType.TRACTION_FREE:
+                            normal_scale = dx_loc / G
+                            add_vertical_normal_traction(
+                                kux, g.x[-1], g.yp[iy], normal_scale
+                            )
                         else:
                             raise ValueError(f"BC type: {p.bc.right.ux.type} is not supported for right boundary yet.")
                     elif has_fault and is_vertical_fault and ix == mid:

@@ -389,9 +389,9 @@ if __name__ == "__main__":
     )
 
     params.bc.left.ux.set_velocity(1e-4)
-    params.bc.left.uy.set_free()
+    params.bc.left.uy.set_traction_free()
     params.bc.right.ux.set_velocity(-1e-4)
-    params.bc.right.uy.set_free()
+    params.bc.right.uy.set_traction_free()
     params.bc.top.ux.set_traction_free()
     params.bc.top.uy.set_fixed()
     params.bc.bottom.ux.set_traction_free()
