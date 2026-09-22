@@ -242,16 +242,29 @@ class FastSlipPy:
         sigma_fault = self.stress.sigman0 - 0.5 * (sigmal + sigmar)
         return tauqs, sigmaqs, sigma_fault
 
-    def _advance_euler_coupling(self, dt: float, dPdt: float):
-        """Advance one step with the original first-order coupling."""
-        mid = self.p.Nx // 2
-        self.fault.advance(dt, self.tauqs[:, mid], self.stress)
-        self.vx, self.vy = self._solve_elastic_velocity(dPdt, self.fault.V)
+    def _advance_elastic_fields(
+        self, dt: float, vx: np.ndarray, vy: np.ndarray
+    ) -> None:
+        """Accept one Euler elastic-velocity increment and recover stresses.
+
+        This is the elastic-state part of the production Euler coupling.  It
+        is kept separate from fault slip and state evolution so pure-elastic
+        validations can exercise the same integration and stress-recovery
+        path without introducing the rate-and-state subsystem.
+        """
+        self.vx, self.vy = vx, vy
         self.uy += self.vy * dt
         self.ux += self.vx * dt
         self.tauqs, self.sigmaqs, self.fault.sigma = (
             self._stress_from_displacement(self.uy, self.ux)
         )
+
+    def _advance_euler_coupling(self, dt: float, dPdt: float):
+        """Advance one step with the original first-order coupling."""
+        mid = self.p.Nx // 2
+        self.fault.advance(dt, self.tauqs[:, mid], self.stress)
+        vx, vy = self._solve_elastic_velocity(dPdt, self.fault.V)
+        self._advance_elastic_fields(dt, vx, vy)
 
     def _advance_rk2_midpoint_coupling(self, dt: float, dPdt: float):
         """Advance all coupled states using the explicit midpoint rule.

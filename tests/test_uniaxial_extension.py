@@ -84,11 +84,13 @@ def test_uniaxial_extension():
 
     max_tau = np.max(np.abs(tauqs))
 
-    sigma_mean = np.mean(sigmaqs)
-    sigma_std = np.std(sigmaqs)
-
     tau_tol = 1e-10
-    sigma_tol = 1e-10
+    expected_sigma = (params.lam + 2.0 * params.G) * a
 
     assert max_tau < tau_tol
-    assert sigma_std < sigma_tol
+    np.testing.assert_allclose(
+        sigmaqs,
+        expected_sigma,
+        rtol=1e-12,
+        atol=1e-10,
+    )
