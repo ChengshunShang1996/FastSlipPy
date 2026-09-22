@@ -72,6 +72,11 @@ class DirectionBC:
         self.value = value
 
     def set_traction(self, value: float):
+        """Set an outward-traction component rate in Pa/s.
+
+        FastSlipPy solves for velocity, so a nonzero natural boundary value
+        is the time derivative of traction rather than absolute traction.
+        """
         self.type = BCType.TRACTION
         self.value = value
 

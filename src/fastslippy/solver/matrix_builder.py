@@ -305,7 +305,9 @@ class MatrixBuilder:
                             add(kuy, kuy, 1)
                             if is_california:
                                 add(kuy, kuy + (Ny+1)*2, 1)
-                        elif p.bc.left.uy.type == BCType.TRACTION_FREE:
+                        elif p.bc.left.uy.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
                             shear_scale = dx_loc / sina
                             add_vertical_shear_traction(
                                 kuy, g.xp[0], g.y[iy], shear_scale
@@ -319,7 +321,9 @@ class MatrixBuilder:
                             add(kuy, kuy, 1)
                             if is_california:
                                 add(kuy, kuy - (Ny+1)*2, 1)
-                        elif p.bc.right.uy.type == BCType.TRACTION_FREE:
+                        elif p.bc.right.uy.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
                             shear_scale = dx_loc / sina
                             add_vertical_shear_traction(
                                 kuy, g.xp[-1], g.y[iy], shear_scale
@@ -334,7 +338,9 @@ class MatrixBuilder:
                             add(kuy, kuy, 1);  add(kuy, kuy + 2, -1)
                         elif p.bc.top.uy.type == BCType.FIXED or p.bc.top.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
-                        elif p.bc.top.uy.type == BCType.TRACTION_FREE:
+                        elif p.bc.top.uy.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
                             normal_scale = dx_loc / G
                             add_horizontal_normal_traction(
                                 kuy, g.xp[ix], g.y[0], normal_scale
@@ -354,14 +360,18 @@ class MatrixBuilder:
                     elif iy == Ny - 1 and not (
                         fault_reaches_bottom
                         and ix == mid + 1
-                        and p.bc.bottom.uy.type == BCType.TRACTION_FREE
+                            and p.bc.bottom.uy.type in (
+                                BCType.TRACTION, BCType.TRACTION_FREE
+                            )
                     ):
                         if p.bc.bottom.uy.type == BCType.FIXED or p.bc.bottom.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
                         elif p.bc.bottom.uy.type == BCType.FREE:
                             #add(kuy, kuy, 1);  add(kuy, kuy - (Ny+1)*2, -1)
                             add(kuy, kuy, 1);  add(kuy, kuy - 2, -1)
-                        elif p.bc.bottom.uy.type == BCType.TRACTION_FREE:
+                        elif p.bc.bottom.uy.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
                             normal_scale = dx_loc / G
                             add_horizontal_normal_traction(
                                 kuy, g.xp[ix], g.y[-1], normal_scale
@@ -589,7 +599,9 @@ class MatrixBuilder:
                             add(kux, kux, 1)
                         elif p.bc.top.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux + 2, -1)
-                        elif p.bc.top.ux.type == BCType.TRACTION_FREE:
+                        elif p.bc.top.ux.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
                             shear_scale = dx_loc / sina
                             add_horizontal_shear_traction(
                                 kux, g.x[ix], g.y[0], shear_scale
@@ -600,7 +612,9 @@ class MatrixBuilder:
                         iy == Ny
                         and fault_reaches_bottom
                         and ix == mid
-                        and p.bc.bottom.ux.type == BCType.TRACTION_FREE
+                        and p.bc.bottom.ux.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        )
                     ):
                         # Fault-line ghost below the deep boundary.  At this
                         # corner the fault-interface trace and the horizontal
@@ -627,7 +641,9 @@ class MatrixBuilder:
                                 add(kux, kux - 2, 1)
                         elif p.bc.bottom.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux - 2, -1)
-                        elif p.bc.bottom.ux.type == BCType.TRACTION_FREE:
+                        elif p.bc.bottom.ux.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
                             shear_scale = dx_loc / sina
                             add_horizontal_shear_traction(
                                 kux, g.x[ix], g.y[-1], shear_scale
@@ -639,7 +655,9 @@ class MatrixBuilder:
                             add(kux, kux, 1)
                         elif p.bc.left.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux + (Ny+1)*2, -1)
-                        elif p.bc.left.ux.type == BCType.TRACTION_FREE:
+                        elif p.bc.left.ux.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
                             normal_scale = dx_loc / G
                             add_vertical_normal_traction(
                                 kux, g.x[0], g.yp[iy], normal_scale
@@ -651,7 +669,9 @@ class MatrixBuilder:
                             add(kux, kux, 1)
                         elif p.bc.right.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux - (Ny+1)*2, -1)
-                        elif p.bc.right.ux.type == BCType.TRACTION_FREE:
+                        elif p.bc.right.ux.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
                             normal_scale = dx_loc / G
                             add_vertical_normal_traction(
                                 kux, g.x[-1], g.yp[iy], normal_scale
@@ -838,19 +858,46 @@ class MatrixBuilder:
         is_groningen = self._case_type == "groningen"
         has_fault = p.fault_mode is not FaultMode.NONE
 
+        top_uy_indices = self._ix_uy_y_boundaries
+        bottom_uy_indices = self._ix_uy_y_boundaries
+        top_ux_indices = self._ix_ux_all
+        bottom_ux_indices = self._ix_ux_all
+        if has_fault and p.fault_reaches_surface:
+            top_uy_indices = top_uy_indices[
+                (top_uy_indices != mid) & (top_uy_indices != mid + 1)
+            ]
+            top_ux_indices = top_ux_indices[top_ux_indices != mid]
+        if has_fault and p.fault_reaches_bottom:
+            bottom_uy_indices = bottom_uy_indices[
+                (bottom_uy_indices != mid) & (bottom_uy_indices != mid + 1)
+            ]
+            bottom_ux_indices = bottom_ux_indices[bottom_ux_indices != mid]
+
         # --- uy block (exact branch priority) ---
         if p.bc.left.uy.type == BCType.VELOCITY:
             factor = 2.0 if is_california else 1.0
             RH[self._kuy[:, 0]] = factor * p.bc.left.uy.value
+        elif p.bc.left.uy.type == BCType.TRACTION:
+            RH[self._kuy[:, 0]] = (
+                -dx_xuy[0] / G * p.bc.left.uy.value
+            )
         if p.bc.right.uy.type == BCType.VELOCITY:
             factor = 2.0 if is_california else 1.0
             RH[self._kuy[:, Nx]] = factor * p.bc.right.uy.value
+        elif p.bc.right.uy.type == BCType.TRACTION:
+            RH[self._kuy[:, Nx]] = (
+                dx_xuy[-1] / G * p.bc.right.uy.value
+            )
 
         if p.bc.top.uy.type == BCType.VELOCITY:
             if is_lab and has_fault:
                 RH[self._kuy[0, mid + 1:Nx]] = p.bc.top.uy.value
             else:
                 RH[self._kuy[0, self._ix_uy_y_boundaries]] = p.bc.top.uy.value
+        elif p.bc.top.uy.type == BCType.TRACTION:
+            RH[self._kuy[0, top_uy_indices]] = (
+                -dx_xuy[top_uy_indices] / G * p.bc.top.uy.value
+            )
 
         if p.bc.bottom.uy.type == BCType.VELOCITY:
             if is_lab and has_fault:
@@ -862,6 +909,10 @@ class MatrixBuilder:
                 RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.bottom.uy.value
             else:
                 RH[self._kuy[Ny - 1, self._ix_uy_y_boundaries]] = p.bc.bottom.uy.value
+        elif p.bc.bottom.uy.type == BCType.TRACTION:
+            RH[self._kuy[Ny - 1, bottom_uy_indices]] = (
+                dx_xuy[bottom_uy_indices] / G * p.bc.bottom.uy.value
+            )
 
         iy_int = self._iy_int
         if has_fault:
@@ -900,17 +951,33 @@ class MatrixBuilder:
         # --- ux block (exact branch priority) ---
         if p.bc.top.ux.type == BCType.VELOCITY:
             RH[self._kux[0, self._ix_ux_all]] = p.bc.top.ux.value
+        elif p.bc.top.ux.type == BCType.TRACTION:
+            RH[self._kux[0, top_ux_indices]] = (
+                -dx_xux[top_ux_indices] / G * p.bc.top.ux.value
+            )
         if p.bc.bottom.ux.type == BCType.VELOCITY:
             if is_california: #TODO: should be removed later, as it is not used
                 RH[self._kux[Ny, :mid]] = -p.bc.bottom.ux.value
                 RH[self._kux[Ny, mid + 1:]] = p.bc.bottom.ux.value
             else:
                 RH[self._kux[Ny, self._ix_ux_all]] = p.bc.bottom.ux.value
+        elif p.bc.bottom.ux.type == BCType.TRACTION:
+            RH[self._kux[Ny, bottom_ux_indices]] = (
+                dx_xux[bottom_ux_indices] / G * p.bc.bottom.ux.value
+            )
 
         if p.bc.left.ux.type == BCType.VELOCITY:
             RH[self._kux[:, 0]] = p.bc.left.ux.value
+        elif p.bc.left.ux.type == BCType.TRACTION:
+            RH[self._kux[1:Ny, 0]] = (
+                -dx_xux[0] / G * p.bc.left.ux.value
+            )
         if p.bc.right.ux.type == BCType.VELOCITY:
             RH[self._kux[:, Nx - 1]] = p.bc.right.ux.value
+        elif p.bc.right.ux.type == BCType.TRACTION:
+            RH[self._kux[1:Ny, Nx - 1]] = (
+                dx_xux[-1] / G * p.bc.right.ux.value
+            )
 
         if is_groningen:
             y_int = y[iy_int]
