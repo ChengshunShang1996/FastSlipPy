@@ -18,7 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from fastslippy import FastSlipPy
-from fastslippy.pre_processing.model_parameters import ModelParameters, TimeIntegrator
+from fastslippy.pre_processing.model_parameters import FaultMode, ModelParameters, TimeIntegrator
 
 class RunFastSlipPy(FastSlipPy):
     """
@@ -157,7 +157,7 @@ class RunFastSlipPy(FastSlipPy):
                                 np.asarray(computed)[plot_indices], "o",
                                 color=color, label="FastSlipPy")
                 ax.set_ylabel(f"{label} [Pa]")
-                ax.set_ylim(-0.1, 0.1)
+                #ax.set_ylim(-0.1, 0.1)
             else:
                 ax.plot(times, exact / 1e6, "k-", label="Analytical")
                 ax.plot(times[plot_indices],
@@ -371,6 +371,7 @@ if __name__ == "__main__":
 
     params = ModelParameters(
         case_type = "lab",
+        fault_mode = FaultMode.NONE,
         alpha = 90.0,
         xsize = 0.1,
         ysize = 0.05,

@@ -37,6 +37,11 @@ class SlipRateSolver(str, Enum):
     NEWTON_V2 = "newton_v2"
     BISECTION = "bisection"
 
+class FaultMode(str, Enum):
+    NONE = "none"
+    LOCKED = "locked"
+    FRICTIONAL = "frictional"
+
 class TimeIntegrator(str, Enum):
     EULER = "euler"
     RK2_MIDPOINT = "rk2_midpoint"
@@ -268,6 +273,9 @@ class ModelParameters:
     # explicit positive interval to decouple visualization from checkpoints.
     # Appended here to preserve the positional constructor API.
     vtk_interval: Optional[int] = None
+    # Keep this new option last so existing positional construction remains
+    # backward compatible.
+    fault_mode: FaultMode = FaultMode.FRICTIONAL
 
     def __post_init__(self):
         case_value = (
@@ -314,6 +322,19 @@ class ModelParameters:
             supported = ", ".join(solver.value for solver in SlipRateSolver)
             raise ValueError(
                 f"slip_rate_solver must be one of: {supported}."
+            ) from exc
+
+        fault_mode = (
+            self.fault_mode.value
+            if isinstance(self.fault_mode, FaultMode)
+            else str(self.fault_mode).lower()
+        )
+        try:
+            self.fault_mode = FaultMode(fault_mode)
+        except ValueError as exc:
+            supported = ", ".join(mode.value for mode in FaultMode)
+            raise ValueError(
+                f"fault_mode must be one of: {supported}."
             ) from exc
 
         default_fault_endpoints = self.case_type is CaseType.CALIFORNIA
@@ -372,7 +393,8 @@ class ModelParameters:
             raise ValueError("ilu_fill_factor must be > 0.")
         if not self.ilu_permc_spec:
             raise ValueError("ilu_permc_spec must be a non-empty string.")
-        assert self.Nx % 2 == 1, "Nx must be odd (fault at centre column)."
+        if self.fault_mode is not FaultMode.NONE:
+            assert self.Nx % 2 == 1, "Nx must be odd (fault at centre column)."
         if self.Ny < 4:
             raise ValueError("Ny must provide at least three stress-cell centres.")
         if self.motion_sign not in (-1, 1):

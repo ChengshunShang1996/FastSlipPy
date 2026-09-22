@@ -12,7 +12,7 @@ __license__     = "MIT License"
 import numpy as np
 from scipy import sparse
 
-from fastslippy.pre_processing.model_parameters import ModelParameters, BCType
+from fastslippy.pre_processing.model_parameters import BCType, FaultMode, ModelParameters
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.utilities.grid_operators import (
     build_recovery_operators,
@@ -132,9 +132,10 @@ class MatrixBuilder:
         dy_yux = self._dy_yux
         use_coordinate_nonuniform_operator = not self._is_uniform
         is_california = self._case_type == "california"
+        has_fault = p.fault_mode is not FaultMode.NONE
         is_vertical_fault = np.isclose(cosa, 0.0, rtol=0.0, atol=1.0e-14)
-        fault_reaches_surface = p.fault_reaches_surface
-        fault_reaches_bottom = p.fault_reaches_bottom
+        fault_reaches_surface = has_fault and p.fault_reaches_surface
+        fault_reaches_bottom = has_fault and p.fault_reaches_bottom
         recovery = build_recovery_operators(g.x, g.y, g.xp, g.yp)
 
         rows, cols, vals = [], [], []
@@ -314,10 +315,10 @@ class MatrixBuilder:
                             )
                         else:
                             raise ValueError(f"BC type: {p.bc.bottom.uy.type} is not supported for bottom boundary yet.")
-                    elif ix == mid:
+                    elif has_fault and ix == mid:
                         # Fault left side
                         add(kuy, kuy, -1); add(kuy, kuy + (Ny+1)*2, 1)
-                    elif is_vertical_fault and ix == mid + 1:
+                    elif has_fault and is_vertical_fault and ix == mid + 1:
                         # Preserve the mirror-decoupled row for any vertical
                         # fault; this is a geometric property, not a BP3 one.
                         dx_fault = dx_xuy[ix]
@@ -360,7 +361,7 @@ class MatrixBuilder:
                         add(kuy, kux - (Ny+1)*2 + 2, -cosa)
                         add(kuy, kux - 2*(Ny+1)*2, cosa / 2)
                         add(kuy, kux - 2*(Ny+1)*2 + 2, cosa / 2)
-                    elif ix == mid + 1:
+                    elif has_fault and ix == mid + 1:
                         # Enforce tau(left)-tau(right)=0 using precisely the
                         # same staggered, coordinate-aware operator as
                         # StressCalUtil.compute_stress_fields.
@@ -594,7 +595,7 @@ class MatrixBuilder:
                             add(kux, kux, 1); add(kux, kux - (Ny+1)*2, -1)
                         else:
                             raise ValueError(f"BC type: {p.bc.right.ux.type} is not supported for right boundary yet.")
-                    elif is_vertical_fault and ix == mid:
+                    elif has_fault and is_vertical_fault and ix == mid:
                         # Preserve the mode-II row for any vertical fault.
                         # Replacing it with the recovered-normal row satisfies
                         # a local equality but destroys mirror decoupling.
@@ -614,7 +615,7 @@ class MatrixBuilder:
                         add(kux, kuy + (Ny+1)*2, coefficient)
                         add(kux, kuy - 2, coefficient)
                         add(kux, kuy + (Ny+1)*2 - 2, -coefficient)
-                    elif ix == mid:
+                    elif has_fault and ix == mid:
                         # Enforce equality of the fault-node normal tractions
                         # consumed by the friction law.  sigmaqs is cell
                         # centred, so use the same recovery as the stress path.
@@ -772,6 +773,7 @@ class MatrixBuilder:
         is_lab = self._case_type == "lab"
         is_california = self._case_type == "california"
         is_groningen = self._case_type == "groningen"
+        has_fault = p.fault_mode is not FaultMode.NONE
 
         # --- uy block (exact branch priority) ---
         if p.bc.left.uy.type == BCType.VELOCITY:
@@ -782,15 +784,15 @@ class MatrixBuilder:
             RH[self._kuy[:, Nx]] = factor * p.bc.right.uy.value
 
         if p.bc.top.uy.type == BCType.VELOCITY:
-            if is_lab:
+            if is_lab and has_fault:
                 RH[self._kuy[0, mid + 1:Nx]] = p.bc.top.uy.value
             else:
                 RH[self._kuy[0, self._ix_uy_y_boundaries]] = p.bc.top.uy.value
 
         if p.bc.bottom.uy.type == BCType.VELOCITY:
-            if is_lab:
+            if is_lab and has_fault:
                 RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.bottom.uy.value
-            elif is_california:
+            elif is_california and has_fault:
                 # The two duplicated fault-face uy nodes are mid (left) and
                 # mid+1 (right).  Both must receive the far-field plate rate.
                 RH[self._kuy[Ny - 1, 1:mid + 1]] = -p.bc.bottom.uy.value
@@ -799,11 +801,12 @@ class MatrixBuilder:
                 RH[self._kuy[Ny - 1, self._ix_uy_y_boundaries]] = p.bc.bottom.uy.value
 
         iy_int = self._iy_int
-        RH[self._kuy[iy_int, mid]] = V[iy_int]
-        if p.fault_reaches_surface:
-            RH[self._kuy[0, mid]] = V[0]
-        if p.fault_reaches_bottom:
-            RH[self._kuy[Ny - 1, mid]] = V[Ny - 1]
+        if has_fault:
+            RH[self._kuy[iy_int, mid]] = V[iy_int]
+            if p.fault_reaches_surface:
+                RH[self._kuy[0, mid]] = V[0]
+            if p.fault_reaches_bottom:
+                RH[self._kuy[Ny - 1, mid]] = V[Ny - 1]
 
         if is_groningen:
             y_int = y[iy_int]
