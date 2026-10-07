@@ -279,7 +279,7 @@ def test_newton_v2_solves_both_velocity_branches_after_large_stress_step():
         assert np.all(np.signbit(fault.V) == (sign < 0.0))
         exponent = (
             params.mu0
-            + friction.b * np.log(params.V0 * fault.theta / params.D_rs)
+            + friction.b * np.log(params.V0 * fault.theta / friction.D_rs)
         ) / friction.a
         residual = (
             fault.sigma * friction.a

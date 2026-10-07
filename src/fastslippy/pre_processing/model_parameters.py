@@ -14,7 +14,7 @@ import numpy as np
 from enum import Enum
 from dataclasses import dataclass, field
 from typing import Optional
-from fastslippy.pre_processing.layer_parameters import Layer, LayerParameters
+from fastslippy.pre_processing.layer_parameters import LayerParameters
 
 class CaseType(str, Enum):
     GRONINGEN = "groningen"
@@ -135,14 +135,6 @@ class BoundaryConditions:
         self.right.set_free()
         self.top.set_free()
         self.bottom.set_free()
-
-@dataclass
-class Layer:
-    name: str
-    top: float
-    bottom: float
-    a: float
-    b: float
 
 @dataclass
 class LoadingConditions:
@@ -410,6 +402,8 @@ class ModelParameters:
             raise ValueError("ksi_scale must be finite and positive.")
         if self.friction_tolerance < 0.0:
             raise ValueError("friction_tolerance must be non-negative.")
+        if not np.isfinite(self.D_rs) or self.D_rs <= 0.0:
+            raise ValueError("D_rs must be finite and positive.")
         if self.x_stretch_enabled:
             if not (0.0 < self.x_stretch_inner_size < self.xsize):
                 raise ValueError("x_stretch_inner_size must be in (0, xsize).")

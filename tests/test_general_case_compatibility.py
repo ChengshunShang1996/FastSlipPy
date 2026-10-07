@@ -81,7 +81,7 @@ def test_case_type_and_default_lab_friction_are_general(case_value):
     assert params.case_type is CaseType.LAB
     np.testing.assert_allclose(friction.a, params.a0)
     np.testing.assert_allclose(friction.b, params.b0)
-    np.testing.assert_allclose(fault.theta, params.D_rs / params.V0)
+    np.testing.assert_allclose(fault.theta, friction.D_rs / params.V0)
     assert params.slip_rate_solver is SlipRateSolver.NEWTON_V2
     assert params.time_integrator is TimeIntegrator.EULER
 
@@ -206,7 +206,7 @@ def test_newton_v2_solves_signed_friction_roots_for_lab_case():
     target_velocity[1::2] *= -1.0
     exponent = (
         params.mu0
-        + friction.b * np.log(params.V0 * fault.theta / params.D_rs)
+        + friction.b * np.log(params.V0 * fault.theta / friction.D_rs)
     ) / friction.a
     driving_stress = (
         fault.sigma * friction.a

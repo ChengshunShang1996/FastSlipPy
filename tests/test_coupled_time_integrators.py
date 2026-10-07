@@ -249,7 +249,7 @@ def test_saved_fault_fields_are_at_the_same_time_level(tmp_path, integrator):
         exponent = (
             p.mu0
             + model.fric.b * np.log(
-                p.V0 * checkpoint["theta"] / p.D_rs
+                p.V0 * checkpoint["theta"] / model.fric.D_rs
             )
         ) / model.fric.a
         friction = (

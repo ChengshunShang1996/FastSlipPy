@@ -11,6 +11,8 @@ __license__     = "MIT License"
 
 
 from dataclasses import dataclass, field
+import math
+from typing import Optional
 
 @dataclass
 class Layer:
@@ -19,15 +21,37 @@ class Layer:
     bottom: float
     a: float
     b: float
+    D_rs: Optional[float] = None
 
 @dataclass
 class LayerParameters:
+    """Depth layers with optional rate-and-state distance overrides.
+
+    When ``D_rs`` is omitted, the layer inherits ``ModelParameters.D_rs``.
+    """
 
     layers: list[Layer] = field(default_factory=list)
 
-    def add(self, name: str, top: float, bottom: float, a: float, b: float):
+    def add(
+        self,
+        name: str,
+        top: float,
+        bottom: float,
+        a: float,
+        b: float,
+        D_rs: Optional[float] = None,
+    ):
+        if D_rs is not None and (not math.isfinite(D_rs) or D_rs <= 0.0):
+            raise ValueError("Layer D_rs must be finite and positive.")
         self.layers.append(
-            Layer(name=name, top=top, bottom=bottom, a=a, b=b)
+            Layer(
+                name=name,
+                top=top,
+                bottom=bottom,
+                a=a,
+                b=b,
+                D_rs=D_rs,
+            )
         )
 
     def clear(self):
@@ -78,6 +102,13 @@ class LayerParameters:
             0.02347,
         )
 
-    def set_homogeneous(self, top, bottom, a, b, ):
+    def set_homogeneous(
+        self,
+        top: float,
+        bottom: float,
+        a: float,
+        b: float,
+        D_rs: Optional[float] = None,
+    ):
         self.clear()
-        self.add("Homogeneous", top, bottom, a, b)
+        self.add("Homogeneous", top, bottom, a, b, D_rs)

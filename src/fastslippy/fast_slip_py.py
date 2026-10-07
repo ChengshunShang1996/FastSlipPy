@@ -148,7 +148,7 @@ class FastSlipPy:
             raise ValueError(f"dy shape {dy_arr.shape} does not match sigma shape {sigman0.shape}.")
         a = fric.a
         b = fric.b
-        k1 = (np.pi / 4.0) * p.G / dy_arr * p.D_rs / a / sigman0
+        k1 = (np.pi / 4.0) * p.G / dy_arr * fric.D_rs / a / sigman0
         k2 = (b - a) / a
         k3 = (k1 - k2)**2 / 4.0 - k1
         k4 = np.minimum(1.0 / (k1 - k2), 0.2)
@@ -164,14 +164,19 @@ class FastSlipPy:
         if self.p.case_type == "california":
             stop = self.fault.california_loading_start_idx()
             if stop > 0:
-                return self.fault.V[:stop], self.ksi[:stop]
-            return self.fault.V, self.ksi
+                return (
+                    self.fault.V[:stop],
+                    self.ksi[:stop],
+                    self.fric.D_rs[:stop],
+                )
+            return self.fault.V, self.ksi, self.fric.D_rs
 
         interior_start = 1
         interior_stop = Ny - 1
         return (
             self.fault.V[interior_start:interior_stop],
             self.ksi[interior_start:interior_stop],
+            self.fric.D_rs[interior_start:interior_stop],
         )
 
     def set_lab_case_velocity_bc(self, p: ModelParameters, t: float):
@@ -453,9 +458,11 @@ class FastSlipPy:
                 self._solve_fault_slip_rate()
 
             # ── adaptive time step ──
-                V_inner, ksi_inner = self._select_adaptive_fault_window()
+                V_inner, ksi_inner, D_rs_inner = (
+                    self._select_adaptive_fault_window()
+                )
                 speed = np.maximum(np.abs(V_inner), np.finfo(float).tiny)
-                dt_cand = np.min(ksi_inner * p.D_rs / speed)
+                dt_cand = np.min(ksi_inner * D_rs_inner / speed)
                 dt_cand = max(dt_cand, 1e-150)
                 dt = min(p.dt_growth * dt, dt_cand, dt_max, p.tfinal - t)
             else:
