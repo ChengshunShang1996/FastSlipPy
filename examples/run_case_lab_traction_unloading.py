@@ -76,6 +76,7 @@ def build_parameters() -> ModelParameters:
         a0=0.012,
         b0=0.0135,
         flash_heating_option=False,
+        sigma0 = 15e6, # Here you define the initial normal stress
     )
 
     # Fix the left side as the horizontal reference and apply a tensile
