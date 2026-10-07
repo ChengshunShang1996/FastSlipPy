@@ -517,7 +517,7 @@ def diagnose_nucleation_stiffness(
     For a displacement mode ``phi``, the incremental failure stress is
     ``delta_tau - mu * delta_sigma_effective``.  Its negative is the elastic
     restoring stiffness.  The generalized eigenvalue compares that stiffness
-    with the local aging-law weakening rate ``sigma * (b-a) / L``.  Ratios
+    with the local aging-law weakening rate ``sigma * (b-a) / D_rs``.  Ratios
     below one identify spatial modes that are softer than this quasistatic
     nucleation criterion; they are a diagnostic, not by themselves proof of a
     dynamic instability.
@@ -714,13 +714,13 @@ def rate_state_friction_coefficient(
     b: float,
     mu0: float,
     V0: float,
-    L: float,
+    D_rs: float,
 ) -> float:
     """Regularised BP3 rate-and-state coefficient for positive velocity."""
 
     if velocity <= 0.0 or theta <= 0.0:
         raise ValueError("velocity and theta must be positive.")
-    exponent = (mu0 + b * np.log(V0 * theta / L)) / a
+    exponent = (mu0 + b * np.log(V0 * theta / D_rs)) / a
     log_argument = np.log(velocity) - np.log(2.0 * V0) + exponent
     return a * _asinh_exponential(float(log_argument))
 
@@ -733,7 +733,7 @@ def signed_rate_state_friction_coefficient_profile(
     b: np.ndarray,
     mu0: float,
     V0: float,
-    L: float,
+    D_rs: float,
 ) -> np.ndarray:
     """Vectorized signed BP3 friction coefficient without overflow."""
     velocity = np.asarray(velocity, dtype=float)
@@ -745,7 +745,7 @@ def signed_rate_state_friction_coefficient_profile(
     if np.any(theta <= 0.0) or np.any(a <= 0.0):
         raise ValueError("theta and a must be positive.")
     speed = np.maximum(np.abs(velocity), np.finfo(float).tiny)
-    exponent = (mu0 + b * np.log(V0 * theta / L)) / a
+    exponent = (mu0 + b * np.log(V0 * theta / D_rs)) / a
     log_argument = np.log(speed / (2.0 * V0)) + exponent
     asinh_argument = np.empty_like(log_argument)
     large = log_argument > 20.0
@@ -765,7 +765,7 @@ def signed_rate_state_friction_derivatives_profile(
     b: np.ndarray,
     mu0: float,
     V0: float,
-    L: float,
+    D_rs: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return ``f``, ``df/dV`` and ``df/dtheta`` for the BP3 friction law."""
 
@@ -777,13 +777,13 @@ def signed_rate_state_friction_derivatives_profile(
         raise ValueError("velocity, theta, a, and b must have identical shapes.")
     if np.any(velocity == 0.0):
         raise ValueError("The friction derivatives require nonzero velocity.")
-    if np.any(theta <= 0.0) or np.any(a <= 0.0) or V0 <= 0.0 or L <= 0.0:
-        raise ValueError("theta, a, V0, and L must be positive.")
+    if np.any(theta <= 0.0) or np.any(a <= 0.0) or V0 <= 0.0 or D_rs <= 0.0:
+        raise ValueError("theta, a, V0, and D_rs must be positive.")
 
     speed = np.abs(velocity)
     log_q_abs = (
         np.log(speed / (2.0 * V0))
-        + (mu0 + b * np.log(V0 * theta / L)) / a
+        + (mu0 + b * np.log(V0 * theta / D_rs)) / a
     )
     q_over_hypot = np.empty_like(log_q_abs)
     nonnegative = log_q_abs >= 0.0
@@ -801,7 +801,7 @@ def signed_rate_state_friction_derivatives_profile(
         b=b,
         mu0=mu0,
         V0=V0,
-        L=L,
+        D_rs=D_rs,
     )
     derivative_velocity = a * q_over_hypot / velocity
     derivative_theta = b * q_over_hypot / theta
@@ -821,7 +821,7 @@ def reduced_rate_state_jacobian(
     b: np.ndarray,
     mu0: float,
     V0: float,
-    L: float,
+    D_rs: float,
     eta: float,
     metric_profile: np.ndarray | None = None,
 ) -> np.ndarray:
@@ -831,7 +831,7 @@ def reduced_rate_state_jacobian(
     The algebraic radiation-damped friction equation is differentiated first,
     then the resulting velocity perturbation is inserted into
     ``delta U dot = delta V`` and
-    ``theta dot = 1 - abs(V) theta / L``.
+    ``theta dot = 1 - abs(V) theta / D_rs``.
 
     This is an instantaneous reduced Jacobian along a non-steady trajectory.
     Its eigenvalues diagnose local growth but do not replace finite-time
@@ -879,7 +879,7 @@ def reduced_rate_state_jacobian(
             b=b,
             mu0=mu0,
             V0=V0,
-            L=L,
+            D_rs=D_rs,
         )
     )
     algebraic_denominator = sigma_effective * friction_velocity + eta
@@ -895,8 +895,8 @@ def reduced_rate_state_jacobian(
 
     slip_rate_from_slip = projector @ slip_to_velocity
     slip_rate_from_theta = projector @ theta_to_velocity
-    aging_velocity_slope = -(theta / L) * np.sign(velocity)
-    aging_theta_slope = -np.abs(velocity) / L
+    aging_velocity_slope = -(theta / D_rs) * np.sign(velocity)
+    aging_theta_slope = -np.abs(velocity) / D_rs
     theta_rate_from_slip = projector @ (
         aging_velocity_slope[:, None] * slip_to_velocity
     )
@@ -910,10 +910,10 @@ def reduced_rate_state_jacobian(
     ])
 
 
-def critical_stiffness(*, sigma0: float, a: float, b: float, L: float) -> float:
-    """Aging-law critical stiffness ``sigma0 * (b-a) / L``."""
+def critical_stiffness(*, sigma0: float, a: float, b: float, D_rs: float) -> float:
+    """Aging-law critical stiffness ``sigma0 * (b-a) / D_rs``."""
 
-    return sigma0 * (b - a) / L
+    return sigma0 * (b - a) / D_rs
 
 
 def simulate_modal_pulse(
@@ -942,9 +942,9 @@ def simulate_modal_pulse(
 
     a = float(params.a0)
     b = float(params.b0)
-    theta_ss = params.L / Vp
+    theta_ss = params.D_rs / Vp
     mu_ss = rate_state_friction_coefficient(
-        Vp, theta_ss, a=a, b=b, mu0=params.mu0, V0=params.V0, L=params.L
+        Vp, theta_ss, a=a, b=b, mu0=params.mu0, V0=params.V0, D_rs=params.D_rs
     )
     tau_ss = params.sigma0 * mu_ss + params.eta * Vp
 
@@ -956,7 +956,7 @@ def simulate_modal_pulse(
         b=b,
         mu0=params.mu0,
         V0=params.V0,
-        L=params.L,
+        D_rs=params.D_rs,
     )
     target_tau = params.sigma0 * mu_target + params.eta * target_velocity
     denominator = modal.tau_coefficient - mu_target * modal.sigma_coefficient
@@ -981,7 +981,7 @@ def simulate_modal_pulse(
                 b=b,
                 mu0=params.mu0,
                 V0=params.V0,
-                L=params.L,
+                D_rs=params.D_rs,
             )
             return sigma * mu + params.eta * velocity - tau
 
@@ -993,7 +993,7 @@ def simulate_modal_pulse(
         upper = np.log(upper_velocity)
         return float(np.exp(brentq(residual, lower, upper, xtol=1e-12, rtol=1e-12)))
 
-    state_time = params.L / Vp
+    state_time = params.D_rs / Vp
     final_time = duration_state_times * state_time
     time = 0.0
     theta = theta_ss
@@ -1008,15 +1008,15 @@ def simulate_modal_pulse(
         velocity = velocities[-1]
         dt = min(
             1.2 * dt,
-            step_fraction * params.L / max(velocity, Vp),
+            step_fraction * params.D_rs / max(velocity, Vp),
             0.02 * state_time,
             final_time - time,
         )
         relative_slip += (velocity - Vp) * dt
 
-        state_exponent = velocity * dt / params.L
+        state_exponent = velocity * dt / params.D_rs
         theta = (
-            params.L / velocity * (1.0 - np.exp(-state_exponent))
+            params.D_rs / velocity * (1.0 - np.exp(-state_exponent))
             + theta * np.exp(-state_exponent)
         )
         time += dt

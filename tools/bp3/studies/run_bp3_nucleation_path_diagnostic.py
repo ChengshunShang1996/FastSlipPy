@@ -144,7 +144,7 @@ def main() -> None:
     parser.add_argument("--velocity-floor", type=float, default=1e-30)
     parser.add_argument("--mu0", type=float, default=0.6)
     parser.add_argument("--V0", type=float, default=1e-6)
-    parser.add_argument("--L", type=float, default=0.008)
+    parser.add_argument("--D-rs", dest="D_rs", type=float, default=0.008)
     parser.add_argument("--a0", type=float, default=0.01)
     parser.add_argument("--a-max", type=float, default=0.025)
     parser.add_argument("--b0", type=float, default=0.015)
@@ -331,7 +331,7 @@ def main() -> None:
                 y, modes, tau_responses, sigma_responses,
                 velocity=velocity[:, index], theta=theta[:, index],
                 sigma_effective=sigma[:, index], a=a, b=b,
-                mu0=args.mu0, V0=args.V0, L=args.L, eta=eta,
+                mu0=args.mu0, V0=args.V0, D_rs=args.D_rs, eta=eta,
                 metric_profile=critical_metric,
             )
             eigenvalues = np.linalg.eigvals(jacobian)
@@ -350,7 +350,7 @@ def main() -> None:
             velocity=velocity[:, index if velocity_index is None else velocity_index],
             theta=theta[:, index if theta_index is None else theta_index],
             sigma_effective=sigma[:, index if sigma_index is None else sigma_index],
-            a=a, b=b, mu0=args.mu0, V0=args.V0, L=args.L,
+            a=a, b=b, mu0=args.mu0, V0=args.V0, D_rs=args.D_rs,
             eta=args.rho * args.cs / 2.0, metric_profile=critical_metric,
         )
         return float(np.max(np.linalg.eigvals(jacobian).real) * SECONDS_PER_YEAR)

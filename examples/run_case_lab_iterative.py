@@ -43,7 +43,7 @@ if __name__ == "__main__":
         V0=1e-6,
         a0=0.012,
         b0=0.0135,
-        L = 2.25e-6,
+        D_rs = 2.25e-6,
         flash_heating_option=False,
         sigma0 = 15e6, # Here you define the initial normal stress
         linear_solver="iterative",

@@ -208,7 +208,7 @@ class ModelParameters:
     a0: float = 0.0012             # Direct effect (homogeneous fallback)
     a_max: float = 0.025           # Maximum direct effect (for California case)
     b0: float = 0.00135            # Evolution effect (homogeneous fallback)
-    L: float = 2.25e-6             # Characteristic slip distance [m]
+    D_rs: float = 2.25e-6          # Rate-and-state characteristic slip distance [m]
     Vw: float = 1e90             # Dynamic weakening velocity [m/s]
     Vi: float = 1e-30            # Initial/background slip rate [m/s]
     flash_heating_option: bool = False  # Whether to include flash heating in the friction law

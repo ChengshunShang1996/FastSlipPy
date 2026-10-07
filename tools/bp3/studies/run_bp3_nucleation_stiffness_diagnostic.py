@@ -82,7 +82,7 @@ def build_parameters(case: MeshCase) -> ModelParameters:
         a0=0.01,
         a_max=0.025,
         b0=0.015,
-        L=0.008,
+        D_rs=0.008,
         Vi=1e-9,
         H=15e3,
         h=3e3,
@@ -330,9 +330,9 @@ def main():
                 b=friction.b,
                 mu0=params.mu0,
                 V0=params.V0,
-                L=params.L,
+                D_rs=params.D_rs,
             )
-            critical = state["sigma"] * (friction.b - friction.a) / params.L
+            critical = state["sigma"] * (friction.b - friction.a) / params.D_rs
             result = diagnose_nucleation_stiffness(
                 response,
                 friction_coefficient=mu,

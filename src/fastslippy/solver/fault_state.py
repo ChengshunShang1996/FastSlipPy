@@ -43,11 +43,11 @@ class FaultState:
                     "logarithm argument."
                 )
             self.theta = (
-                p.L / p.V0
+                p.D_rs / p.V0
                 * np.exp(fric.a / fric.b * np.log(logarg) - p.mu0 / fric.b)
             )
         elif p.case_type == "lab":
-            self.theta = np.full(p.Ny, p.L / p.V0)
+            self.theta = np.full(p.Ny, p.D_rs / p.V0)
         self.sigma = stress.sigman0.copy()
         self.tau   = stress.tau0 - p.eta * self.V
         if p.case_type == "california":
@@ -91,8 +91,8 @@ class FaultState:
         Solve for V at each fault node using the rate-and-state friction law
         (with flash heating):
 
-            σ · a · asinh[ V/(2V₀) · exp((μ₀ + b·ln(V₀θ/L))/a) ]
-                / (1 + L/(Vw·θ))   +   η·V   =   τ_qs + τ₀
+            σ · a · asinh[ V/(2V₀) · exp((μ₀ + b·ln(V₀θ/D_rs))/a) ]
+                / (1 + D_rs/(Vw·θ))   +   η·V   =   τ_qs + τ₀
         """
         p = self.p
         for iy in range(p.Ny):
@@ -102,9 +102,9 @@ class FaultState:
             sig = self.sigma[iy]
 
             def equation(VV):
-                arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
+                arg = (p.mu0 + b_i * np.log(p.V0 * th / p.D_rs)) / a_i
                 friction = sig * a_i * np.arcsinh(VV / (2 * p.V0) * np.exp(arg))
-                flash    = 1 + p.L / p.Vw / th
+                flash    = 1 + p.D_rs / p.Vw / th
                 return friction / flash + p.eta * VV - rhs
 
             # Guard against sign errors in the bracket
@@ -165,10 +165,10 @@ class FaultState:
                 )
 
             exponent = (
-                p.mu0 + b_i * np.log(p.V0 * theta_i / p.L)
+                p.mu0 + b_i * np.log(p.V0 * theta_i / p.D_rs)
             ) / a_i
             flash = (
-                1.0 + p.L / (p.Vw * theta_i)
+                1.0 + p.D_rs / (p.Vw * theta_i)
                 if p.flash_heating_option
                 else 1.0
             )
@@ -315,14 +315,14 @@ class FaultState:
         """
         p = self.p
         speed = np.abs(velocity)
-        x = speed * dt / p.L
+        x = speed * dt / p.D_rs
         expo = x > 1e-6
         theta_new = np.empty_like(theta)
         theta_new[expo] = (
-            p.L / speed[expo] * (1.0 - np.exp(-x[expo]))
+            p.D_rs / speed[expo] * (1.0 - np.exp(-x[expo]))
             + theta[expo] * np.exp(-x[expo]))
         theta_new[~expo] = (theta[~expo]
-            + dt * (1.0 - speed[~expo] * theta[~expo] / p.L))
+            + dt * (1.0 - speed[~expo] * theta[~expo] / p.D_rs))
         return theta_new
 
     def advance(self, dt: float, tauqs_col: np.ndarray, stress: StressState):
@@ -353,10 +353,10 @@ class FaultState:
             th  = self.theta[iy]
             sig = self.sigma[iy]
 
-            arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
+            arg = (p.mu0 + b_i * np.log(p.V0 * th / p.D_rs)) / a_i
 
             if p.flash_heating_option:
-                flash_denom = 1.0 + p.L/(p.Vw*th)
+                flash_denom = 1.0 + p.D_rs/(p.Vw*th)
             else:
                 flash_denom = 1.0
 
@@ -465,11 +465,11 @@ class FaultState:
             theta_i = self.theta[iy]
             sigma_i = self.sigma[iy]
             exponent = (
-                p.mu0 + b_i * np.log(p.V0 * theta_i / p.L)
+                p.mu0 + b_i * np.log(p.V0 * theta_i / p.D_rs)
             ) / a_i
             exp_exponent = np.exp(exponent)
             flash = (
-                1.0 + p.L / (p.Vw * theta_i)
+                1.0 + p.D_rs / (p.Vw * theta_i)
                 if p.flash_heating_option
                 else 1.0
             )
@@ -558,12 +558,12 @@ class FaultState:
             sig = self.sigma[iy]
 
             # 2. Compute state-dependent parameters
-            arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
+            arg = (p.mu0 + b_i * np.log(p.V0 * th / p.D_rs)) / a_i
             exp_arg = np.exp(arg)
 
             # Flash heating modification factor
             if p.flash_heating_option:
-                flash_denom = 1.0 + p.L / (p.Vw * th)
+                flash_denom = 1.0 + p.D_rs / (p.Vw * th)
             else:
                 flash_denom = 1.0
 
@@ -649,7 +649,7 @@ class FaultState:
             th  = self.theta[iy]
             sig = self.sigma[iy]
 
-            arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
+            arg = (p.mu0 + b_i * np.log(p.V0 * th / p.D_rs)) / a_i
             
             lo = 1e-40
             hi = self.V[iy]*2

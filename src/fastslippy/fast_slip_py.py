@@ -148,7 +148,7 @@ class FastSlipPy:
             raise ValueError(f"dy shape {dy_arr.shape} does not match sigma shape {sigman0.shape}.")
         a = fric.a
         b = fric.b
-        k1 = (np.pi / 4.0) * p.G / dy_arr * p.L / a / sigman0
+        k1 = (np.pi / 4.0) * p.G / dy_arr * p.D_rs / a / sigman0
         k2 = (b - a) / a
         k3 = (k1 - k2)**2 / 4.0 - k1
         k4 = np.minimum(1.0 / (k1 - k2), 0.2)
@@ -455,7 +455,7 @@ class FastSlipPy:
             # ── adaptive time step ──
                 V_inner, ksi_inner = self._select_adaptive_fault_window()
                 speed = np.maximum(np.abs(V_inner), np.finfo(float).tiny)
-                dt_cand = np.min(ksi_inner * p.L / speed)
+                dt_cand = np.min(ksi_inner * p.D_rs / speed)
                 dt_cand = max(dt_cand, 1e-150)
                 dt = min(p.dt_growth * dt, dt_cand, dt_max, p.tfinal - t)
             else:

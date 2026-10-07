@@ -258,7 +258,7 @@ def main() -> None:
                 frozen_sigma[:, column], response.tau_rate[:, column],
                 response.sigma_effective_rate[:, column],
                 a=friction.a, b=friction.b, mu0=params.mu0,
-                V0=params.V0, L=params.L, eta=eta,
+                V0=params.V0, D_rs=params.D_rs, eta=eta,
             )
             predicted[:, column] = budget.predicted
             shear_terms[:, column] = budget.shear_loading
