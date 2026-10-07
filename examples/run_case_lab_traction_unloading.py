@@ -75,6 +75,7 @@ def build_parameters() -> ModelParameters:
         V0=1.0e-6,
         a0=0.012,
         b0=0.0135,
+        L = 2.25e-6,
         flash_heating_option=False,
         sigma0 = 15e6, # Here you define the initial normal stress
     )
