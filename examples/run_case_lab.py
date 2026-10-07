@@ -53,11 +53,14 @@ if __name__ == "__main__":
         dt_max = 0.01,
         mu0=0.72,
         nu=0.25,
+        #Tip: you can use either G or E
         E=1e12, #according to k_critical = sigam * (b-a) / d_c, E = 1e10  ## E=0.55e10 for stick-slip pattern
         V0 = 1e-6,
         a0 = 0.012,
         b0 = 0.0135,
-        flash_heating_option = False
+        D_rs = 2.25e-6,
+        sigma0 = 15e6, # Here you define the initial normal stress
+        flash_heating_option = False,
     )
 
     params.bc.left.ux.set_fixed()

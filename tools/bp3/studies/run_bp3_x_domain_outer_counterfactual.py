@@ -119,7 +119,7 @@ def build_parameters(
         a0=0.01,
         a_max=0.025,
         b0=0.015,
-        L=0.008,
+        D_rs=0.008,
         Vi=1e-9,
         H=15e3,
         h=3e3,
@@ -554,7 +554,7 @@ def main() -> None:
                 frozen_velocity[:, column], frozen_theta[:, column],
                 frozen_sigma[:, column], tau_rate[:, column],
                 sigma_rate[:, column], a=friction.a, b=friction.b,
-                mu0=params.mu0, V0=params.V0, L=params.L, eta=params.eta,
+                mu0=params.mu0, V0=params.V0, D_rs=params.D_rs, eta=params.eta,
             )
             predicted[:, column] = budget.predicted
             shear_terms[:, column] = budget.shear_loading
@@ -596,7 +596,7 @@ def main() -> None:
                 np.dot(node_weights * mode, coulomb_response) / denominator
             )
             critical_profile = (
-                frozen_sigma[:, column] * (friction.b - friction.a) / params.L
+                frozen_sigma[:, column] * (friction.b - friction.a) / params.D_rs
             )
             critical_stiffness = float(
                 np.dot(node_weights * mode * mode, critical_profile) / denominator

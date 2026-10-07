@@ -23,6 +23,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from fastslippy.pre_processing.model_parameters import (
     CaseType,
+    FaultMode,
     ModelParameters,
     SlipRateSolver,
     TimeIntegrator,
@@ -60,6 +61,8 @@ class FastSlipPy:
         self.stress = StressState(self.p, self.grid.y)
         # Fault state
         self.fault  = FaultState(self.p, self.stress, self.fric, fault_y=self.grid.y)
+        if self.p.fault_mode is not FaultMode.FRICTIONAL:
+            self.fault.V.fill(0.0)
         # ksi for adaptive dt
         self.ksi    = self._build_ksi(self.p, self.fric, self.stress.sigman0, self.grid.dy_fault)
 
@@ -145,7 +148,7 @@ class FastSlipPy:
             raise ValueError(f"dy shape {dy_arr.shape} does not match sigma shape {sigman0.shape}.")
         a = fric.a
         b = fric.b
-        k1 = (np.pi / 4.0) * p.G / dy_arr * p.L / a / sigman0
+        k1 = (np.pi / 4.0) * p.G / dy_arr * fric.D_rs / a / sigman0
         k2 = (b - a) / a
         k3 = (k1 - k2)**2 / 4.0 - k1
         k4 = np.minimum(1.0 / (k1 - k2), 0.2)
@@ -161,14 +164,19 @@ class FastSlipPy:
         if self.p.case_type == "california":
             stop = self.fault.california_loading_start_idx()
             if stop > 0:
-                return self.fault.V[:stop], self.ksi[:stop]
-            return self.fault.V, self.ksi
+                return (
+                    self.fault.V[:stop],
+                    self.ksi[:stop],
+                    self.fric.D_rs[:stop],
+                )
+            return self.fault.V, self.ksi, self.fric.D_rs
 
         interior_start = 1
         interior_stop = Ny - 1
         return (
             self.fault.V[interior_start:interior_stop],
             self.ksi[interior_start:interior_stop],
+            self.fric.D_rs[interior_start:interior_stop],
         )
 
     def set_lab_case_velocity_bc(self, p: ModelParameters, t: float):
@@ -190,6 +198,9 @@ class FastSlipPy:
 
     def _solve_fault_slip_rate(self, tauqs_col: Optional[np.ndarray] = None):
         """Solve the algebraic rate-and-state equation at one time level."""
+        if self.p.fault_mode is not FaultMode.FRICTIONAL:
+            self.fault.V.fill(0.0)
+            return
         if tauqs_col is None:
             tauqs_col = self.tauqs[:, self.p.Nx // 2]
         if self.p.slip_rate_solver is SlipRateSolver.NEWTON_V2:
@@ -206,6 +217,8 @@ class FastSlipPy:
     ) -> tuple[np.ndarray, np.ndarray]:
         """Return ``(vx, vy)`` for a supplied fault-rate stage."""
         p = self.p
+        if p.fault_mode is not FaultMode.FRICTIONAL:
+            fault_velocity = np.zeros_like(self.fault.V)
         RH = self.RH_builder.build_RH(dPdt, fault_velocity)
         solution = self._solve(RH)
         vpx = np.reshape(
@@ -227,7 +240,10 @@ class FastSlipPy:
             p.lam, p.G, self.grid.cosa, self.grid.sina, Ny, Nx,
             x=self.grid.x, y=self.grid.y,
             xp=self.grid.xp, yp=self.grid.yp,
+            fault_enabled=p.fault_mode is not FaultMode.NONE,
         )
+        if p.fault_mode is FaultMode.NONE:
+            return tauqs, sigmaqs, self.stress.sigman0.copy()
         mid_l = (Nx - 1) // 2 - 1
         mid_r = (Nx - 1) // 2
         sigmal, sigmar = self.stress_calculator.recover_fault_normal_stress(
@@ -242,16 +258,35 @@ class FastSlipPy:
         sigma_fault = self.stress.sigman0 - 0.5 * (sigmal + sigmar)
         return tauqs, sigmaqs, sigma_fault
 
-    def _advance_euler_coupling(self, dt: float, dPdt: float):
-        """Advance one step with the original first-order coupling."""
-        mid = self.p.Nx // 2
-        self.fault.advance(dt, self.tauqs[:, mid], self.stress)
-        self.vx, self.vy = self._solve_elastic_velocity(dPdt, self.fault.V)
+    def _advance_elastic_fields(
+        self, dt: float, vx: np.ndarray, vy: np.ndarray
+    ) -> None:
+        """Accept one Euler elastic-velocity increment and recover stresses.
+
+        This is the elastic-state part of the production Euler coupling.  It
+        is kept separate from fault slip and state evolution so pure-elastic
+        validations can exercise the same integration and stress-recovery
+        path without introducing the rate-and-state subsystem.
+        """
+        self.vx, self.vy = vx, vy
         self.uy += self.vy * dt
         self.ux += self.vx * dt
         self.tauqs, self.sigmaqs, self.fault.sigma = (
             self._stress_from_displacement(self.uy, self.ux)
         )
+
+    def _advance_euler_coupling(self, dt: float, dPdt: float):
+        """Advance one step with the original first-order coupling."""
+        if self.p.fault_mode is not FaultMode.FRICTIONAL:
+            vx, vy = self._solve_elastic_velocity(
+                dPdt, np.zeros_like(self.fault.V)
+            )
+            self._advance_elastic_fields(dt, vx, vy)
+            return
+        mid = self.p.Nx // 2
+        self.fault.advance(dt, self.tauqs[:, mid], self.stress)
+        vx, vy = self._solve_elastic_velocity(dPdt, self.fault.V)
+        self._advance_elastic_fields(dt, vx, vy)
 
     def _advance_rk2_midpoint_coupling(self, dt: float, dPdt: float):
         """Advance all coupled states using the explicit midpoint rule.
@@ -262,6 +297,13 @@ class FastSlipPy:
         slip, and state.  Stress and effective normal stress are recovered from
         the accepted end-of-step displacement.
         """
+        if self.p.fault_mode is not FaultMode.FRICTIONAL:
+            vx, vy = self._solve_elastic_velocity(
+                dPdt, np.zeros_like(self.fault.V)
+            )
+            self._advance_elastic_fields(dt, vx, vy)
+            return
+
         theta0 = self.fault.theta.copy()
         slip0 = self.fault.U.copy()
         ux0 = self.ux.copy()
@@ -314,12 +356,15 @@ class FastSlipPy:
         restores the integrator's stage value so the Euler trajectory remains
         backward compatible.
         """
-        stage_velocity = self.fault.V.copy()
-        try:
-            self._solve_fault_slip_rate()
-            velocity = self.fault.V.copy()
-        finally:
-            self.fault.V = stage_velocity
+        if self.p.fault_mode is FaultMode.FRICTIONAL:
+            stage_velocity = self.fault.V.copy()
+            try:
+                self._solve_fault_slip_rate()
+                velocity = self.fault.V.copy()
+            finally:
+                self.fault.V = stage_velocity
+        else:
+            velocity = np.zeros_like(self.fault.V)
         traction = (
             self.tauqs[:, self.p.Nx // 2]
             + self.stress.tau0
@@ -409,14 +454,19 @@ class FastSlipPy:
                 phase = 2
 
             # Algebraic slip rate at the accepted beginning-of-step state.
-            self._solve_fault_slip_rate()
+            if p.fault_mode is FaultMode.FRICTIONAL:
+                self._solve_fault_slip_rate()
 
             # ── adaptive time step ──
-            V_inner, ksi_inner = self._select_adaptive_fault_window()
-            speed = np.maximum(np.abs(V_inner), np.finfo(float).tiny)
-            dt_cand = np.min(ksi_inner * p.L / speed)
-            dt_cand = max(dt_cand, 1e-150)
-            dt = min(p.dt_growth * dt, dt_cand, dt_max, p.tfinal - t)
+                V_inner, ksi_inner, D_rs_inner = (
+                    self._select_adaptive_fault_window()
+                )
+                speed = np.maximum(np.abs(V_inner), np.finfo(float).tiny)
+                dt_cand = np.min(ksi_inner * D_rs_inner / speed)
+                dt_cand = max(dt_cand, 1e-150)
+                dt = min(p.dt_growth * dt, dt_cand, dt_max, p.tfinal - t)
+            else:
+                dt = min(p.dt_init, p.tfinal - t)
             if dt <= 0.0:
                 break
 

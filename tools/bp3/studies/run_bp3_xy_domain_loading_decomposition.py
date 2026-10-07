@@ -233,7 +233,7 @@ def build_parameters(args: argparse.Namespace, case: XYDomainCase) -> ModelParam
         a0=0.01,
         a_max=0.025,
         b0=0.015,
-        L=0.008,
+        D_rs=0.008,
         Vi=1e-9,
         H=15e3,
         h=3e3,
@@ -498,7 +498,7 @@ def main() -> None:
             grid.y,
             creep_start=params.W_f,
             creep_velocity=params.loading.V_L,
-            state_length=params.L,
+            state_length=params.D_rs,
         )
         components = split_fault_velocity_components(
             grid.y,
@@ -577,7 +577,7 @@ def main() -> None:
                 b=friction.b,
                 mu0=params.mu0,
                 V0=params.V0,
-                L=params.L,
+                D_rs=params.D_rs,
                 eta=params.eta,
             )
             predicted_profiles[:, column] = budget.predicted

@@ -35,7 +35,7 @@ def _bp3_parameters(**overrides):
         a0=0.01,
         a_max=0.025,
         b0=0.015,
-        L=0.008,
+        D_rs=0.008,
         Vi=1e-9,
         # Exercise the explicit free-surface/fault-corner friction path;
         # production BP3 runs extrapolate the surface rate.
@@ -279,7 +279,7 @@ def test_newton_v2_solves_both_velocity_branches_after_large_stress_step():
         assert np.all(np.signbit(fault.V) == (sign < 0.0))
         exponent = (
             params.mu0
-            + friction.b * np.log(params.V0 * fault.theta / params.L)
+            + friction.b * np.log(params.V0 * fault.theta / friction.D_rs)
         ) / friction.a
         residual = (
             fault.sigma * friction.a

@@ -12,7 +12,7 @@ __license__     = "MIT License"
 import numpy as np
 from scipy import sparse
 
-from fastslippy.pre_processing.model_parameters import ModelParameters, BCType
+from fastslippy.pre_processing.model_parameters import BCType, FaultMode, ModelParameters
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.utilities.grid_operators import (
     build_recovery_operators,
@@ -132,9 +132,10 @@ class MatrixBuilder:
         dy_yux = self._dy_yux
         use_coordinate_nonuniform_operator = not self._is_uniform
         is_california = self._case_type == "california"
+        has_fault = p.fault_mode is not FaultMode.NONE
         is_vertical_fault = np.isclose(cosa, 0.0, rtol=0.0, atol=1.0e-14)
-        fault_reaches_surface = p.fault_reaches_surface
-        fault_reaches_bottom = p.fault_reaches_bottom
+        fault_reaches_surface = has_fault and p.fault_reaches_surface
+        fault_reaches_bottom = has_fault and p.fault_reaches_bottom
         recovery = build_recovery_operators(g.x, g.y, g.xp, g.yp)
 
         rows, cols, vals = [], [], []
@@ -242,6 +243,49 @@ class MatrixBuilder:
                 g.y, y_uy, y_target, 1, scale * cosa,
             )
 
+        def add_vertical_normal_traction(row, x_target, y_target, scale):
+            """Add ``scale * sigma_xx`` at a vertical boundary."""
+            x_ux = nearest_three_point_stencil(g.x, x_target)
+            y_ux = nearest_three_point_stencil(g.yp, y_target)
+            x_uy = nearest_three_point_stencil(g.xp, x_target)
+            y_uy = nearest_three_point_stencil(g.y, y_target)
+            add_tensor_derivative(
+                row, "ux", g.x, x_ux, x_target, 1,
+                g.yp, y_ux, y_target, 0, scale * (lam + 2.0 * G),
+            )
+            add_tensor_derivative(
+                row, "uy", g.xp, x_uy, x_target, 0,
+                g.y, y_uy, y_target, 1, scale * lam,
+            )
+            add_tensor_derivative(
+                row, "ux", g.x, x_ux, x_target, 0,
+                g.yp, y_ux, y_target, 1, -scale * 2.0 * G * cosa,
+            )
+
+        def add_vertical_shear_traction(row, x_target, y_target, scale):
+            """Add the scaled vertical shear-traction bracket."""
+            x_ux = nearest_three_point_stencil(g.x, x_target)
+            y_ux = nearest_three_point_stencil(g.yp, y_target)
+            x_uy = nearest_three_point_stencil(g.xp, x_target)
+            y_uy = nearest_three_point_stencil(g.y, y_target)
+            a2 = 1.0 - 2.0 * cosa * cosa
+            add_tensor_derivative(
+                row, "uy", g.xp, x_uy, x_target, 1,
+                g.y, y_uy, y_target, 0, scale,
+            )
+            add_tensor_derivative(
+                row, "ux", g.x, x_ux, x_target, 0,
+                g.yp, y_ux, y_target, 1, scale * a2,
+            )
+            add_tensor_derivative(
+                row, "ux", g.x, x_ux, x_target, 1,
+                g.yp, y_ux, y_target, 0, scale * cosa,
+            )
+            add_tensor_derivative(
+                row, "uy", g.xp, x_uy, x_target, 0,
+                g.y, y_uy, y_target, 1, -scale * cosa,
+            )
+
         for ix in range(Nx+1):           # 0 … Nx  (MATLAB 1 … Nx+1)
             for iy in range(Ny+1):       # 0 … Ny
 
@@ -261,6 +305,13 @@ class MatrixBuilder:
                             add(kuy, kuy, 1)
                             if is_california:
                                 add(kuy, kuy + (Ny+1)*2, 1)
+                        elif p.bc.left.uy.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
+                            shear_scale = dx_loc / sina
+                            add_vertical_shear_traction(
+                                kuy, g.xp[0], g.y[iy], shear_scale
+                            )
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.left.uy.type}")
                     elif ix == Nx: #right boundary
@@ -270,6 +321,13 @@ class MatrixBuilder:
                             add(kuy, kuy, 1)
                             if is_california:
                                 add(kuy, kuy - (Ny+1)*2, 1)
+                        elif p.bc.right.uy.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
+                            shear_scale = dx_loc / sina
+                            add_vertical_shear_traction(
+                                kuy, g.xp[-1], g.y[iy], shear_scale
+                            )
                         else:
                             raise ValueError(f"Unknown BC type: {p.bc.right.uy.type}")
                     elif iy == 0 and not (
@@ -280,7 +338,9 @@ class MatrixBuilder:
                             add(kuy, kuy, 1);  add(kuy, kuy + 2, -1)
                         elif p.bc.top.uy.type == BCType.FIXED or p.bc.top.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
-                        elif p.bc.top.uy.type == BCType.TRACTION_FREE:
+                        elif p.bc.top.uy.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
                             normal_scale = dx_loc / G
                             add_horizontal_normal_traction(
                                 kuy, g.xp[ix], g.y[0], normal_scale
@@ -300,24 +360,28 @@ class MatrixBuilder:
                     elif iy == Ny - 1 and not (
                         fault_reaches_bottom
                         and ix == mid + 1
-                        and p.bc.bottom.uy.type == BCType.TRACTION_FREE
+                            and p.bc.bottom.uy.type in (
+                                BCType.TRACTION, BCType.TRACTION_FREE
+                            )
                     ):
                         if p.bc.bottom.uy.type == BCType.FIXED or p.bc.bottom.uy.type == BCType.VELOCITY:
                             add(kuy, kuy, 1)
                         elif p.bc.bottom.uy.type == BCType.FREE:
                             #add(kuy, kuy, 1);  add(kuy, kuy - (Ny+1)*2, -1)
                             add(kuy, kuy, 1);  add(kuy, kuy - 2, -1)
-                        elif p.bc.bottom.uy.type == BCType.TRACTION_FREE:
+                        elif p.bc.bottom.uy.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
                             normal_scale = dx_loc / G
                             add_horizontal_normal_traction(
                                 kuy, g.xp[ix], g.y[-1], normal_scale
                             )
                         else:
                             raise ValueError(f"BC type: {p.bc.bottom.uy.type} is not supported for bottom boundary yet.")
-                    elif ix == mid:
+                    elif has_fault and ix == mid:
                         # Fault left side
                         add(kuy, kuy, -1); add(kuy, kuy + (Ny+1)*2, 1)
-                    elif is_vertical_fault and ix == mid + 1:
+                    elif has_fault and is_vertical_fault and ix == mid + 1:
                         # Preserve the mirror-decoupled row for any vertical
                         # fault; this is a geometric property, not a BP3 one.
                         dx_fault = dx_xuy[ix]
@@ -360,7 +424,7 @@ class MatrixBuilder:
                         add(kuy, kux - (Ny+1)*2 + 2, -cosa)
                         add(kuy, kux - 2*(Ny+1)*2, cosa / 2)
                         add(kuy, kux - 2*(Ny+1)*2 + 2, cosa / 2)
-                    elif ix == mid + 1:
+                    elif has_fault and ix == mid + 1:
                         # Enforce tau(left)-tau(right)=0 using precisely the
                         # same staggered, coordinate-aware operator as
                         # StressCalUtil.compute_stress_fields.
@@ -535,7 +599,9 @@ class MatrixBuilder:
                             add(kux, kux, 1)
                         elif p.bc.top.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux + 2, -1)
-                        elif p.bc.top.ux.type == BCType.TRACTION_FREE:
+                        elif p.bc.top.ux.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
                             shear_scale = dx_loc / sina
                             add_horizontal_shear_traction(
                                 kux, g.x[ix], g.y[0], shear_scale
@@ -546,7 +612,9 @@ class MatrixBuilder:
                         iy == Ny
                         and fault_reaches_bottom
                         and ix == mid
-                        and p.bc.bottom.ux.type == BCType.TRACTION_FREE
+                        and p.bc.bottom.ux.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        )
                     ):
                         # Fault-line ghost below the deep boundary.  At this
                         # corner the fault-interface trace and the horizontal
@@ -573,7 +641,9 @@ class MatrixBuilder:
                                 add(kux, kux - 2, 1)
                         elif p.bc.bottom.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux - 2, -1)
-                        elif p.bc.bottom.ux.type == BCType.TRACTION_FREE:
+                        elif p.bc.bottom.ux.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
                             shear_scale = dx_loc / sina
                             add_horizontal_shear_traction(
                                 kux, g.x[ix], g.y[-1], shear_scale
@@ -585,6 +655,13 @@ class MatrixBuilder:
                             add(kux, kux, 1)
                         elif p.bc.left.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux + (Ny+1)*2, -1)
+                        elif p.bc.left.ux.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
+                            normal_scale = dx_loc / G
+                            add_vertical_normal_traction(
+                                kux, g.x[0], g.yp[iy], normal_scale
+                            )
                         else:
                             raise ValueError(f"BC type: {p.bc.left.ux.type} is not supported for left boundary yet.")
                     elif ix == Nx - 1:
@@ -592,9 +669,16 @@ class MatrixBuilder:
                             add(kux, kux, 1)
                         elif p.bc.right.ux.type == BCType.FREE:
                             add(kux, kux, 1); add(kux, kux - (Ny+1)*2, -1)
+                        elif p.bc.right.ux.type in (
+                            BCType.TRACTION, BCType.TRACTION_FREE
+                        ):
+                            normal_scale = dx_loc / G
+                            add_vertical_normal_traction(
+                                kux, g.x[-1], g.yp[iy], normal_scale
+                            )
                         else:
                             raise ValueError(f"BC type: {p.bc.right.ux.type} is not supported for right boundary yet.")
-                    elif is_vertical_fault and ix == mid:
+                    elif has_fault and is_vertical_fault and ix == mid:
                         # Preserve the mode-II row for any vertical fault.
                         # Replacing it with the recovered-normal row satisfies
                         # a local equality but destroys mirror decoupling.
@@ -614,7 +698,7 @@ class MatrixBuilder:
                         add(kux, kuy + (Ny+1)*2, coefficient)
                         add(kux, kuy - 2, coefficient)
                         add(kux, kuy + (Ny+1)*2 - 2, -coefficient)
-                    elif ix == mid:
+                    elif has_fault and ix == mid:
                         # Enforce equality of the fault-node normal tractions
                         # consumed by the friction law.  sigmaqs is cell
                         # centred, so use the same recovery as the stress path.
@@ -772,38 +856,71 @@ class MatrixBuilder:
         is_lab = self._case_type == "lab"
         is_california = self._case_type == "california"
         is_groningen = self._case_type == "groningen"
+        has_fault = p.fault_mode is not FaultMode.NONE
+
+        top_uy_indices = self._ix_uy_y_boundaries
+        bottom_uy_indices = self._ix_uy_y_boundaries
+        top_ux_indices = self._ix_ux_all
+        bottom_ux_indices = self._ix_ux_all
+        if has_fault and p.fault_reaches_surface:
+            top_uy_indices = top_uy_indices[
+                (top_uy_indices != mid) & (top_uy_indices != mid + 1)
+            ]
+            top_ux_indices = top_ux_indices[top_ux_indices != mid]
+        if has_fault and p.fault_reaches_bottom:
+            bottom_uy_indices = bottom_uy_indices[
+                (bottom_uy_indices != mid) & (bottom_uy_indices != mid + 1)
+            ]
+            bottom_ux_indices = bottom_ux_indices[bottom_ux_indices != mid]
 
         # --- uy block (exact branch priority) ---
         if p.bc.left.uy.type == BCType.VELOCITY:
             factor = 2.0 if is_california else 1.0
             RH[self._kuy[:, 0]] = factor * p.bc.left.uy.value
+        elif p.bc.left.uy.type == BCType.TRACTION:
+            RH[self._kuy[:, 0]] = (
+                -dx_xuy[0] / G * p.bc.left.uy.value
+            )
         if p.bc.right.uy.type == BCType.VELOCITY:
             factor = 2.0 if is_california else 1.0
             RH[self._kuy[:, Nx]] = factor * p.bc.right.uy.value
+        elif p.bc.right.uy.type == BCType.TRACTION:
+            RH[self._kuy[:, Nx]] = (
+                dx_xuy[-1] / G * p.bc.right.uy.value
+            )
 
         if p.bc.top.uy.type == BCType.VELOCITY:
-            if is_lab:
+            if is_lab and has_fault:
                 RH[self._kuy[0, mid + 1:Nx]] = p.bc.top.uy.value
             else:
                 RH[self._kuy[0, self._ix_uy_y_boundaries]] = p.bc.top.uy.value
+        elif p.bc.top.uy.type == BCType.TRACTION:
+            RH[self._kuy[0, top_uy_indices]] = (
+                -dx_xuy[top_uy_indices] / G * p.bc.top.uy.value
+            )
 
         if p.bc.bottom.uy.type == BCType.VELOCITY:
-            if is_lab:
+            if is_lab and has_fault:
                 RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.bottom.uy.value
-            elif is_california:
+            elif is_california and has_fault:
                 # The two duplicated fault-face uy nodes are mid (left) and
                 # mid+1 (right).  Both must receive the far-field plate rate.
                 RH[self._kuy[Ny - 1, 1:mid + 1]] = -p.bc.bottom.uy.value
                 RH[self._kuy[Ny - 1, mid + 1:Nx]] = p.bc.bottom.uy.value
             else:
                 RH[self._kuy[Ny - 1, self._ix_uy_y_boundaries]] = p.bc.bottom.uy.value
+        elif p.bc.bottom.uy.type == BCType.TRACTION:
+            RH[self._kuy[Ny - 1, bottom_uy_indices]] = (
+                dx_xuy[bottom_uy_indices] / G * p.bc.bottom.uy.value
+            )
 
         iy_int = self._iy_int
-        RH[self._kuy[iy_int, mid]] = V[iy_int]
-        if p.fault_reaches_surface:
-            RH[self._kuy[0, mid]] = V[0]
-        if p.fault_reaches_bottom:
-            RH[self._kuy[Ny - 1, mid]] = V[Ny - 1]
+        if has_fault:
+            RH[self._kuy[iy_int, mid]] = V[iy_int]
+            if p.fault_reaches_surface:
+                RH[self._kuy[0, mid]] = V[0]
+            if p.fault_reaches_bottom:
+                RH[self._kuy[Ny - 1, mid]] = V[Ny - 1]
 
         if is_groningen:
             y_int = y[iy_int]
@@ -834,17 +951,33 @@ class MatrixBuilder:
         # --- ux block (exact branch priority) ---
         if p.bc.top.ux.type == BCType.VELOCITY:
             RH[self._kux[0, self._ix_ux_all]] = p.bc.top.ux.value
+        elif p.bc.top.ux.type == BCType.TRACTION:
+            RH[self._kux[0, top_ux_indices]] = (
+                -dx_xux[top_ux_indices] / G * p.bc.top.ux.value
+            )
         if p.bc.bottom.ux.type == BCType.VELOCITY:
             if is_california: #TODO: should be removed later, as it is not used
                 RH[self._kux[Ny, :mid]] = -p.bc.bottom.ux.value
                 RH[self._kux[Ny, mid + 1:]] = p.bc.bottom.ux.value
             else:
                 RH[self._kux[Ny, self._ix_ux_all]] = p.bc.bottom.ux.value
+        elif p.bc.bottom.ux.type == BCType.TRACTION:
+            RH[self._kux[Ny, bottom_ux_indices]] = (
+                dx_xux[bottom_ux_indices] / G * p.bc.bottom.ux.value
+            )
 
         if p.bc.left.ux.type == BCType.VELOCITY:
             RH[self._kux[:, 0]] = p.bc.left.ux.value
+        elif p.bc.left.ux.type == BCType.TRACTION:
+            RH[self._kux[1:Ny, 0]] = (
+                -dx_xux[0] / G * p.bc.left.ux.value
+            )
         if p.bc.right.ux.type == BCType.VELOCITY:
             RH[self._kux[:, Nx - 1]] = p.bc.right.ux.value
+        elif p.bc.right.ux.type == BCType.TRACTION:
+            RH[self._kux[1:Ny, Nx - 1]] = (
+                dx_xux[-1] / G * p.bc.right.ux.value
+            )
 
         if is_groningen:
             y_int = y[iy_int]

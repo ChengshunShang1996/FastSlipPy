@@ -28,13 +28,13 @@ def test_rate_state_budget_closes_for_an_exact_synthetic_balance():
     velocity = 1e-9 * np.exp(growth * time)
     theta = np.full(time.shape, 2e6)
     sigma = np.full(time.shape, 50e6)
-    a, b, mu0, V0, L, eta = 0.01, 0.015, 0.6, 1e-6, 0.008, 4.6e6
-    friction = mu0 + a * np.log(velocity / V0) + b * np.log(V0 * theta / L)
+    a, b, mu0, V0, D_rs, eta = 0.01, 0.015, 0.6, 1e-6, 0.008, 4.6e6
+    friction = mu0 + a * np.log(velocity / V0) + b * np.log(V0 * theta / D_rs)
     traction = sigma * friction + eta * velocity
 
     result = rate_state_log_velocity_budget(
         time, velocity, traction, sigma, theta,
-        a=a, b=b, mu0=mu0, V0=V0, L=L, eta=eta,
+        a=a, b=b, mu0=mu0, V0=V0, D_rs=D_rs, eta=eta,
     )
 
     interior = slice(2, -2)
@@ -49,7 +49,7 @@ def test_rate_state_budget_rejects_nonmonotonic_time():
     with pytest.raises(ValueError, match="strictly increasing"):
         rate_state_log_velocity_budget(
             np.array([0.0, 1.0, 1.0]), values, values, values, values,
-            a=0.01, b=0.015, mu0=0.6, V0=1e-6, L=0.008, eta=1.0,
+            a=0.01, b=0.015, mu0=0.6, V0=1e-6, D_rs=0.008, eta=1.0,
         )
 
 
@@ -64,7 +64,7 @@ def test_frozen_acceleration_uses_aging_law_and_elastic_rates():
 
     result = frozen_rate_state_acceleration(
         velocity, theta, sigma, tau_rate, sigma_rate,
-        a=a, b=b, mu0=0.6, V0=1e-6, L=0.008, eta=4.6e6,
+        a=a, b=b, mu0=0.6, V0=1e-6, D_rs=0.008, eta=4.6e6,
     )
 
     np.testing.assert_allclose(

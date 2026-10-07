@@ -81,12 +81,15 @@ def test_pure_shear():
     # 5. Diagnostics
     # --------------------------------------------------
 
-    tau_std  = np.std(tauqs)
-
     max_sigma = np.max(np.abs(sigmaqs))
 
-    tau_tol = 1e-10
     sigma_tol = 1e-10
+    expected_tau = params.G * gamma
 
-    assert tau_std < tau_tol
+    np.testing.assert_allclose(
+        tauqs,
+        expected_tau,
+        rtol=1e-12,
+        atol=1e-10,
+    )
     assert max_sigma < sigma_tol

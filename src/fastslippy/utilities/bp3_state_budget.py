@@ -97,7 +97,7 @@ def rate_state_log_velocity_budget(
     b: float,
     mu0: float,
     V0: float,
-    L: float,
+    D_rs: float,
     eta: float,
 ) -> LogVelocityBudget:
     r"""Decompose ``d(log|V|)/dt`` using the quasidynamic force balance.
@@ -132,16 +132,16 @@ def rate_state_log_velocity_budget(
         raise ValueError("time must be strictly increasing.")
     if np.any(sigma <= 0.0) or np.any(state <= 0.0):
         raise ValueError("normal_stress and theta must be positive.")
-    constants = (a, b, V0, L, eta)
+    constants = (a, b, V0, D_rs, eta)
     if any(not np.isfinite(value) or value <= 0.0 for value in constants):
-        raise ValueError("a, b, V0, L, and eta must be finite and positive.")
+        raise ValueError("a, b, V0, D_rs, and eta must be finite and positive.")
     if not np.isfinite(mu0):
         raise ValueError("mu0 must be finite.")
 
     speed = np.maximum(np.abs(rate), np.finfo(float).tiny)
     log_speed = np.log(speed)
     log_state = np.log(state)
-    friction = mu0 + a * np.log(speed / V0) + b * np.log(V0 * state / L)
+    friction = mu0 + a * np.log(speed / V0) + b * np.log(V0 * state / D_rs)
     denominator = a * sigma + eta * speed
 
     edge_order = 2
@@ -176,13 +176,13 @@ def frozen_rate_state_acceleration(
     b: np.ndarray,
     mu0: float,
     V0: float,
-    L: float,
+    D_rs: float,
     eta: float,
 ) -> FrozenAccelerationBudget:
     r"""Return the exact instantaneous BP3 ``d(log|V|)/dt`` budget.
 
     This version uses the regularized-asinh friction law implemented by
-    :class:`FaultState` and the aging law ``theta_dot = 1-|V|theta/L``.  The
+    :class:`FaultState` and the aging law ``theta_dot = 1-|V|theta/D_rs``.  The
     supplied traction rates may therefore be replaced by those from another
     spatial discretization without changing the frozen fault state.
     """
@@ -204,16 +204,16 @@ def frozen_rate_state_acceleration(
         raise ValueError("theta and normal_stress must be positive.")
     if np.any(direct <= 0.0) or np.any(evolution <= 0.0):
         raise ValueError("a and b must be positive.")
-    constants = (V0, L, eta)
+    constants = (V0, D_rs, eta)
     if any(not np.isfinite(value) or value <= 0.0 for value in constants):
-        raise ValueError("V0, L, and eta must be finite and positive.")
+        raise ValueError("V0, D_rs, and eta must be finite and positive.")
     if not np.isfinite(mu0):
         raise ValueError("mu0 must be finite.")
 
     speed = np.maximum(np.abs(rate), np.finfo(float).tiny)
     log_q = (
         np.log(speed / (2.0 * V0))
-        + (mu0 + evolution * np.log(V0 * state / L)) / direct
+        + (mu0 + evolution * np.log(V0 * state / D_rs)) / direct
     )
     large = log_q > 20.0
     asinh_q = np.empty_like(log_q)
@@ -232,7 +232,7 @@ def frozen_rate_state_acceleration(
     direct_log_derivative = direct * q_over_hypot
     state_log_derivative = evolution * q_over_hypot
     denominator = sigma * direct_log_derivative + eta * speed
-    theta_log_rate = 1.0 / state - speed / L
+    theta_log_rate = 1.0 / state - speed / D_rs
     shear_term = tau_rate / denominator
     normal_term = -friction * sigma_rate / denominator
     state_term = -sigma * state_log_derivative * theta_log_rate / denominator

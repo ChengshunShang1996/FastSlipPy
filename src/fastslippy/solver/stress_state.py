@@ -51,7 +51,7 @@ class StressState:
 
         elif p.case_type == "lab":
 
-            sigman0 = 0.0 * y + 15e6
+            sigman0 = 0.0 * y + p.sigma0
             tau0 = 0.0 * y  + 1e-30
             Pl0 = 0.0 * y + 1e-30
             Pr0 = 0.0 * y + 1e-30
@@ -59,13 +59,7 @@ class StressState:
         elif p.case_type == "california":
 
             sigman0 = np.full_like(y, p.sigma0, dtype=float)
-            steady_friction = p.a_max * np.arcsinh(
-                p.Vi / (2 * p.V0)
-                * np.exp(
-                    (p.mu0 + p.b0 * np.log(p.V0 / np.abs(p.Vi)))
-                    / p.a_max
-                )
-            )
+            steady_friction = p.a_max * np.arcsinh(p.Vi / (2 * p.V0) * np.exp((p.mu0 + p.b0 * np.log(p.V0 / np.abs(p.Vi))) / p.a_max))
             tau0 = sigman0 * steady_friction + p.eta * p.Vi
             Pl0 = np.zeros_like(y, dtype=float)
             Pr0 = np.zeros_like(y, dtype=float)

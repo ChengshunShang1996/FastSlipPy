@@ -54,7 +54,7 @@ def build_parameters(
         a0=0.01,
         a_max=0.025,
         b0=0.015,
-        L=0.008,
+        D_rs=0.008,
         dt_init=1.0,
         dt_max=1e6,
         dt_growth=1.2,

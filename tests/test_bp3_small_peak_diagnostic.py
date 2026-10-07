@@ -96,26 +96,26 @@ def test_rate_state_friction_derivatives_match_finite_differences():
     b = np.full(3, 0.015)
     friction, derivative_velocity, derivative_theta = (
         signed_rate_state_friction_derivatives_profile(
-            velocity, theta, a=a, b=b, mu0=0.6, V0=1e-6, L=0.008
+            velocity, theta, a=a, b=b, mu0=0.6, V0=1e-6, D_rs=0.008
         )
     )
     velocity_step = velocity * 1e-6
     theta_step = theta * 1e-6
     friction_velocity_plus = signed_rate_state_friction_coefficient_profile(
         velocity + velocity_step, theta, a=a, b=b,
-        mu0=0.6, V0=1e-6, L=0.008,
+        mu0=0.6, V0=1e-6, D_rs=0.008,
     )
     friction_velocity_minus = signed_rate_state_friction_coefficient_profile(
         velocity - velocity_step, theta, a=a, b=b,
-        mu0=0.6, V0=1e-6, L=0.008,
+        mu0=0.6, V0=1e-6, D_rs=0.008,
     )
     friction_theta_plus = signed_rate_state_friction_coefficient_profile(
         velocity, theta + theta_step, a=a, b=b,
-        mu0=0.6, V0=1e-6, L=0.008,
+        mu0=0.6, V0=1e-6, D_rs=0.008,
     )
     friction_theta_minus = signed_rate_state_friction_coefficient_profile(
         velocity, theta - theta_step, a=a, b=b,
-        mu0=0.6, V0=1e-6, L=0.008,
+        mu0=0.6, V0=1e-6, D_rs=0.008,
     )
 
     assert np.all(np.isfinite(friction))
@@ -147,7 +147,7 @@ def test_reduced_rate_state_jacobian_has_expected_shape_and_is_finite():
     jacobian = reduced_rate_state_jacobian(
         y, modes, tau_responses, sigma_responses,
         velocity=velocity, theta=theta, sigma_effective=sigma,
-        a=a, b=b, mu0=0.6, V0=1e-6, L=0.008,
+        a=a, b=b, mu0=0.6, V0=1e-6, D_rs=0.008,
         eta=4.6e6, metric_profile=np.full(y.shape, 1.0),
     )
 
@@ -161,12 +161,12 @@ def test_signed_friction_profile_matches_scalar_rate_state_law():
     a = np.full(velocity.shape, 0.01)
     b = np.full(velocity.shape, 0.015)
     actual = signed_rate_state_friction_coefficient_profile(
-        velocity, theta, a=a, b=b, mu0=0.6, V0=1e-6, L=0.008
+        velocity, theta, a=a, b=b, mu0=0.6, V0=1e-6, D_rs=0.008
     )
     expected = np.array([
         np.sign(value) * rate_state_friction_coefficient(
             abs(value), theta[index], a=a[index], b=b[index],
-            mu0=0.6, V0=1e-6, L=0.008,
+            mu0=0.6, V0=1e-6, D_rs=0.008,
         )
         for index, value in enumerate(velocity)
     ])
@@ -206,7 +206,7 @@ def test_reduced_nucleation_stiffness_modes_satisfy_eigenproblem():
             sigma0=params.sigma0,
             a=params.a0,
             b=params.b0,
-            L=params.L,
+            D_rs=params.D_rs,
         ),
     )
     result = diagnose_nucleation_stiffness(
@@ -275,15 +275,15 @@ def test_near_critical_operator_can_decay_a_small_peak_and_run_away():
     plate_rate = params.loading.V_p
     mu_ss = rate_state_friction_coefficient(
         plate_rate,
-        params.L / plate_rate,
+        params.D_rs / plate_rate,
         a=params.a0,
         b=params.b0,
         mu0=params.mu0,
         V0=params.V0,
-        L=params.L,
+        D_rs=params.D_rs,
     )
     kc = critical_stiffness(
-        sigma0=params.sigma0, a=params.a0, b=params.b0, L=params.L
+        sigma0=params.sigma0, a=params.a0, b=params.b0, D_rs=params.D_rs
     )
 
     candidates = []

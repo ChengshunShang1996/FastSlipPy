@@ -29,7 +29,7 @@ def _small_bp3_parameters(**overrides):
         a0=0.01,
         a_max=0.025,
         b0=0.015,
-        L=0.008,
+        D_rs=0.008,
         Vi=1e-9,
         H=300.0,
         h=100.0,
@@ -249,7 +249,7 @@ def test_saved_fault_fields_are_at_the_same_time_level(tmp_path, integrator):
         exponent = (
             p.mu0
             + model.fric.b * np.log(
-                p.V0 * checkpoint["theta"] / p.L
+                p.V0 * checkpoint["theta"] / model.fric.D_rs
             )
         ) / model.fric.a
         friction = (

@@ -33,7 +33,7 @@ def build_small_bp3_parameters() -> ModelParameters:
         a0=0.01,
         a_max=0.025,
         b0=0.015,
-        L=0.008,
+        D_rs=0.008,
         Vi=1e-9,
         H=8e3,
         h=2e3,
@@ -63,7 +63,7 @@ def build_small_bp3_parameters() -> ModelParameters:
 def main() -> None:
     params = build_small_bp3_parameters()
     response = build_fault_traction_response(params)
-    theta_ss = params.L / params.loading.V_p
+    theta_ss = params.D_rs / params.loading.V_p
     mu_ss = rate_state_friction_coefficient(
         params.loading.V_p,
         theta_ss,
@@ -71,10 +71,10 @@ def main() -> None:
         b=params.b0,
         mu0=params.mu0,
         V0=params.V0,
-        L=params.L,
+        D_rs=params.D_rs,
     )
     kc = critical_stiffness(
-        sigma0=params.sigma0, a=params.a0, b=params.b0, L=params.L
+        sigma0=params.sigma0, a=params.a0, b=params.b0, D_rs=params.D_rs
     )
 
     candidates = []

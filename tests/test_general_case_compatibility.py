@@ -15,6 +15,13 @@ from fastslippy.solver.matrix_builder import MatrixBuilder
 from fastslippy.solver.stress_state import StressState
 
 
+def test_rate_state_characteristic_distance_uses_descriptive_name():
+    params = ModelParameters(D_rs=1.25e-5)
+
+    assert params.D_rs == 1.25e-5
+    assert not hasattr(params, "L")
+
+
 def _lab_parameters(*, stretched: bool = False, **overrides):
     values = dict(
         case_type=CaseType.LAB,
@@ -36,6 +43,8 @@ def _lab_parameters(*, stretched: bool = False, **overrides):
         V0=1e-6,
         a0=0.012,
         b0=0.0135,
+        D_rs = 2.25e-6,
+        sigma0 = 15e6, # Here you define the initial normal stress
     )
     if stretched:
         values.update(
@@ -72,7 +81,7 @@ def test_case_type_and_default_lab_friction_are_general(case_value):
     assert params.case_type is CaseType.LAB
     np.testing.assert_allclose(friction.a, params.a0)
     np.testing.assert_allclose(friction.b, params.b0)
-    np.testing.assert_allclose(fault.theta, params.L / params.V0)
+    np.testing.assert_allclose(fault.theta, friction.D_rs / params.V0)
     assert params.slip_rate_solver is SlipRateSolver.NEWTON_V2
     assert params.time_integrator is TimeIntegrator.EULER
 
@@ -197,7 +206,7 @@ def test_newton_v2_solves_signed_friction_roots_for_lab_case():
     target_velocity[1::2] *= -1.0
     exponent = (
         params.mu0
-        + friction.b * np.log(params.V0 * fault.theta / params.L)
+        + friction.b * np.log(params.V0 * fault.theta / friction.D_rs)
     ) / friction.a
     driving_stress = (
         fault.sigma * friction.a
@@ -276,7 +285,7 @@ def test_short_groningen_run_remains_compatible_with_newton_v2(tmp_path):
         mu0=0.3,
         nu=0.15,
         V0=1e-6,
-        L=0.5,
+        D_rs=0.5,
         Vw=1e90,
         Vi=1e-30,
         flash_heating_option=True,

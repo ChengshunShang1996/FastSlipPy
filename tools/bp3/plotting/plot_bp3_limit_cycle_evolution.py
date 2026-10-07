@@ -119,7 +119,7 @@ def configure_phase_axes(
         color="0.45",
         linestyle=":",
         linewidth=1.2,
-        label=r"steady state $V\theta/L=1$",
+        label=r"steady state $V\theta/D_{\mathrm{rs}}=1$",
     )
     axes[3].set_xlabel("Complete cycle number")
     axes[3].set_ylabel("Peak-to-peak recurrence [yr]")

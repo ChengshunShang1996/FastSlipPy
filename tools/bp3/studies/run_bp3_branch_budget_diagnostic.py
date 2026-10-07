@@ -132,7 +132,7 @@ def main() -> None:
                         default=(1.0, 10.0, 30.0, 50.0, 60.0, 68.0))
     parser.add_argument("--mu0", type=float, default=0.6)
     parser.add_argument("--V0", type=float, default=1e-6)
-    parser.add_argument("--L", type=float, default=0.008)
+    parser.add_argument("--D-rs", dest="D_rs", type=float, default=0.008)
     parser.add_argument("--a", type=float, default=0.01)
     parser.add_argument("--b", type=float, default=0.015)
     parser.add_argument("--rho", type=float, default=2670.0)
@@ -195,11 +195,11 @@ def main() -> None:
         ref_events = ref["events"]
         fast_budget = rate_state_log_velocity_budget(
             time, velocity[iy], traction[iy], sigma[iy], theta[iy],
-            a=args.a, b=args.b, mu0=args.mu0, V0=args.V0, L=args.L, eta=eta,
+            a=args.a, b=args.b, mu0=args.mu0, V0=args.V0, D_rs=args.D_rs, eta=eta,
         )
         ref_budget = rate_state_log_velocity_budget(
             ref["time"], ref["velocity"], ref["traction"], ref["sigma"], ref["theta"],
-            a=args.a, b=args.b, mu0=args.mu0, V0=args.V0, L=args.L, eta=eta,
+            a=args.a, b=args.b, mu0=args.mu0, V0=args.V0, D_rs=args.D_rs, eta=eta,
         )
         for age in args.ages_years:
             fast_index = _closest(
@@ -291,7 +291,7 @@ def main() -> None:
         iy = int(np.argmax(velocity[:, index]))
         local_budget = rate_state_log_velocity_budget(
             time, velocity[iy], traction[iy], sigma[iy], theta[iy],
-            a=args.a, b=args.b, mu0=args.mu0, V0=args.V0, L=args.L, eta=eta,
+            a=args.a, b=args.b, mu0=args.mu0, V0=args.V0, D_rs=args.D_rs, eta=eta,
         )
         nucleation_path.append({
             "threshold_ms": threshold,

@@ -33,6 +33,7 @@ class FaultState:
         self.p = p
         Ny = p.Ny
         self._fault_y = None if fault_y is None else np.asarray(fault_y, dtype=float)
+        self.D_rs = np.asarray(fric.D_rs, dtype=float).copy()
         self.U     = np.zeros(Ny)
         self.V     = np.full(Ny, p.Vi)
         if p.case_type == "groningen" or p.case_type == "california":
@@ -43,11 +44,11 @@ class FaultState:
                     "logarithm argument."
                 )
             self.theta = (
-                p.L / p.V0
+                self.D_rs / p.V0
                 * np.exp(fric.a / fric.b * np.log(logarg) - p.mu0 / fric.b)
             )
         elif p.case_type == "lab":
-            self.theta = np.full(p.Ny, p.L / p.V0)
+            self.theta = self.D_rs / p.V0
         self.sigma = stress.sigman0.copy()
         self.tau   = stress.tau0 - p.eta * self.V
         if p.case_type == "california":
@@ -91,20 +92,21 @@ class FaultState:
         Solve for V at each fault node using the rate-and-state friction law
         (with flash heating):
 
-            σ · a · asinh[ V/(2V₀) · exp((μ₀ + b·ln(V₀θ/L))/a) ]
-                / (1 + L/(Vw·θ))   +   η·V   =   τ_qs + τ₀
+            σ · a · asinh[ V/(2V₀) · exp((μ₀ + b·ln(V₀θ/D_rs))/a) ]
+                / (1 + D_rs/(Vw·θ))   +   η·V   =   τ_qs + τ₀
         """
         p = self.p
         for iy in range(p.Ny):
             rhs = tauqs_col[iy] + stress.tau0[iy]
             a_i = fric.a[iy];  b_i = fric.b[iy]
+            D_rs_i = fric.D_rs[iy]
             th  = self.theta[iy]
             sig = self.sigma[iy]
 
             def equation(VV):
-                arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
+                arg = (p.mu0 + b_i * np.log(p.V0 * th / D_rs_i)) / a_i
                 friction = sig * a_i * np.arcsinh(VV / (2 * p.V0) * np.exp(arg))
-                flash    = 1 + p.L / p.Vw / th
+                flash    = 1 + D_rs_i / p.Vw / th
                 return friction / flash + p.eta * VV - rhs
 
             # Guard against sign errors in the bracket
@@ -156,6 +158,7 @@ class FaultState:
 
             a_i = float(fric.a[iy])
             b_i = float(fric.b[iy])
+            D_rs_i = float(fric.D_rs[iy])
             theta_i = float(self.theta[iy])
             sigma_i = float(self.sigma[iy])
             if a_i <= 0.0 or theta_i <= 0.0 or sigma_i <= 0.0:
@@ -165,10 +168,10 @@ class FaultState:
                 )
 
             exponent = (
-                p.mu0 + b_i * np.log(p.V0 * theta_i / p.L)
+                p.mu0 + b_i * np.log(p.V0 * theta_i / D_rs_i)
             ) / a_i
             flash = (
-                1.0 + p.L / (p.Vw * theta_i)
+                1.0 + D_rs_i / (p.Vw * theta_i)
                 if p.flash_heating_option
                 else 1.0
             )
@@ -313,16 +316,18 @@ class FaultState:
         intentionally identical to the original Euler fallback in
         :meth:`advance`, preserving the legacy Euler path.
         """
-        p = self.p
         speed = np.abs(velocity)
-        x = speed * dt / p.L
+        x = speed * dt / self.D_rs
         expo = x > 1e-6
         theta_new = np.empty_like(theta)
         theta_new[expo] = (
-            p.L / speed[expo] * (1.0 - np.exp(-x[expo]))
+            self.D_rs[expo] / speed[expo] * (1.0 - np.exp(-x[expo]))
             + theta[expo] * np.exp(-x[expo]))
         theta_new[~expo] = (theta[~expo]
-            + dt * (1.0 - speed[~expo] * theta[~expo] / p.L))
+            + dt * (
+                1.0
+                - speed[~expo] * theta[~expo] / self.D_rs[~expo]
+            ))
         return theta_new
 
     def advance(self, dt: float, tauqs_col: np.ndarray, stress: StressState):
@@ -350,13 +355,14 @@ class FaultState:
             rhs = tauqs_col[iy] + stress.tau0[iy]
             a_i = fric.a[iy]
             b_i = fric.b[iy]
+            D_rs_i = fric.D_rs[iy]
             th  = self.theta[iy]
             sig = self.sigma[iy]
 
-            arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
+            arg = (p.mu0 + b_i * np.log(p.V0 * th / D_rs_i)) / a_i
 
             if p.flash_heating_option:
-                flash_denom = 1.0 + p.L/(p.Vw*th)
+                flash_denom = 1.0 + D_rs_i / (p.Vw * th)
             else:
                 flash_denom = 1.0
 
@@ -462,14 +468,15 @@ class FaultState:
             rhs = tauqs_col[iy] + stress.tau0[iy]
             a_i = fric.a[iy]
             b_i = fric.b[iy]
+            D_rs_i = fric.D_rs[iy]
             theta_i = self.theta[iy]
             sigma_i = self.sigma[iy]
             exponent = (
-                p.mu0 + b_i * np.log(p.V0 * theta_i / p.L)
+                p.mu0 + b_i * np.log(p.V0 * theta_i / D_rs_i)
             ) / a_i
             exp_exponent = np.exp(exponent)
             flash = (
-                1.0 + p.L / (p.Vw * theta_i)
+                1.0 + D_rs_i / (p.Vw * theta_i)
                 if p.flash_heating_option
                 else 1.0
             )
@@ -554,16 +561,17 @@ class FaultState:
 
             a_i = fric.a[iy]
             b_i = fric.b[iy]
+            D_rs_i = fric.D_rs[iy]
             th  = self.theta[iy]
             sig = self.sigma[iy]
 
             # 2. Compute state-dependent parameters
-            arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
+            arg = (p.mu0 + b_i * np.log(p.V0 * th / D_rs_i)) / a_i
             exp_arg = np.exp(arg)
 
             # Flash heating modification factor
             if p.flash_heating_option:
-                flash_denom = 1.0 + p.L / (p.Vw * th)
+                flash_denom = 1.0 + D_rs_i / (p.Vw * th)
             else:
                 flash_denom = 1.0
 
@@ -646,10 +654,11 @@ class FaultState:
             rhs = tauqs_col[iy] + stress.tau0[iy]
             a_i = fric.a[iy]
             b_i = fric.b[iy]
+            D_rs_i = fric.D_rs[iy]
             th  = self.theta[iy]
             sig = self.sigma[iy]
 
-            arg = (p.mu0 + b_i * np.log(p.V0 * th / p.L)) / a_i
+            arg = (p.mu0 + b_i * np.log(p.V0 * th / D_rs_i)) / a_i
             
             lo = 1e-40
             hi = self.V[iy]*2

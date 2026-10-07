@@ -51,7 +51,7 @@ def build_bp3_parameters() -> ModelParameters:
         a0 = 0.01,
         a_max = 0.025,
         b0 = 0.015,
-        L = 0.008,
+        D_rs = 0.008,
         dt_init = 1.0,
         dt_max = 0.1 * 365 * 24 * 3600.0,
         tfinal = 1500 * 365 * 24 * 3600.0,

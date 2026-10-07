@@ -14,7 +14,7 @@ import numpy as np
 from enum import Enum
 from dataclasses import dataclass, field
 from typing import Optional
-from fastslippy.pre_processing.layer_parameters import Layer, LayerParameters
+from fastslippy.pre_processing.layer_parameters import LayerParameters
 
 class CaseType(str, Enum):
     GRONINGEN = "groningen"
@@ -36,6 +36,11 @@ class IterativeMethod(str, Enum):
 class SlipRateSolver(str, Enum):
     NEWTON_V2 = "newton_v2"
     BISECTION = "bisection"
+
+class FaultMode(str, Enum):
+    NONE = "none"
+    LOCKED = "locked"
+    FRICTIONAL = "frictional"
 
 class TimeIntegrator(str, Enum):
     EULER = "euler"
@@ -67,6 +72,11 @@ class DirectionBC:
         self.value = value
 
     def set_traction(self, value: float):
+        """Set an outward-traction component rate in Pa/s.
+
+        FastSlipPy solves for velocity, so a nonzero natural boundary value
+        is the time derivative of traction rather than absolute traction.
+        """
         self.type = BCType.TRACTION
         self.value = value
 
@@ -125,14 +135,6 @@ class BoundaryConditions:
         self.right.set_free()
         self.top.set_free()
         self.bottom.set_free()
-
-@dataclass
-class Layer:
-    name: str
-    top: float
-    bottom: float
-    a: float
-    b: float
 
 @dataclass
 class LoadingConditions:
@@ -198,7 +200,7 @@ class ModelParameters:
     a0: float = 0.0012             # Direct effect (homogeneous fallback)
     a_max: float = 0.025           # Maximum direct effect (for California case)
     b0: float = 0.00135            # Evolution effect (homogeneous fallback)
-    L: float = 2.25e-6               # Characteristic slip distance [m]
+    D_rs: float = 2.25e-6          # Rate-and-state characteristic slip distance [m]
     Vw: float = 1e90             # Dynamic weakening velocity [m/s]
     Vi: float = 1e-30            # Initial/background slip rate [m/s]
     flash_heating_option: bool = False  # Whether to include flash heating in the friction law
@@ -268,6 +270,9 @@ class ModelParameters:
     # explicit positive interval to decouple visualization from checkpoints.
     # Appended here to preserve the positional constructor API.
     vtk_interval: Optional[int] = None
+    # Keep this new option last so existing positional construction remains
+    # backward compatible.
+    fault_mode: FaultMode = FaultMode.FRICTIONAL
 
     def __post_init__(self):
         case_value = (
@@ -314,6 +319,19 @@ class ModelParameters:
             supported = ", ".join(solver.value for solver in SlipRateSolver)
             raise ValueError(
                 f"slip_rate_solver must be one of: {supported}."
+            ) from exc
+
+        fault_mode = (
+            self.fault_mode.value
+            if isinstance(self.fault_mode, FaultMode)
+            else str(self.fault_mode).lower()
+        )
+        try:
+            self.fault_mode = FaultMode(fault_mode)
+        except ValueError as exc:
+            supported = ", ".join(mode.value for mode in FaultMode)
+            raise ValueError(
+                f"fault_mode must be one of: {supported}."
             ) from exc
 
         default_fault_endpoints = self.case_type is CaseType.CALIFORNIA
@@ -372,7 +390,8 @@ class ModelParameters:
             raise ValueError("ilu_fill_factor must be > 0.")
         if not self.ilu_permc_spec:
             raise ValueError("ilu_permc_spec must be a non-empty string.")
-        assert self.Nx % 2 == 1, "Nx must be odd (fault at centre column)."
+        if self.fault_mode is not FaultMode.NONE:
+            assert self.Nx % 2 == 1, "Nx must be odd (fault at centre column)."
         if self.Ny < 4:
             raise ValueError("Ny must provide at least three stress-cell centres.")
         if self.motion_sign not in (-1, 1):
@@ -383,6 +402,8 @@ class ModelParameters:
             raise ValueError("ksi_scale must be finite and positive.")
         if self.friction_tolerance < 0.0:
             raise ValueError("friction_tolerance must be non-negative.")
+        if not np.isfinite(self.D_rs) or self.D_rs <= 0.0:
+            raise ValueError("D_rs must be finite and positive.")
         if self.x_stretch_enabled:
             if not (0.0 < self.x_stretch_inner_size < self.xsize):
                 raise ValueError("x_stretch_inner_size must be in (0, xsize).")

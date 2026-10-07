@@ -27,7 +27,9 @@ except ImportError:
 
 if _HAS_NUMBA:
     @njit(cache=True)
-    def _compute_stress_fields_uniform_numba(uy, ux, dx, dy, lam, G, cosa, sina):
+    def _compute_stress_fields_uniform_numba(
+        uy, ux, dx, dy, lam, G, cosa, sina, fault_enabled
+    ):
         ny = uy.shape[0]
         nx = uy.shape[1] - 1
 
@@ -85,9 +87,10 @@ if _HAS_NUMBA:
             for j in range(nx):
                 tauqs[i, j] = coef * (term1[i, j] + term2[i, j] + cosa * (mm_duxdx[i, j] - mm_duydy[i, j]))
 
-        mid = nx // 2
-        for i in range(ny):
-            tauqs[i, mid] = 0.5 * (tauqs[i, mid - 1] + tauqs[i, mid + 1])
+        if fault_enabled:
+            mid = nx // 2
+            for i in range(ny):
+                tauqs[i, mid] = 0.5 * (tauqs[i, mid - 1] + tauqs[i, mid + 1])
 
         for i in range(ny - 1):
             for j in range(nx - 1):
@@ -183,7 +186,8 @@ class StressCalUtil:
 
     def compute_stress_fields(self, uy, ux, dx, dy, lam, G, cosa, sina, Ny, Nx,
                               x: Optional[np.ndarray] = None, y: Optional[np.ndarray] = None,
-                              xp: Optional[np.ndarray] = None, yp: Optional[np.ndarray] = None):
+                              xp: Optional[np.ndarray] = None, yp: Optional[np.ndarray] = None,
+                              fault_enabled: bool = True):
         """
         Compute tauqs (Ny × Nx) and sigmaqs (Ny-1 × Nx-1) from displacement fields.
 
@@ -207,7 +211,9 @@ class StressCalUtil:
 
         if use_uniform_fast_path:
             if self._use_numba:
-                return _compute_stress_fields_uniform_numba(uy, ux, dx, dy, lam, G, cosa, sina)
+                return _compute_stress_fields_uniform_numba(
+                    uy, ux, dx, dy, lam, G, cosa, sina, fault_enabled
+                )
 
             ws = self._get_workspace(Ny, Nx)
             term1 = ws["term1"]
@@ -243,8 +249,9 @@ class StressCalUtil:
             mm_duydy *= 0.5
 
             tauqs[:, :] = G / sina * (term1 + term2 + cosa * (mm_duxdx - mm_duydy))
-            mid = Nx // 2
-            tauqs[:, mid] = 0.5 * (tauqs[:, mid - 1] + tauqs[:, mid + 1])
+            if fault_enabled:
+                mid = Nx // 2
+                tauqs[:, mid] = 0.5 * (tauqs[:, mid - 1] + tauqs[:, mid + 1])
 
             np.subtract(ux[1:Ny, 1:], ux[1:Ny, :-1], out=s_term1)
             s_term1 /= dx
@@ -295,9 +302,10 @@ class StressCalUtil:
         # ── Assemble tauqs ──────────────────────────────────────────────────
         tauqs = G / sina * (term1 + term2 + cosa * (mm_duxdx - mm_duydy))  # (Ny, Nx)
 
-        # Interpolate across the fault column (fault sits at mid)
-        mid = Nx // 2    # 0-based centre column index
-        tauqs[:, mid] = (tauqs[:, mid - 1] + tauqs[:, mid + 1]) / 2
+        if fault_enabled:
+            # Interpolate across the fault column (fault sits at mid).
+            mid = Nx // 2    # 0-based centre column index
+            tauqs[:, mid] = (tauqs[:, mid - 1] + tauqs[:, mid + 1]) / 2
 
         # ══ sigmaqs  (Ny-1, Nx-1) ═══════════════════════════════════════════
         s_term1 = np.diff(ux[1:Ny, :], axis=1) / dx_ux[None, :]         # (Ny-1, Nx-1)
