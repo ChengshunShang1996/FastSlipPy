@@ -425,14 +425,15 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
             "No data-source arguments supplied; using the configured "
             "800x160 km, 600x160 km, and DFRA defaults."
         )
-    return parser.parse_args(supplied)
+    args = parser.parse_args(supplied)
+    if args.fps < 1:
+        parser.error("--fps must be positive")
+    return args
 
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_arguments(argv)
 
-    if args.fps < 1:
-        parser.error("--fps must be positive")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     labels = [spec[0] for spec in args.case]
     paths = [Path(spec[1]) for spec in args.case]
