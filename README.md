@@ -10,7 +10,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16282499.svg)](https://doi.org/10.5281/zenodo.16282499)
 -->
 
-FastSlipPy is a scientific software package for modeling dynamic fault slip in induced seismicity. It is designed to simulate the behavior of faults under various stress conditions, providing insights into the mechanisms driving induced earthquakes. The software is based on the Finite Difference Method (FDM).
+FastSlipPy is a scientific software package for modeling quasi-dynamic fault slip in induced seismicity. It is designed to simulate the behavior of faults under various stress conditions, providing insights into the mechanisms driving induced earthquakes. The software is based on the Finite Difference Method (FDM).
 
 The initial version of this software is based on the open-source code [IndNuc][IndNuc_link], which is a Matlab-based code specifically developed for modeling induced seismicity in Groningen area. FastSlipPy has been rewritten in Python to enhance its accessibility and usability, allowing for easier integration with other scientific tools and libraries.
 
@@ -237,7 +237,7 @@ No liability and warranty are provided.
 
 [src_folder]: .src/
 [IndNuc_link]: https://github.com/USustSub/IndNuc
-[release-image]: https://img.shields.io/badge/release-0.1.1-green.svg?style=flat
+[release-image]: https://img.shields.io/badge/release-0.1.3-green.svg?style=flat
 [license-image]: https://img.shields.io/badge/license-MIT-green.svg?style=flat
 [contributing-image]: https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg
 [json_link]: https://www.json.org/
