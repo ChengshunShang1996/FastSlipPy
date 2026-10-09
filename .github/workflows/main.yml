@@ -1,6 +1,13 @@
 name: CI
 
 on:
+  workflow_call:
+    inputs:
+      artifact_retention_days:
+        description: Retention period for built distributions
+        required: false
+        type: number
+        default: 7
   push:
     branches:
       - master
@@ -127,4 +134,4 @@ jobs:
           name: python-package-distributions
           path: dist/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: ${{ inputs.artifact_retention_days || 7 }}
