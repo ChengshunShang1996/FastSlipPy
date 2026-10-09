@@ -46,6 +46,13 @@ before merging to `master`, and limit who can create tags matching `v*`.
    ```
 
 5. Review the workflow run and approve the `pypi` environment deployment.
+6. Test it in a temporal environment:
+
+   ```console
+   python -m venv .venv-release-check
+   .\.venv-release-check\Scripts\python -m pip install fastslippy==0.1.3
+   .\.venv-release-check\Scripts\python -c "from fastslippy import FastSlipPy"
+   ```
 
 PyPI versions are immutable. Never move or reuse a release tag after its files
 have been published. If a PyPI upload succeeds but a later job fails, rerun only
