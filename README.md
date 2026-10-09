@@ -2,7 +2,9 @@
 
 <p align=center><img height="80.0%" width="80.0%" src="https://raw.githubusercontent.com/ChengshunShang1996/FastSlipPy/master/docs/images/logo.png"></p>
 
-![Release][release-image]
+[![CI][ci-image]][ci-link]
+[![PyPI][release-image]][pypi-link]
+[![Python][python-versions-image]][pypi-link]
 ![License][license-image]
 ![Contributing][contributing-image]
 
@@ -22,7 +24,7 @@ The ambitious goal of FastSlipPy is to provide an easy-to-use, efficient, and fl
 ## Table of Contents
 
 - [Main Features](#main-features)
-- [Dependencies](#demgen-dependencies)
+- [Dependencies](#dependencies)
 - [Instructions](#instructions)
   - [Input and Output Files](#input-and-output-files)
   - [Running Simulations](#running-simulations)
@@ -49,11 +51,13 @@ This program can be used for modeling induced seismicity in a fault system. The 
 
 FastSlipPy is fully written in the [Python][python_website] programming language and adopts the Object Oriented Programming (OOP) paradigm to offer modularity and extensibility.
 
-Please make sure you have installed Python3.X.X on your PC. Currently, [Python3.10.X][python310_website] is recommended, as other versions haven't been tested.
+FastSlipPy requires Python 3.9 or newer. Continuous integration currently tests
+Python 3.9 through 3.12 on Linux and Python 3.11 on Windows.
 
 All the required Python libraries will be added automatically. Some of them are:
 
 - numpy
+- scipy
 - matplotlib
 - meshio
 
@@ -231,22 +235,25 @@ The program was initially developed under the context of the FastSlip project. T
 
 ## License
 
-FastSlipPy is licensed under the [MIT license][bsd_license_link],
+FastSlipPy is licensed under the [MIT license][mit_license_link],
 which allows the program to be freely used by anyone for modification, private use, commercial use, and distribution, only requiring the preservation of copyright and license notices.
 No liability and warranty are provided.
 
 [src_folder]: .src/
 [IndNuc_link]: https://github.com/USustSub/IndNuc
-[release-image]: https://img.shields.io/badge/release-0.1.3-green.svg?style=flat
+[ci-image]: https://github.com/ChengshunShang1996/FastSlipPy/actions/workflows/main.yml/badge.svg?branch=master
+[ci-link]: https://github.com/ChengshunShang1996/FastSlipPy/actions/workflows/main.yml
+[release-image]: https://img.shields.io/pypi/v/fastslippy.svg
+[python-versions-image]: https://img.shields.io/pypi/pyversions/fastslippy.svg
+[pypi-link]: https://pypi.org/project/fastslippy/
 [license-image]: https://img.shields.io/badge/license-MIT-green.svg?style=flat
 [contributing-image]: https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg
 [json_link]: https://www.json.org/
-[contribute_link]: https://github.com/ChengshunShang1996/DEMGen/blob/main/CONTRIBUTING.md
-[citation_link]: https://github.com/ChengshunShang1996/DEMGen/blob/main/CITATION.cff
+[contribute_link]: https://github.com/ChengshunShang1996/FastSlipPy/blob/master/CONTRIBUTING.md
+[citation_link]: https://github.com/ChengshunShang1996/FastSlipPy/blob/master/CITATION.cff
 [uu_website]: https://www.uu.nl/en
-[bsd_license_link]: https://choosealicense.com/licenses/bsd-2-clause/
+[mit_license_link]: https://choosealicense.com/licenses/mit/
 [python_website]: https://www.python.org/
-[python310_website]: https://www.python.org/downloads/release/python-3100/
 [examples_link]: ./examples/
 [model_parameters]: ./src/fastslippy/pre_processing/model_parameters.py
 [mengli_link]: https://github.com/limeng-uni
