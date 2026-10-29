@@ -36,7 +36,8 @@ class IterativeMethod(str, Enum):
 class SlipRateSolver(str, Enum):
     NEWTON_V2 = "newton_v2"
     BISECTION = "bisection"
-
+    BISECTION_BP3 = "bisection_bp3"
+    
 class FaultMode(str, Enum):
     NONE = "none"
     LOCKED = "locked"
