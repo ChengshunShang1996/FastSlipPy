@@ -325,7 +325,7 @@ def test_bp3_motion_sign_automatically_controls_internal_loading(tmp_path):
         model.output.close()
 
 
-@pytest.mark.parametrize("slip_rate_solver", ["newton_v2", "bisection"])
+@pytest.mark.parametrize("slip_rate_solver", ["newton_v2", "bisection_bp3"])
 def test_short_bp3_run_advances_to_exact_final_time(
     tmp_path, slip_rate_solver
 ):
@@ -364,6 +364,8 @@ def test_short_bp3_run_advances_to_exact_final_time(
     model = FastSlipPy(params=params, output_dir=str(tmp_path))
     assert model.grid.is_nonuniform
     model.figure_creator.plot_results = lambda *args, **kwargs: None
+    if slip_rate_solver == "bisection_bp3":
+        slip_rate_solver = "bisection"
     selected_solver = getattr(
         model.fault, f"solve_slip_rate_{slip_rate_solver}"
     )

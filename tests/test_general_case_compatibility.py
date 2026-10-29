@@ -130,7 +130,7 @@ def test_fault_endpoint_ownership_rejects_non_boolean_values(name):
     ("value", "expected"),
     [
         ("newton_v2", SlipRateSolver.NEWTON_V2),
-        ("BISECTION", SlipRateSolver.BISECTION),
+        ("BISECTION_BP3", SlipRateSolver.BISECTION_BP3),
     ],
 )
 def test_slip_rate_solver_input_is_normalized(value, expected):

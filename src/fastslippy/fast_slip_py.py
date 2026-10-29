@@ -204,13 +204,11 @@ class FastSlipPy:
         if tauqs_col is None:
             tauqs_col = self.tauqs[:, self.p.Nx // 2]
         if self.p.slip_rate_solver is SlipRateSolver.NEWTON_V2:
-            self.fault.solve_slip_rate_newton_v2(
-                tauqs_col, self.stress, self.fric
-            )
-        else:
-            self.fault.solve_slip_rate_bisection(
-                tauqs_col, self.stress, self.fric
-            )
+            self.fault.solve_slip_rate_newton_v2(tauqs_col, self.stress, self.fric)
+        elif self.p.slip_rate_solver is SlipRateSolver.BISECTION_BP3:
+            self.fault.solve_slip_rate_bisection(tauqs_col, self.stress, self.fric)
+        else: #BISECTION
+            self.fault.solve_slip_rate(tauqs_col, self.stress, self.fric)
 
     def _solve_elastic_velocity(
         self, dPdt: float, fault_velocity: np.ndarray
