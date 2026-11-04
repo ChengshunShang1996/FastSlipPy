@@ -9,11 +9,12 @@ __date__        = "May 5, 2026"
 __license__     = "MIT License"
 #/////////////////////////////////////////////////
 
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Optional
+
 import numpy as np
 
-from enum import Enum
-from dataclasses import dataclass, field
-from typing import Optional
 from fastslippy.pre_processing.layer_parameters import LayerParameters
 
 class CaseType(str, Enum):
@@ -85,6 +86,81 @@ class DirectionBC:
         self.type = BCType.TRACTION_FREE
         self.value = 0.0
 
+
+@dataclass
+class OptionalDirectionBC:
+    """An optional boundary-condition override for one boundary section."""
+
+    type: Optional[BCType] = None
+    value: float = 0.0
+
+    @property
+    def is_set(self) -> bool:
+        return self.type is not None
+
+    def clear(self):
+        """Remove this override and inherit the whole-face condition again."""
+        self.type = None
+        self.value = 0.0
+
+    def set_fixed(self):
+        self.type = BCType.FIXED
+        self.value = 0.0
+
+    def set_free(self):
+        self.type = BCType.FREE
+        self.value = 0.0
+
+    def set_velocity(self, value: float):
+        self.type = BCType.VELOCITY
+        self.value = value
+
+    def set_traction(self, value: float):
+        """Set an outward-traction component rate in Pa/s."""
+        self.type = BCType.TRACTION
+        self.value = value
+
+    def set_traction_free(self):
+        self.type = BCType.TRACTION_FREE
+        self.value = 0.0
+
+
+@dataclass
+class BoundarySection:
+    """Optional overrides on one side of a horizontal boundary face."""
+
+    ux: OptionalDirectionBC = field(default_factory=OptionalDirectionBC)
+    uy: OptionalDirectionBC = field(default_factory=OptionalDirectionBC)
+
+    def clear(self):
+        self.ux.clear()
+        self.uy.clear()
+
+    def set_fixed(self):
+        self.ux.set_fixed()
+        self.uy.set_fixed()
+
+    def set_free(self):
+        self.ux.set_free()
+        self.uy.set_free()
+
+    def set_traction_free(self):
+        self.ux.set_traction_free()
+        self.uy.set_traction_free()
+
+    def set_velocity_x(self, value: float):
+        self.ux.set_velocity(value)
+
+    def set_velocity_y(self, value: float):
+        self.uy.set_velocity(value)
+
+    def set_traction_x(self, value: float):
+        self.ux.set_traction(value)
+
+    def set_traction_y(self, value: float):
+        self.uy.set_traction(value)
+
+
 @dataclass
 class BoundaryFace:
 
@@ -115,6 +191,17 @@ class BoundaryFace:
     def set_traction_y(self, value: float):
         self.uy.set_traction(value)
 
+
+@dataclass
+class HorizontalBoundaryFace(BoundaryFace):
+    """A top/bottom face with optional sections on either side of the fault."""
+
+    # Leaving both sections unset preserves the established whole-face and
+    # benchmark-specific behaviour.
+    left: BoundarySection = field(default_factory=BoundarySection)
+    right: BoundarySection = field(default_factory=BoundarySection)
+
+
 @dataclass
 class BoundaryConditions:
     # Grid y increases with depth: top is y=0 (free surface) and bottom is
@@ -122,8 +209,8 @@ class BoundaryConditions:
 
     left: BoundaryFace = field(default_factory=BoundaryFace)
     right: BoundaryFace = field(default_factory=BoundaryFace)
-    top: BoundaryFace = field(default_factory=BoundaryFace)
-    bottom: BoundaryFace = field(default_factory=BoundaryFace)
+    top: HorizontalBoundaryFace = field(default_factory=HorizontalBoundaryFace)
+    bottom: HorizontalBoundaryFace = field(default_factory=HorizontalBoundaryFace)
 
     def set_all_fixed(self):
         self.left.set_fixed()

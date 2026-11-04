@@ -130,6 +130,27 @@ for the California/BP3 case and to the outer boundary for the Lab and Groningen
 cases. Traction-free and fault-interface stress operators themselves are shared
 by all cases on both uniform and stretched meshes.
 
+The portions of `top` and `bottom` on either side of the fault can have
+independent boundary conditions. For example:
+
+```python
+params.bc.top.left.set_traction_free()
+params.bc.top.right.ux.set_fixed()
+params.bc.top.right.uy.set_velocity(1.0e-5)
+
+params.bc.bottom.left.set_free()
+params.bc.bottom.right.ux.set_traction(2.0e3)  # outward traction rate [Pa/s]
+params.bc.bottom.right.uy.set_velocity(1.0e-5)
+```
+
+The section methods support `fixed`, `free`, `velocity`, `traction`, and
+`traction_free` in the same way as whole-face conditions. An unset section
+inherits the existing whole-face condition; call, for example,
+`params.bc.top.left.uy.clear()` to restore inheritance after an override.
+Existing whole-face input remains unchanged, including the historical Lab and
+California loading conventions. At a boundary reached by the fault, the fault
+jump/continuity rows take precedence over section boundary conditions.
+
 For large-scale runs that hit memory limits during sparse LU factorization, you can switch to the iterative linear solver in [model_parameters.py][model_parameters]:
 
 - `linear_solver="iterative"`
