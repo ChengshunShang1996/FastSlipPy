@@ -14,8 +14,22 @@ import time
 import numpy as np
 import matplotlib
 
-matplotlib.use("Agg")
+#matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+plt.rcParams.update({
+    "mathtext.fontset": "stix",
+    "font.family": "STIXGeneral",
+    "font.size": 15,
+    "axes.titlesize": 16,
+    "axes.titleweight": "normal",
+    "axes.labelsize": 15,
+    "xtick.labelsize": 14,
+    "ytick.labelsize": 14,
+    "legend.fontsize": 14,
+    "figure.titlesize": 18,
+    "axes.linewidth": 1.0,
+    "lines.linewidth": 2.0,
+})
 
 from fastslippy import FastSlipPy
 from fastslippy.pre_processing.model_parameters import FaultMode, ModelParameters, TimeIntegrator
@@ -94,30 +108,53 @@ class RunFastSlipPy(FastSlipPy):
         strain_yy = -self.p.nu * strain_xx / (1.0 - self.p.nu)
         uy_analytical = strain_yy * (y_sample - self.grid.y[0])
 
-        fig, axes = plt.subplots(1, 2, figsize=(10, 5), sharex=True)
-        axes[0].plot(times, ux_analytical, "k-", 
-                     label="Analytical")
+        fig, axes = plt.subplots(
+            1, 2, figsize=(9.2, 4.4), sharex=True, layout="constrained"
+        )
+        axes[0].plot(times, ux_analytical, color="0.15", label="Analytical")
         axes[0].plot(times[plot_indices],
                      np.asarray(self.comparison_ux)[plot_indices], "o",
-                     color="tab:blue", label="FastSlipPy")
+                     ms=6.5, color="tab:blue", markeredgecolor="white",
+                     markeredgewidth=0.6, label="FastSlipPy", zorder=3)
         axes[0].set_ylabel(r"$u_x$ [m]")
-        axes[0].set_title(f"Axial displacement at x = {x_sample:g} m")
+        axes[0].set_title(
+            rf"Axial displacement, $x={x_sample:g}\,\mathrm{{m}}$",
+            y=1.05,
+            pad=6,
+        )
 
-        axes[1].plot(times, uy_analytical, "k-",
-                     label="Analytical")
+        axes[1].plot(times, uy_analytical, color="0.15", label="Analytical")
         axes[1].plot(times[plot_indices],
                      np.asarray(self.comparison_uy)[plot_indices], "o",
-                     color="tab:orange", label="FastSlipPy")
-        axes[1].set_xlabel("Time [s]")
+                     ms=6.5, color="tab:orange", markeredgecolor="white",
+                     markeredgewidth=0.6, label="FastSlipPy", zorder=3)
         axes[1].set_ylabel(r"$u_y$ [m]")
-        axes[1].set_title(f"Poisson displacement at y = {y_sample:g} m")
+        axes[1].set_title(
+            rf"Poisson displacement, $y={y_sample:g}\,\mathrm{{m}}$",
+            y=1.05,
+            pad=6,
+        )
 
         for ax in axes:
-            ax.grid(True, alpha=0.3)
-            ax.legend()
-        fig.tight_layout()
+            ax.set_xlabel("Time [s]")
+            ax.ticklabel_format(
+                axis="y", style="sci", scilimits=(0, 0), useMathText=True
+            )
+            ax.grid(True, color="0.85", linewidth=0.8)
+            ax.set_axisbelow(True)
+            ax.margins(x=0.03, y=0.06)
+
+        axes[0].legend(
+            loc="upper right",
+            frameon=True,
+            framealpha=0.92,
+            edgecolor="0.8",
+            borderpad=0.45,
+            handlelength=1.8,
+        )
+
         path = self.output.out / "displacement_comparison.png"
-        fig.savefig(path, dpi=150)
+        fig.savefig(path, dpi=200, bbox_inches="tight")
         plt.close(fig)
         return path
 
@@ -138,7 +175,9 @@ class RunFastSlipPy(FastSlipPy):
         zero_stress = np.zeros_like(times)
         x_sample = self.grid.xp[1:self.p.Nx][ix_sigma]
 
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5), sharex=True)
+        fig, axes = plt.subplots(
+            1, 3, figsize=(12.2, 4.2), sharex=True, layout="constrained"
+        )
         analytical = (sigma_xx_analytical, zero_stress, zero_stress)
         numerical = (
             self.comparison_sigma_xx,
@@ -146,31 +185,46 @@ class RunFastSlipPy(FastSlipPy):
             self.comparison_sigma_xy,
         )
         labels = (r"$\sigma_{xx}$", r"$\sigma_{yy}$", r"$\sigma_{xy}$")
+        titles = ("Axial stress", "Transverse stress", "Shear stress")
         colors = ("tab:blue", "tab:orange", "tab:green")
-        for ax, exact, computed, label, color in zip(
-            axes, analytical, numerical, labels, colors
+        for ax, exact, computed, label, title, color in zip(
+            axes, analytical, numerical, labels, titles, colors
         ):
             if label == r"$\sigma_{yy}$":
-                ax.plot(times, exact, "k-",
-                                    label="Analytical")
+                ax.plot(times, exact, color="0.15", label="Analytical")
                 ax.plot(times[plot_indices],
                                 np.asarray(computed)[plot_indices], "o",
-                                color=color, label="FastSlipPy")
+                                ms=6.5, color=color, markeredgecolor="white",
+                                markeredgewidth=0.6, label="FastSlipPy", zorder=3)
                 ax.set_ylabel(f"{label} [Pa]")
                 #ax.set_ylim(-0.1, 0.1)
             else:
-                ax.plot(times, exact / 1e6, "k-", label="Analytical")
+                ax.plot(times, exact / 1e6, color="0.15", label="Analytical")
                 ax.plot(times[plot_indices],
                         np.asarray(computed)[plot_indices] / 1e6, "o",
-                        color=color, label="FastSlipPy")
+                        ms=6.5, color=color, markeredgecolor="white",
+                        markeredgewidth=0.6, label="FastSlipPy", zorder=3)
                 ax.set_ylabel(f"{label} [MPa]")
-            ax.grid(True, alpha=0.3)
-            ax.legend()
-            ax.set_title(f"Stress histories near x = {x_sample:g} m")
+            ax.grid(True, color="0.85", linewidth=0.8)
+            ax.set_axisbelow(True)
+            ax.margins(x=0.03, y=0.06)
+            ax.set_title(
+                rf"{title}, $x={x_sample:g}\,\mathrm{{m}}$",
+                y=1.03,
+                pad=6,
+            )
             ax.set_xlabel("Time [s]")
-        fig.tight_layout()
+
+        axes[0].legend(
+            loc="upper right",
+            frameon=True,
+            framealpha=0.92,
+            edgecolor="0.8",
+            borderpad=0.45,
+            handlelength=1.8,
+        )
         path = self.output.out / "stress_comparison.png"
-        fig.savefig(path, dpi=150)
+        fig.savefig(path, dpi=200, bbox_inches="tight")
         plt.close(fig)
         return path
 
