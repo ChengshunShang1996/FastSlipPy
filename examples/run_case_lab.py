@@ -43,11 +43,11 @@ if __name__ == "__main__":
         xsize = 1.0,
         ysize = 1.0,
         Nx=41, Ny=41,
-        Nt=10000,
-        output_interval=10,
-        #tfinal = 10,
+        Nt=20000,
+        output_interval=1,
+        tfinal = 10,
         checkpoint_interval=1000,
-        vtk_interval = 500,
+        vtk_interval = 1000,
         Vi=1e-40,
         dt_init=0.0001,
         dt_max = 0.01,
@@ -61,6 +61,7 @@ if __name__ == "__main__":
         D_rs = 2.25e-6,
         sigma0 = 15e6, # Here you define the initial normal stress
         flash_heating_option = False,
+        slip_rate_solver='bisection',
     )
 
     params.bc.left.ux.set_fixed()
@@ -74,5 +75,5 @@ if __name__ == "__main__":
 
     params.layers.set_homogeneous(top = 1, bottom = 2, a=params.a0, b=params.b0)
 
-    model = RunFastSlipPy(params=params, output_dir="output")
+    model = RunFastSlipPy(params=params, output_dir="output/lab-comparison")
     model.run()
