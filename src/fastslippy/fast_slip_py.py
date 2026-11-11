@@ -514,8 +514,9 @@ class FastSlipPy:
             self.output.log(it, t2 if phase == 2 else t, dt,
                             output_V, self.fault.U, self.checkpointer)
 
-            if global_it % p.output_interval == 0:
-                self.output.write_memory(
+            scheduled_output = global_it % p.output_interval == 0
+            if scheduled_output or reached_final_time:
+                history_index = self.output.write_memory(
                     it, self.fault.U, output_V, output_tau,
                     self.fault.sigma, self.stress.P, self.fault.theta,
                     dt, t, self.tauqs, self.sigmaqs,
@@ -523,7 +524,8 @@ class FastSlipPy:
                 if p.case_type == "california":
                     self.output.record_bp3_surface(
                         it, t, self.grid, self.ux, self.uy,
-                        output_vx, output_vy
+                        output_vx, output_vy,
+                        history_index=history_index,
                     )
 
             if global_it % p.checkpoint_interval == 0:

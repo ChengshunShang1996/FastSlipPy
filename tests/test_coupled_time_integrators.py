@@ -80,6 +80,42 @@ def test_vtk_cadence_is_independent_and_includes_final_state(tmp_path):
     assert calls == [(2, 2.0), (3, 3.0)]
 
 
+def test_off_cadence_final_state_is_stored_and_plotted(tmp_path):
+    params = _small_bp3_parameters(
+        Nt=5,
+        tfinal=3.0,
+        output_interval=10,
+        checkpoint_interval=100,
+    )
+    model = FastSlipPy(params, output_dir=str(tmp_path))
+
+    model.run()
+
+    np.testing.assert_array_equal(model.output.tm, [3.0])
+    np.testing.assert_array_equal(model.output.iterations, [3])
+    assert (tmp_path / "data_3.npz").exists()
+    assert (tmp_path / "fields_it3.png").exists()
+    with np.load(tmp_path / "dataall.npz") as history:
+        np.testing.assert_array_equal(history["tm"], [3.0])
+        np.testing.assert_array_equal(history["iterations"], [3])
+
+
+def test_final_state_on_output_cadence_is_not_duplicated(tmp_path):
+    params = _small_bp3_parameters(
+        Nt=5,
+        tfinal=4.0,
+        output_interval=2,
+        checkpoint_interval=100,
+    )
+    model = FastSlipPy(params, output_dir=str(tmp_path))
+    _disable_figures(model)
+
+    model.run()
+
+    np.testing.assert_array_equal(model.output.tm, [2.0, 4.0])
+    np.testing.assert_array_equal(model.output.iterations, [2, 4])
+
+
 @pytest.mark.parametrize("integrator", ["euler", "rk2_midpoint"])
 def test_checkpoint_restart_matches_uninterrupted_run(tmp_path, integrator):
     full_params = _small_bp3_parameters(time_integrator=integrator)

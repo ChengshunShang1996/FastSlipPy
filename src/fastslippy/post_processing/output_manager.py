@@ -41,6 +41,7 @@ class OutputManager:
         self.thetam  = np.zeros((Ny, n))
         self.dtm     = np.zeros(n)
         self.tm      = np.zeros(n)
+        self.iterations = np.full(n, -1, dtype=np.int64)
         # They require a lot of memory, so we don't store them in memory by default.
         # self.taumall    = np.zeros((Ny, Nx, n))
         # self.sigmamall  = np.zeros((Ny-1, Nx-1, n))
@@ -71,7 +72,8 @@ class OutputManager:
     def write_memory(self, it: int,
                      U, V, tau, sigma, P, theta, dt, t,
                      tauqs, sigmaqs, uy, vy, ux, vx, tau0):
-        idx = self._history_index(it)
+        idx = self._written_count
+        self._ensure_history_capacity(idx + 1)
         self.Um[:, idx]     = U
         self.Vm[:, idx]     = V
         self.taum[:, idx]   = tau
@@ -81,7 +83,8 @@ class OutputManager:
         self.thetam[:, idx] = theta
         self.dtm[idx]       = dt
         self.tm[idx]        = t
-        self._written_count = max(self._written_count, idx + 1)
+        self.iterations[idx] = self._iteration_offset + it
+        self._written_count = idx + 1
         # self.taumall[:, :, idx]   = tauqs
         # self.sigmamall[:, :, idx] = sigmaqs
         # self.uymall[:, :, idx]    = uy
@@ -95,12 +98,20 @@ class OutputManager:
         #     tauqs=tauqs, sigmaqs=sigmaqs,
         #     uy=uy, vy=vy, ux=ux, vx=vx
         # )
+        return idx
 
-    def record_bp3_surface(self, it: int, t: float, grid, ux, uy, vx, vy):
+    def record_bp3_surface(
+        self, it: int, t: float, grid, ux, uy, vx, vy, *, history_index=None
+    ):
         """Record the eight SEAS BP3 free-surface stations."""
-        if self.p.case_type != "california" or (it + self._iteration_offset) % self.p.output_interval:
+        if self.p.case_type != "california":
             return
-        idx = self._history_index(it)
+        if history_index is None:
+            if (it + self._iteration_offset) % self.p.output_interval:
+                return
+            idx = self._written_count - 1
+        else:
+            idx = int(history_index)
         if idx < 0 or idx >= self._bp3_surface_disp1.shape[1]:
             return
 
@@ -377,11 +388,31 @@ class OutputManager:
                  time_integrator=np.asarray(self.p.time_integrator.value),
                  state_time_level=np.asarray("end"), **extra)
 
-    def _history_index(self, it):
-        interval = self.p.output_interval
-        return (self._history_count
-                + (it + self._iteration_offset) // interval
-                - self._iteration_offset // interval - 1)
+    def _ensure_history_capacity(self, required: int):
+        """Grow history arrays when tfinal falls between output iterations."""
+        current = self.tm.shape[-1]
+        if required <= current:
+            return
+        capacity = max(required, max(1, 2 * current))
+        for name in (
+            "Um", "Vm", "taum", "sigmam", "Pm", "thetam",
+            "dtm", "tm", "tau0",
+        ):
+            values = getattr(self, name)
+            grown = np.zeros(values.shape[:-1] + (capacity,), dtype=values.dtype)
+            grown[..., :current] = values
+            setattr(self, name, grown)
+        iterations = np.full(capacity, -1, dtype=np.int64)
+        iterations[:current] = self.iterations
+        self.iterations = iterations
+        for name in (
+            "_bp3_surface_disp1", "_bp3_surface_disp2",
+            "_bp3_surface_vel1", "_bp3_surface_vel2",
+        ):
+            values = getattr(self, name)
+            grown = np.full((8, capacity), np.nan)
+            grown[:, :current] = values
+            setattr(self, name, grown)
 
     def restore_history(self, checkpoint_time, iteration, tau0):
         """Retain accepted samples through the restart time, then reserve new slots."""
@@ -411,6 +442,14 @@ class OutputManager:
                 else:
                     restored[..., :keep.size] = old[name][..., keep]
             setattr(self, name, restored)
+        restored_iterations = np.full(capacity, -1, dtype=np.int64)
+        if keep.size:
+            if "iterations" in old:
+                restored_iterations[:keep.size] = old["iterations"][keep]
+            else:
+                # Older histories only contain regular cadence samples.
+                restored_iterations[:keep.size] = (keep + 1) * interval
+        self.iterations = restored_iterations
         for name in surfaces:
             restored = np.full((8, capacity), np.nan)
             if name in old:
@@ -424,6 +463,7 @@ class OutputManager:
             Um=self.Um, Vm=self.Vm, taum=self.taum,
             sigmam=self.sigmam, Pm=self.Pm, thetam=self.thetam,
             dtm=self.dtm, tm=self.tm,
+            iterations=self.iterations,
             tau0=self.tau0,
         )
         # Surface histories are small compared with the fault histories and

@@ -41,15 +41,11 @@ class FigureCreator:
         yr = 365 * 24 * 3600
 
         if it < 0:
-            # Snapshot arrays are preallocated to Nt/output_interval.  A run
-            # stopped before Nt therefore has trailing all-zero columns; the
-            # last allocated column is not necessarily the last result.
-            valid = np.flatnonzero(om.tm > 0.0)
-            if valid.size == 0:
+            if om._written_count == 0:
                 raise ValueError("No stored output snapshot is available.")
-            it = int(valid[-1])
+            it = om._written_count - 1
 
-        actual_it = (it + 1) * om.p.output_interval
+        actual_it = int(om.iterations[it])
 
         # ─────────────────────────────────────────────
         # 1. Ratio τ/σ vs depth
@@ -65,7 +61,7 @@ class FigureCreator:
         plt.title("Ratio shear / normal stress")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"tau_sigma_ratio_it{it+1}.png", dpi=150)
+        fig.savefig(self.output.out / f"tau_sigma_ratio_it{actual_it}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y+shift_y, om.taum[:, it] / 1e6, 'o-', lw=1)
@@ -73,7 +69,7 @@ class FigureCreator:
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"tau_it{it+1}.png", dpi=150)
+        fig.savefig(self.output.out / f"tau_it{actual_it}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y+shift_y, om.sigmam[:, it] / 1e6, 'o-', lw=1)
@@ -81,7 +77,7 @@ class FigureCreator:
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"sigma_it{it+1}.png", dpi=150)
+        fig.savefig(self.output.out / f"sigma_it{actual_it}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y+shift_y, om.tau0[:, it] / 1e6, 'o-', lw=1)
@@ -89,7 +85,7 @@ class FigureCreator:
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"tau0_it{it+1}.png", dpi=150)
+        fig.savefig(self.output.out / f"tau0_it{actual_it}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y+shift_y, om.Vm[:, it], 'o-', lw=1)
@@ -97,7 +93,7 @@ class FigureCreator:
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"slip_velocity_it{it+1}.png", dpi=150)
+        fig.savefig(self.output.out / f"slip_velocity_it{actual_it}.png", dpi=150)
 
         data_fname = om.out / f"data_{actual_it}.npz"
         if not data_fname.exists():
@@ -119,7 +115,7 @@ class FigureCreator:
             plt.plot(grid.y, tauqs[:, k], '--', label=f'col {k}')
         plt.legend()
         plt.grid(True)
-        fig_verify1.savefig(self.output.out / f"verify_tau_it{it + 1}.png", dpi=150)
+        fig_verify1.savefig(self.output.out / f"verify_tau_it{actual_it}.png", dpi=150)
         plt.close(fig_verify1)
 
         fig_verify2 = plt.figure(figsize=(8,6))
@@ -128,7 +124,7 @@ class FigureCreator:
             plt.plot(grid.y, tauqs[:, k], '--', label=f'col {k}')
         plt.legend()
         plt.grid(True)
-        fig_verify2.savefig(self.output.out / f"verify_tauqs_it{it + 1}.png", dpi=150)
+        fig_verify2.savefig(self.output.out / f"verify_tauqs_it{actual_it}.png", dpi=150)
         plt.close(fig_verify2)
 
         # ─────────────────────────────────────────────
@@ -183,7 +179,7 @@ class FigureCreator:
             ax.invert_yaxis()
 
         plt.tight_layout()
-        fig.savefig(self.output.out / f"fields_it{it+1}.png", dpi=150)
+        fig.savefig(self.output.out / f"fields_it{actual_it}.png", dpi=150)
 
         #plt.show()
 
@@ -206,9 +202,11 @@ class FigureCreator:
         yr = 365 * 24 * 3600
 
         if it < 0:
-            it = om.Um.shape[1] - 1  # last stored snapshot
+            if om._written_count == 0:
+                raise ValueError("No stored output snapshot is available.")
+            it = om._written_count - 1
 
-        actual_it = (it + 1) * om.p.output_interval
+        actual_it = int(om.iterations[it])
 
         # ─────────────────────────────────────────────
         # 1. Ratio τ/σ vs depth
@@ -224,7 +222,7 @@ class FigureCreator:
         plt.title("Ratio shear / normal stress")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"tau_sigma_ratio_it{it+1}.png", dpi=150)
+        fig.savefig(self.output.out / f"tau_sigma_ratio_it{actual_it}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y, om.taum[:, it] / 1e6, 'o-', lw=1)
@@ -232,7 +230,7 @@ class FigureCreator:
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"tau_it{it+1}.png", dpi=150)
+        fig.savefig(self.output.out / f"tau_it{actual_it}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y, om.sigmam[:, it] / 1e6, 'o-', lw=1)
@@ -240,7 +238,7 @@ class FigureCreator:
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"sigma_it{it+1}.png", dpi=150)
+        fig.savefig(self.output.out / f"sigma_it{actual_it}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y, om.tau0[:, it] / 1e6, 'o-', lw=1)
@@ -248,7 +246,7 @@ class FigureCreator:
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"tau0_it{it+1}.png", dpi=150)
+        fig.savefig(self.output.out / f"tau0_it{actual_it}.png", dpi=150)
 
         fig = plt.figure(figsize=(8, 5))
         plt.plot(grid.y, om.Vm[:, it], 'o-', lw=1)
@@ -256,7 +254,7 @@ class FigureCreator:
         plt.xlabel("Depth [m]")
         plt.grid(True)
         plt.tight_layout()
-        fig.savefig(self.output.out / f"slip_velocity_it{it+1}.png", dpi=150)
+        fig.savefig(self.output.out / f"slip_velocity_it{actual_it}.png", dpi=150)
 
         field_fname = om.out / f"data_{actual_it}.npz"
         
@@ -279,7 +277,7 @@ class FigureCreator:
             plt.plot(grid.y, tauqs[:, k], '--', label=f'col {k}')
         plt.legend()
         plt.grid(True)
-        fig_verify1.savefig(self.output.out / f"verify_tau_it{it + 1}.png", dpi=150)
+        fig_verify1.savefig(self.output.out / f"verify_tau_it{actual_it}.png", dpi=150)
         plt.close(fig_verify1)
 
         fig_verify2 = plt.figure(figsize=(8,6))
@@ -288,7 +286,7 @@ class FigureCreator:
             plt.plot(grid.y, tauqs[:, k], '--', label=f'col {k}')
         plt.legend()
         plt.grid(True)
-        fig_verify2.savefig(self.output.out / f"verify_tauqs_it{it + 1}.png", dpi=150)
+        fig_verify2.savefig(self.output.out / f"verify_tauqs_it{actual_it}.png", dpi=150)
         plt.close(fig_verify2)
 
         # ─────────────────────────────────────────────
@@ -342,7 +340,7 @@ class FigureCreator:
             ax.set_aspect('equal')
 
         plt.tight_layout()
-        fig.savefig(self.output.out / f"fields_it{it + 1}.png", dpi=150)
+        fig.savefig(self.output.out / f"fields_it{actual_it}.png", dpi=150)
 
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
         im = axes[0].pcolormesh(
@@ -363,7 +361,7 @@ class FigureCreator:
             ax.set_aspect('equal')
 
         plt.tight_layout()
-        fig.savefig(self.output.out / f"displacement_fields_it{it + 1}.png", dpi=150)
+        fig.savefig(self.output.out / f"displacement_fields_it{actual_it}.png", dpi=150)
 
         #plt.show()
 
