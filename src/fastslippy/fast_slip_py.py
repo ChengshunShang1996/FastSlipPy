@@ -555,6 +555,8 @@ class FastSlipPy:
                         self.ux, self.uy, output_vx, output_vy,
                         self.tauqs, self.sigmaqs,
                         self.fault, t,
+                        tau0=self.stress.tau0,
+                        sigman0=self.stress.sigman0,
                     )
                 finally:
                     self.fault.V = stage_velocity

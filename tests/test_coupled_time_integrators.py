@@ -73,7 +73,9 @@ def test_vtk_cadence_is_independent_and_includes_final_state(tmp_path):
     model = FastSlipPy(params, output_dir=str(tmp_path))
     _disable_figures(model)
     calls = []
-    model.output.write_vtk = lambda *args: calls.append((args[0], args[-1]))
+    model.output.write_vtk = lambda *args, **kwargs: calls.append(
+        (args[0], args[-1])
+    )
 
     model.run()
 

@@ -8,6 +8,7 @@ import pytest
 from fastslippy.post_processing.output_manager import OutputManager
 from fastslippy.pre_processing.grid import Grid
 from fastslippy.pre_processing.model_parameters import ModelParameters
+from fastslippy.solver.stress_state import StressState
 
 
 def _vtk_fixture(tmp_path, *, alpha=60.0):
@@ -142,6 +143,36 @@ def test_vtk_preserves_fault_jump_and_complete_global_vectors(tmp_path):
     np.testing.assert_array_equal(
         right.cell_data["normal_stress_quasistatic_Pa"][0],
         sigmaqs[:, mid:].ravel(order="C"),
+    )
+
+    initial_stress = StressState(params, grid.y)
+    left_tau_total = left.point_data["shear_stress_Pa"].reshape(
+        params.Ny, mid + 1
+    )
+    right_tau_total = right.point_data["shear_stress_Pa"].reshape(
+        params.Ny, params.Nx - mid
+    )
+    np.testing.assert_allclose(
+        left_tau_total,
+        initial_stress.tau0[:, None] + left_tau,
+    )
+    np.testing.assert_allclose(
+        right_tau_total,
+        initial_stress.tau0[:, None] + right_tau,
+    )
+    np.testing.assert_allclose(
+        left.cell_data["normal_stress_Pa"][0],
+        (
+            initial_stress.sigman0[1:, None]
+            - sigmaqs[:, :mid]
+        ).ravel(order="C"),
+    )
+    np.testing.assert_allclose(
+        right.cell_data["normal_stress_Pa"][0],
+        (
+            initial_stress.sigman0[1:, None]
+            - sigmaqs[:, mid:]
+        ).ravel(order="C"),
     )
 
     assert fault_mesh.cells[0].type == "line"

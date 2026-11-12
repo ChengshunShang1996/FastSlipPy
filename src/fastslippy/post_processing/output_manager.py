@@ -660,6 +660,9 @@ class OutputManager:
         sigmaqs,
         fault,
         t: float,
+        *,
+        tau0=None,
+        sigman0=None,
     ):
         """Write fault-aware field VTUs and a physical-time PVD collection.
 
@@ -669,6 +672,9 @@ class OutputManager:
         solver displacement components are interpolated to the tau grid
         without interpolating the y-basis motion across the fault.
         Quasi-static normal stress is cell data on the same quad topology.
+        Total domain stresses include the initial stress state using
+        ``tau = tau0 + tauqs`` and ``sigma = sigman0 - sigmaqs``, where
+        compressive effective normal stress is positive.
         """
         try:
             import meshio
@@ -695,6 +701,20 @@ class OutputManager:
         sigmaqs = self._checked_vtk_array(
             "sigmaqs", sigmaqs, (Ny - 1, Nx - 1)
         )
+
+        # Supplying these arrays avoids reconstructing the initial state in
+        # normal solver operation.  The fallback preserves compatibility for
+        # callers that use OutputManager.write_vtk directly.
+        if tau0 is None or sigman0 is None:
+            from fastslippy.solver.stress_state import StressState
+
+            initial_stress = StressState(self.p, np.asarray(grid.y))
+            if tau0 is None:
+                tau0 = initial_stress.tau0
+            if sigman0 is None:
+                sigman0 = initial_stress.sigman0
+        tau0 = self._checked_vtk_array("tau0", tau0, (Ny,))
+        sigman0 = self._checked_vtk_array("sigman0", sigman0, (Ny,))
 
         x = self._checked_vtk_array("grid.x", grid.x, (Nx,))
         y = self._checked_vtk_array("grid.y", grid.y, (Ny,))
@@ -761,10 +781,13 @@ class OutputManager:
         tau_right = tauqs[:, right].copy()
         tau_left[:, -1] = tauqs[:, mid - 1]
         tau_right[:, 0] = tauqs[:, mid + 1]
+        normal_stress_initial = sigman0[1:, None]
 
         def domain_mesh(side, u_y, v_y, tau, sigma):
             u_x = displacement_x_basis[:, side]
             v_x = velocity_x_basis[:, side]
+            shear_stress = tau + tau0[:, None]
+            normal_stress = normal_stress_initial - sigma
             return self._vtk_quad_mesh(
                 meshio,
                 Xtau[:, side],
@@ -781,11 +804,15 @@ class OutputManager:
                     "vx_on_tau_m_per_s": v_x.ravel(order="C"),
                     "vy_on_tau_m_per_s": v_y.ravel(order="C"),
                     "shear_stress_quasistatic_Pa": tau.ravel(order="C"),
+                    "shear_stress_Pa": shear_stress.ravel(order="C"),
                 },
                 cell_data={
                     "normal_stress_quasistatic_Pa": [
                         sigma.ravel(order="C")
-                    ]
+                    ],
+                    "normal_stress_Pa": [
+                        normal_stress.ravel(order="C")
+                    ],
                 },
             )
 
