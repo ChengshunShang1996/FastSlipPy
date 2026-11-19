@@ -61,6 +61,27 @@ All the required Python libraries will be added automatically. Some of them are:
 - matplotlib
 - meshio
 
+Kratos Multiphysics is an optional dependency used only by the stress-controlled
+DEM multiscale friction backend.  Existing rate-and-state simulations do not
+import or require Kratos.
+
+### Optional fast-slip DEM coupling
+
+Set ``friction_law="dem_multiscale"`` and provide a
+``DEMCouplingParameters`` instance to retain rate-and-state friction during
+slow loading and activate persistent Kratos DEM RVEs above a configured slip
+rate.  During an active interval FastSlipPy supplies driving shear stress,
+effective normal stress and the macro time interval.  The RVE applies
+``tau_drive - eta * V_wall`` to its dynamic shear wall, advances with DEM
+substeps for exactly that interval, and returns slip increment and mean wall
+velocity.  See ``examples/run_case_dem_multiscale.py``.
+
+The initial implementation intentionally supports only the Euler integrator.
+It writes Kratos model snapshots alongside FastSlipPy checkpoints, but restart
+from an active DEM checkpoint is not yet supported.  DEM and continuum units,
+RVE wall mass, contact damping, activation thresholds and time-step limits
+must be calibrated before physical use.
+
 ## Instructions
 
 ### Install

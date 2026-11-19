@@ -10,32 +10,32 @@ __license__     = "MIT License"
 #/////////////////////////////////////////////////
 
 import os
-import json
 import sys
 import time
-import numpy as np
-
-from scipy.sparse.linalg import LinearOperator, bicgstab, factorized, gmres, spilu
-from typing import Optional
 from pathlib import Path
+from typing import Optional
+
+import numpy as np
+from scipy.sparse.linalg import LinearOperator, bicgstab, factorized, gmres, spilu
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
+from fastslippy.post_processing.figure_creator import FigureCreator
+from fastslippy.post_processing.output_manager import OutputManager
+from fastslippy.pre_processing.frictional_zones import FrictionalZones
+from fastslippy.pre_processing.grid import Grid
 from fastslippy.pre_processing.model_parameters import (
-    CaseType,
     FaultMode,
+    FrictionLaw,
     ModelParameters,
     SlipRateSolver,
     TimeIntegrator,
 )
-from fastslippy.pre_processing.grid import Grid
-from fastslippy.pre_processing.frictional_zones import FrictionalZones
-from fastslippy.solver.stress_state import StressState
+from fastslippy.solver.dem_coupling import DEMMultiscaleCoupler
 from fastslippy.solver.fault_state import FaultState
 from fastslippy.solver.matrix_builder import MatrixBuilder
+from fastslippy.solver.stress_state import StressState
 from fastslippy.utilities.stress_cal_util import StressCalUtil
-from fastslippy.post_processing.output_manager import OutputManager
-from fastslippy.post_processing.figure_creator import FigureCreator
 
 class FastSlipPy:
     """
@@ -45,7 +45,8 @@ class FastSlipPy:
 
     def __init__(self, params: Optional[ModelParameters] = None,
                  output_dir: str = "output",
-                 checkpointer: int = 0):
+                 checkpointer: int = 0,
+                 *, dem_backend_factory=None):
         self.p            = params or ModelParameters()
         self.p.apply_bp3_motion_sign()
         self.checkpointer = checkpointer
@@ -78,6 +79,33 @@ class FastSlipPy:
         self.stress_calculator = StressCalUtil(prefer_numba=True)
 
         self.figure_creator = FigureCreator(self.output, self.grid)
+
+        self.dem_coupler = None
+        self.dem_last_result = None
+        if self.p.friction_law is FrictionLaw.DEM_MULTISCALE:
+            if self.p.fault_mode is not FaultMode.FRICTIONAL:
+                raise ValueError(
+                    "dem_multiscale requires fault_mode='frictional'."
+                )
+            if checkpointer:
+                raise NotImplementedError(
+                    "Restarting an active dem_multiscale run is not yet supported."
+                )
+            if dem_backend_factory is None:
+                from fastslippy.solver.kratos_dem_backend import (
+                    KratosDEMBackendFactory,
+                )
+
+                dem_backend_factory = KratosDEMBackendFactory(
+                    self.p.dem, self.output.out / "dem_rves"
+                )
+            self.dem_coupler = DEMMultiscaleCoupler(
+                self.p.Ny, self.p.dem, dem_backend_factory
+            )
+
+    @property
+    def _using_dem(self) -> bool:
+        return self.dem_coupler is not None
 
     def _build_and_factor_LH(self, dPdt: float):
         builder = MatrixBuilder(self.p, self.grid)
@@ -281,6 +309,26 @@ class FastSlipPy:
             )
             self._advance_elastic_fields(dt, vx, vy)
             return
+        if self._using_dem:
+            mid = self.p.Nx // 2
+            driving = self.tauqs[:, mid] + self.stress.tau0
+            result = self.dem_coupler.advance(
+                predictor_velocity=self.fault.V,
+                driving_shear_stress=driving,
+                effective_normal_stress=self.fault.sigma,
+                radiation_damping=self.p.eta,
+                dt=dt,
+            )
+            self.dem_last_result = result
+            self.fault.V = result.velocity
+            # Keep the RSF state evolving as a cheap shadow model.  It supplies
+            # the activation predictor and avoids a stale state when an RVE is
+            # deactivated after a fast episode.
+            self.fault.advance(dt, self.tauqs[:, mid], self.stress)
+            self.fault.tau = result.traction
+            vx, vy = self._solve_elastic_velocity(dPdt, self.fault.V)
+            self._advance_elastic_fields(dt, vx, vy)
+            return
         mid = self.p.Nx // 2
         self.fault.advance(dt, self.tauqs[:, mid], self.stress)
         vx, vy = self._solve_elastic_velocity(dPdt, self.fault.V)
@@ -355,6 +403,14 @@ class FastSlipPy:
         backward compatible.
         """
         if self.p.fault_mode is FaultMode.FRICTIONAL:
+            if self._using_dem:
+                velocity = self.fault.V.copy()
+                traction = self.fault.tau.copy()
+                if include_velocity_fields:
+                    vx, vy = self._solve_elastic_velocity(dPdt, velocity)
+                else:
+                    vx, vy = None, None
+                return velocity, traction, vx, vy
             stage_velocity = self.fault.V.copy()
             try:
                 self._solve_fault_slip_rate()
@@ -456,13 +512,27 @@ class FastSlipPy:
                 self._solve_fault_slip_rate()
 
             # ── adaptive time step ──
-                V_inner, ksi_inner, D_rs_inner = (
-                    self._select_adaptive_fault_window()
+                dem_fast_step = (
+                    self._using_dem
+                    and self.dem_coupler.fast_step_expected(self.fault.V)
                 )
-                speed = np.maximum(np.abs(V_inner), np.finfo(float).tiny)
-                dt_cand = np.min(ksi_inner * D_rs_inner / speed)
-                dt_cand = max(dt_cand, 1e-150)
-                dt = min(p.dt_growth * dt, dt_cand, dt_max, p.tfinal - t)
+                if dem_fast_step:
+                    # During an active/predicted fast episode the DEM slip
+                    # increment, rather than the RSF D_rs/V scale, controls dt.
+                    dt = min(p.dt_growth * dt, dt_max, p.tfinal - t)
+                    dt = self.dem_coupler.limit_dt(
+                        dt, predictor_velocity=self.fault.V
+                    )
+                else:
+                    V_inner, ksi_inner, D_rs_inner = (
+                        self._select_adaptive_fault_window()
+                    )
+                    speed = np.maximum(np.abs(V_inner), np.finfo(float).tiny)
+                    dt_cand = np.min(ksi_inner * D_rs_inner / speed)
+                    dt_cand = max(dt_cand, 1e-150)
+                    dt = min(
+                        p.dt_growth * dt, dt_cand, dt_max, p.tfinal - t
+                    )
             else:
                 dt = min(p.dt_init, p.tfinal - t)
             if dt <= 0.0:
@@ -538,6 +608,10 @@ class FastSlipPy:
                     pressure=self.stress.P,
                     pressure_left=self.stress.Pl, pressure_right=self.stress.Pr)
                 self.output.save_all()
+                if self._using_dem:
+                    self.dem_coupler.save_checkpoint(
+                        self.output.out / f"dem_checkpoint_{global_it}"
+                    )
                 print(f"  Checkpoint it={global_it}, elapsed {time.perf_counter()-t0_all:.1f}s")
             should_write_vtk = p.output_vtk_option and (
                 global_it % vtk_interval == 0
@@ -580,6 +654,11 @@ class FastSlipPy:
                     pressure=self.stress.P,
                     pressure_left=self.stress.Pl, pressure_right=self.stress.Pr)
         self.output.save_all()
+        if self._using_dem:
+            self.dem_coupler.save_checkpoint(
+                self.output.out / f"dem_checkpoint_{self.checkpointer + it}"
+            )
+            self.dem_coupler.close()
         if p.case_type == "california":
             self.output.write_bp3_outputs(self.grid)
         self.output.close()

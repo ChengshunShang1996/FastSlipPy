@@ -22,9 +22,10 @@ class CaseType(str, Enum):
     LAB = "lab"
     CALIFORNIA = "california"
 
-class FrictionLaw(Enum):
+class FrictionLaw(str, Enum):
     RATE_STATE = "rate_state"
     SLIP_WEAKENING = "slip_weakening"
+    DEM_MULTISCALE = "dem_multiscale"
 
 class LinearSolver(str, Enum):
     DIRECT = "direct"
@@ -85,6 +86,58 @@ class DirectionBC:
     def set_traction_free(self):
         self.type = BCType.TRACTION_FREE
         self.value = 0.0
+
+
+@dataclass
+class DEMCouplingParameters:
+    """Optional stress-controlled DEM coupling settings.
+
+    The defaults are deliberately inert: :class:`ModelParameters` continues
+    to use rate-and-state friction unless ``friction_law`` is explicitly set
+    to ``dem_multiscale``.
+    """
+
+    case_directory: str = ""
+    activation_velocity: float = 1.0e-3
+    deactivation_velocity: float = 5.0e-4
+    deactivation_steps: int = 5
+    max_macro_dt: float = np.inf
+    max_slip_increment: float = np.inf
+    layer_length: float = 0.12
+    wall_mass_per_area: float = 1.0
+    normal_servo_velocity: float = 0.1
+    servo_relaxation: float = 0.15
+    maximum_wall_speed: float = np.inf
+    consolidation_time: float = 0.0
+    output_enabled: bool = False
+
+    def validate(self) -> None:
+        positive = (
+            "activation_velocity",
+            "max_macro_dt",
+            "max_slip_increment",
+            "layer_length",
+            "wall_mass_per_area",
+            "normal_servo_velocity",
+            "maximum_wall_speed",
+        )
+        for name in positive:
+            value = float(getattr(self, name))
+            if value <= 0.0 or np.isnan(value):
+                raise ValueError(f"dem.{name} must be positive.")
+        if self.deactivation_velocity < 0.0:
+            raise ValueError("dem.deactivation_velocity must be non-negative.")
+        if self.deactivation_velocity >= self.activation_velocity:
+            raise ValueError(
+                "dem.deactivation_velocity must be smaller than "
+                "dem.activation_velocity."
+            )
+        if self.deactivation_steps < 1:
+            raise ValueError("dem.deactivation_steps must be at least one.")
+        if not 0.0 < self.servo_relaxation <= 1.0:
+            raise ValueError("dem.servo_relaxation must lie in (0, 1].")
+        if self.consolidation_time < 0.0:
+            raise ValueError("dem.consolidation_time must be non-negative.")
 
 
 @dataclass
@@ -358,9 +411,11 @@ class ModelParameters:
     # explicit positive interval to decouple visualization from checkpoints.
     # Appended here to preserve the positional constructor API.
     vtk_interval: Optional[int] = None
-    # Keep this new option last so existing positional construction remains
-    # backward compatible.
+    # Appended after the established topology inputs for positional
+    # compatibility.
     fault_mode: FaultMode = FaultMode.FRICTIONAL
+    # Optional and appended to preserve every pre-existing positional field.
+    dem: DEMCouplingParameters = field(default_factory=DEMCouplingParameters)
 
     def __post_init__(self):
         case_value = (
@@ -375,6 +430,20 @@ class ModelParameters:
             raise ValueError(
                 f"case_type must be one of: {supported}."
             ) from exc
+
+        friction_law = (
+            self.friction_law.value
+            if isinstance(self.friction_law, FrictionLaw)
+            else str(self.friction_law).lower()
+        )
+        try:
+            self.friction_law = FrictionLaw(friction_law)
+        except ValueError as exc:
+            supported = ", ".join(law.value for law in FrictionLaw)
+            raise ValueError(
+                f"friction_law must be one of: {supported}."
+            ) from exc
+        self.dem.validate()
 
         #self.G = self.rho * self.cs ** 2
         if self.E > 0:
@@ -465,6 +534,13 @@ class ModelParameters:
             raise ValueError(
                 f"time_integrator must be one of: {supported}."
             ) from exc
+        if (
+            self.friction_law is FrictionLaw.DEM_MULTISCALE
+            and self.time_integrator is not TimeIntegrator.EULER
+        ):
+            raise ValueError(
+                "dem_multiscale currently supports only the Euler time integrator."
+            )
 
         if self.iterative_rtol <= 0.0:
             raise ValueError("iterative_rtol must be > 0.")
