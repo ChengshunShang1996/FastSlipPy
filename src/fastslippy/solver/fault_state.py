@@ -123,7 +123,9 @@ class FaultState:
                         self,
                         tauqs_col: np.ndarray,
                         stress: StressState,
-                        fric: FrictionalZones):
+                        fric: FrictionalZones,
+                        *,
+                        tolerance_factor: float = 1.0):
         """Solve the signed rate-state equation with safeguarded Newton steps.
 
         Unlike :meth:`solve_slip_rate_newton`, this version solves for
@@ -133,6 +135,9 @@ class FaultState:
         Newton solver is intentionally retained for comparison.
         """
         p = self.p
+        if tolerance_factor < 1.0 or not np.isfinite(tolerance_factor):
+            raise ValueError("tolerance_factor must be finite and at least one.")
+        friction_tolerance = p.friction_tolerance * tolerance_factor
         tauqs_col = np.asarray(tauqs_col, dtype=float)
         if tauqs_col.shape != (p.Ny,):
             raise ValueError(
@@ -185,8 +190,11 @@ class FaultState:
                     f"Newton v2 received invalid friction data at node {iy}."
                 )
 
+            smallest_speed = np.nextafter(0.0, 1.0)
+
             def residual_and_log_derivative(speed):
                 """Return F(speed) and dF/d(log(speed)), avoiding overflow."""
+                speed = max(float(speed), smallest_speed)
                 log_speed = np.log(speed)
                 log_q = log_speed + log_multiplier
                 if log_q > 20.0:
@@ -212,10 +220,14 @@ class FaultState:
             # F is strictly increasing. Radiation damping therefore gives the
             # finite analytical upper bound ``target / eta``.
             guaranteed_upper = target / p.eta
+            if guaranteed_upper <= smallest_speed:
+                # The physical root is below the smallest representable
+                # positive float.  Zero is the only meaningful stored rate.
+                solved[iy] = 0.0
+                continue
             previous_speed = abs(float(self.V[iy]))
             if not np.isfinite(previous_speed):
                 previous_speed = abs(float(p.Vi))
-            smallest_speed = np.nextafter(0.0, 1.0)
             upper = min(
                 max(2.0 * previous_speed, smallest_speed),
                 guaranteed_upper,
@@ -249,7 +261,7 @@ class FaultState:
                     raise RuntimeError(
                         f"Newton v2 became non-finite at fault node {iy}."
                     )
-                if abs(residual) <= p.friction_tolerance:
+                if abs(residual) <= friction_tolerance:
                     converged = True
                     break
 
@@ -283,7 +295,7 @@ class FaultState:
                 if newton_speed == speed:
                     # No further representable progress is possible.
                     converged = abs(residual) <= max(
-                        p.friction_tolerance,
+                        friction_tolerance,
                         16.0 * np.finfo(float).eps * target,
                     )
                     break

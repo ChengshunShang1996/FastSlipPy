@@ -74,7 +74,9 @@ rate.  During an active interval FastSlipPy supplies driving shear stress,
 effective normal stress and the macro time interval.  The RVE applies
 ``tau_drive - eta * V_wall`` to its dynamic shear wall, advances with DEM
 substeps for exactly that interval, and returns slip increment and mean wall
-velocity.  See ``examples/run_case_dem_multiscale.py``.
+velocity. See ``examples/dem_multiscale/run_case.py``. The example directory
+contains its own Kratos geometry, material law and project settings, so no
+external DEM case path or environment variable is required.
 
 The initial implementation intentionally supports only the Euler integrator.
 It writes Kratos model snapshots alongside FastSlipPy checkpoints, but restart

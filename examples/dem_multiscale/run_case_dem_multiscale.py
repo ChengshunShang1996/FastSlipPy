@@ -1,10 +1,4 @@
-"""Run the optional fast-slip Kratos DEM coupling.
-
-The referenced DEM case must contain ``dem_shearDEM.mdpa``,
-``dem_shearDEM_FEM_boundary.mdpa``, ``MaterialsDEM.json`` and
-``ProjectParametersDEM.json``.  Stress, length and time units in that case
-must be consistent with FastSlipPy before using this as a physical model.
-"""
+"""Run the self-contained FastSlipPy/Kratos DEM multiscale example."""
 
 from __future__ import annotations
 
@@ -18,19 +12,31 @@ from fastslippy.pre_processing.model_parameters import (
     ModelParameters,
 )
 
+CASE_DIRECTORY = Path(__file__).resolve().parent
+
+
+class DEMExample(FastSlipPy):
+    """Apply a short, rapid loading ramp so the example activates its RVEs."""
+
+    def set_lab_case_velocity_bc(self, p: ModelParameters, t: float) -> None:
+        del t
+        loading_velocity = 1.0e-2
+        p.bc.right.uy.set_velocity(loading_velocity)
+        p.bc.top.uy.set_velocity(loading_velocity)
+        p.bc.bottom.uy.set_velocity(loading_velocity)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "dem_case_directory",
+        "--output",
         type=Path,
-        help="directory containing the prepared Kratos DEM shear case",
+        default=Path("output/dem-coupled"),
     )
-    parser.add_argument("--output", type=Path, default=Path("output/dem-coupled"))
     args = parser.parse_args()
 
     dem = DEMCouplingParameters(
-        case_directory=str(args.dem_case_directory.resolve()),
+        case_directory=str(CASE_DIRECTORY),
         activation_velocity=5.0e-5,
         deactivation_velocity=2.0e-5,
         deactivation_steps=10,
@@ -41,8 +47,8 @@ def main() -> None:
         normal_servo_velocity=0.1,
         servo_relaxation=0.15,
         maximum_wall_speed=0.5,
-        consolidation_time=1.0e-3,
-        output_enabled=False,
+        consolidation_time=1.0e-4,
+        output_enabled=True,
     )
     params = ModelParameters(
         case_type="lab",
@@ -51,10 +57,10 @@ def main() -> None:
         alpha=90.0,
         xsize=1.0,
         ysize=1.0,
-        Nx=11,
-        Ny=11,
+        Nx=5,
+        Ny=5,
         Nt=1000,
-        tfinal=0.1,
+        tfinal=0.02,
         dt_init=1.0e-5,
         dt_max=1.0e-3,
         output_interval=10,
@@ -72,7 +78,7 @@ def main() -> None:
     params.bc.bottom.ux.set_fixed()
     params.bc.bottom.uy.set_velocity(1.0e-4)
 
-    FastSlipPy(params=params, output_dir=str(args.output)).run()
+    DEMExample(params=params, output_dir=str(args.output)).run()
 
 
 if __name__ == "__main__":

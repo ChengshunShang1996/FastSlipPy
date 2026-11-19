@@ -224,7 +224,12 @@ class FastSlipPy:
     def before_run(self):
         pass
 
-    def _solve_fault_slip_rate(self, tauqs_col: Optional[np.ndarray] = None):
+    def _solve_fault_slip_rate(
+        self,
+        tauqs_col: Optional[np.ndarray] = None,
+        *,
+        predictor_only: bool = False,
+    ):
         """Solve the algebraic rate-and-state equation at one time level."""
         if self.p.fault_mode is not FaultMode.FRICTIONAL:
             self.fault.V.fill(0.0)
@@ -232,7 +237,15 @@ class FastSlipPy:
         if tauqs_col is None:
             tauqs_col = self.tauqs[:, self.p.Nx // 2]
         if self.p.slip_rate_solver is SlipRateSolver.NEWTON_V2:
-            self.fault.solve_slip_rate_newton_v2(tauqs_col, self.stress, self.fric)
+            self.fault.solve_slip_rate_newton_v2(
+                tauqs_col,
+                self.stress,
+                self.fric,
+                # In DEM mode RSF is only a switching predictor.  A 10 Pa
+                # residual at the example's 10 kPa confinement is sufficient
+                # for that decision and avoids subnormal-speed stagnation.
+                tolerance_factor=2.0 if predictor_only else 1.0,
+            )
         elif self.p.slip_rate_solver is SlipRateSolver.BISECTION_BP3:
             self.fault.solve_slip_rate_bisection(tauqs_col, self.stress, self.fric)
         else: #BISECTION
@@ -509,7 +522,7 @@ class FastSlipPy:
 
             # Algebraic slip rate at the accepted beginning-of-step state.
             if p.fault_mode is FaultMode.FRICTIONAL:
-                self._solve_fault_slip_rate()
+                self._solve_fault_slip_rate(predictor_only=self._using_dem)
 
             # ── adaptive time step ──
                 dem_fast_step = (
