@@ -86,17 +86,22 @@ def _submodel_part(name: str, identifiers: list[int]) -> list[str]:
 
 
 def write_case(directory: Path = CASE_DIRECTORY) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
     gouge, bottom, top = _packing()
-    particles = gouge + bottom + top
-    gouge_ids = list(range(1, len(gouge) + 1))
-    bottom_ids = list(range(gouge_ids[-1] + 1, gouge_ids[-1] + len(bottom) + 1))
-    top_ids = list(range(bottom_ids[-1] + 1, bottom_ids[-1] + len(top) + 1))
     fine_ids = [
         identifier
         for identifier, (_, y, _) in enumerate(gouge, start=1)
         if abs(y - 0.5 * HEIGHT) <= 0.5 * FINE_LAYER_WIDTH
     ]
+    write_packing(directory, gouge, bottom, top, fine_ids)
+
+
+def write_packing(directory, gouge, bottom, top, fine_ids):
+    """Write free cylinders and two velocity-constrained rough walls."""
+    directory.mkdir(parents=True, exist_ok=True)
+    particles = gouge + bottom + top
+    gouge_ids = list(range(1, len(gouge) + 1))
+    bottom_ids = list(range(gouge_ids[-1] + 1, gouge_ids[-1] + len(bottom) + 1))
+    top_ids = list(range(bottom_ids[-1] + 1, bottom_ids[-1] + len(top) + 1))
 
     lines = [
         "Begin ModelPartData",
@@ -128,7 +133,8 @@ def write_case(directory: Path = CASE_DIRECTORY) -> None:
         lines.extend(["End NodalData", ""])
 
     lines.extend(_submodel_part("Gouge", gouge_ids))
-    lines.extend(_submodel_part("FineLayer", fine_ids))
+    if fine_ids:
+        lines.extend(_submodel_part("FineLayer", fine_ids))
     lines.extend(_submodel_part("BottomWall", bottom_ids))
     lines.extend(_submodel_part("TopWall", top_ids))
     (directory / "dem_shearDEM.mdpa").write_text(

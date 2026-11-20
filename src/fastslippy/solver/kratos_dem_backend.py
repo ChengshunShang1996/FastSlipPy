@@ -7,6 +7,7 @@ FastSlipPy therefore does not require KratosMultiphysics.
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 from contextlib import contextmanager
@@ -38,6 +39,7 @@ def _stage_class(KM, DEMAnalysisStage):
             self.effective_normal_stress = 1.0
             self.radiation_damping = 0.0
             self.wall_velocity = np.zeros(2, dtype=float)
+            self.prescribed_wall_velocity = None
             self.shear_displacement = 0.0
             self.measured_shear_traction = 0.0
             self.measured_normal_traction = 0.0
@@ -49,7 +51,7 @@ def _stage_class(KM, DEMAnalysisStage):
             self.top_wall = self.spheres_model_part.GetSubModelPart("TopWall")
             self.bottom_wall = self.spheres_model_part.GetSubModelPart("BottomWall")
 
-        def InitializeSolutionStep(self):
+        def _update_wall_velocity(self):
             dt = float(self._GetSolver().dt)
             target_resistance = (
                 self.driving_shear_stress
@@ -75,6 +77,12 @@ def _stage_class(KM, DEMAnalysisStage):
                 (1.0 - relaxation) * self.wall_velocity[1]
                 + relaxation * desired_normal_velocity
             )
+
+        def InitializeSolutionStep(self):
+            if self.prescribed_wall_velocity is None:
+                self._update_wall_velocity()
+            else:
+                self.wall_velocity[:] = self.prescribed_wall_velocity
             velocity = [
                 float(self.wall_velocity[0]),
                 float(self.wall_velocity[1]),
@@ -218,18 +226,28 @@ class KratosDEMRVE:
         stage.radiation_damping = radiation_damping
         solver = stage._GetSolver()
         nominal_dt = float(solver.dt)
-        elapsed = 0.0
+        if not math.isfinite(nominal_dt) or nominal_dt <= 0.0:
+            raise ValueError("DEM solver time step must be finite and positive.")
+        if not math.isfinite(duration) or duration <= 0.0:
+            raise ValueError("DEM interval must be finite and positive.")
+        # Repeatedly summing dt can produce a spurious near-zero final solve.
+        full_steps = int(duration / nominal_dt)
+        remainder = duration - full_steps * nominal_dt
+        step_count = max(1, full_steps + int(remainder > math.ulp(duration)))
         traction_integral = 0.0
         normal_integral = 0.0
         with _working_directory(self.work_directory):
-            while elapsed < duration:
-                step_dt = min(nominal_dt, duration - elapsed)
-                solver.dt = step_dt
-                self._single_step()
-                elapsed += step_dt
-                traction_integral += stage.measured_shear_traction * step_dt
-                normal_integral += stage.measured_normal_traction * step_dt
-            solver.dt = nominal_dt
+            try:
+                for i in range(step_count):
+                    step_dt = nominal_dt
+                    if i + 1 == step_count:
+                        step_dt = duration - i * nominal_dt
+                    solver.dt = step_dt
+                    self._single_step()
+                    traction_integral += stage.measured_shear_traction * step_dt
+                    normal_integral += stage.measured_normal_traction * step_dt
+            finally:
+                solver.dt = nominal_dt
         return (
             traction_integral / duration,
             normal_integral / duration,
