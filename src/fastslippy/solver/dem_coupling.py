@@ -73,6 +73,7 @@ class DEMMultiscaleCoupler:
     ) -> None:
         self.settings = settings
         self._factory = backend_factory
+        self._initial_normal_stress: Optional[np.ndarray] = None
         self._backends: list[Optional[DEMRVEBackend]] = [None] * node_count
         self.active = np.zeros(node_count, dtype=bool)
         self._below_threshold_steps = np.zeros(node_count, dtype=np.int64)
@@ -128,6 +129,9 @@ class DEMMultiscaleCoupler:
             raise ValueError("DEM stress arrays have the wrong shape.")
         if dt <= 0.0 or not np.isfinite(dt):
             raise ValueError("DEM macro time step must be finite and positive.")
+        if self._initial_normal_stress is None:
+            # RVEs may first activate after the FDM stress has already evolved.
+            self._initial_normal_stress = normal.copy()
 
         newly_active = (~self.active) & (
             np.abs(predictor) >= self.settings.activation_velocity
@@ -144,7 +148,9 @@ class DEMMultiscaleCoupler:
             backend = self._backends[index]
             if backend is None:
                 backend = self._factory(
-                    int(index), float(normal[index]), float(predictor[index])
+                    int(index),
+                    float(self._initial_normal_stress[index]),
+                    float(predictor[index]),
                 )
                 self._backends[index] = backend
             result = backend.advance(

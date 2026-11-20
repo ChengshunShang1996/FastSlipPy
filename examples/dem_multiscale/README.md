@@ -46,3 +46,31 @@ The per-substep trace is written to `output/single-rve/history.csv`. Use
 `--output PATH` for another run directory. The trace reports wall-center
 separation as `height_m`, actual wall displacements and velocities, forces
 on both walls, tractions, Kratos time and the integration errors.
+
+## Target-controlled normal consolidation
+
+```powershell
+$env:OMP_NUM_THREADS = '1'
+python examples/dem_multiscale/verify_normal_consolidation.py
+```
+
+The command creates separate 5 kPa, 15 kPa and step-limit runs of the same
+16-cylinder packing. Each RVE writes `normal_consolidation.csv` under
+`output/normal-consolidation/<case>/rve_00000/`. The final row records the
+stop reason. The step-limit run must raise a consolidation error and leave
+its diagnostic history. Use `--output PATH` to change the parent directory.
+
+The coupled backend prepares each new RVE at its node's initial effective
+normal stress. The bottom wall is fixed and the top wall can move vertically
+in either direction. At every DEM substep both compression-positive wall
+tractions must match the target within
+`consolidation_stress_atol + consolidation_stress_rtol * target` (defaults
+1 Pa and 0.001). The in-plane norm of the sum of both reactions per wall
+area must satisfy the same bound. The largest wall normal speed, free-grain
+translation speed and free-grain rim speed (radius times angular speed)
+must each be at most `consolidation_speed_tol` (default 1e-5 m/s).
+
+All checks must pass for `consolidation_window_steps` consecutive substeps
+(default 100). A violation resets the count. `consolidation_max_steps`
+(default 20000) bounds a failed attempt. The backend accepts the legacy
+`consolidation_time` argument for compatibility and ignores its value.

@@ -96,6 +96,29 @@ def test_dem_coupler_activates_only_fast_nodes_and_balances_radiation_damping():
     np.testing.assert_allclose(result.slip_increment, result.velocity * 0.25)
 
 
+def test_late_activation_consolidates_to_initial_node_stress():
+    targets = []
+    calls = []
+
+    def factory(index, initial_normal_stress, initial_velocity):
+        targets.append((index, initial_normal_stress))
+        return DeterministicRVE(index, calls)
+
+    coupler = DEMMultiscaleCoupler(2, DEMCouplingParameters(), factory)
+    normal = np.array([5000.0, 15000.0])
+    loads = dict(
+        driving_shear_stress=np.zeros(2),
+        effective_normal_stress=normal,
+        radiation_damping=0.0,
+        dt=0.1,
+    )
+    coupler.advance(predictor_velocity=np.zeros(2), **loads)
+    normal[:] = 9000.0
+    coupler.advance(predictor_velocity=np.array([0.0, 0.01]), **loads)
+    assert targets == [(1, 15000.0)]
+    assert calls[0][2] == 9000.0
+
+
 def test_dem_configuration_is_optional_and_rejects_midpoint():
     assert ModelParameters().friction_law is FrictionLaw.RATE_STATE
     with pytest.raises(ValueError, match="Euler"):

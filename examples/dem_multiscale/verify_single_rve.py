@@ -185,7 +185,8 @@ def main():
     settings = DEMCouplingParameters(
         case_directory=str(out / "input"), layer_length=width
     )
-    rve = ObservedRVE(0, 0.0, 0.0, settings, out)
+    # This displacement-controlled calibration starts from the raw packing.
+    rve = ObservedRVE(0, None, 0.0, settings, out)
     try:
         verify(rve, width)
     finally:

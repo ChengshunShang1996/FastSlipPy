@@ -47,7 +47,6 @@ def main() -> None:
         normal_servo_velocity=0.1,
         servo_relaxation=0.15,
         maximum_wall_speed=0.5,
-        consolidation_time=1.0e-4,
         output_enabled=True,
     )
     params = ModelParameters(

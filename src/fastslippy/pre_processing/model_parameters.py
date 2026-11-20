@@ -108,8 +108,13 @@ class DEMCouplingParameters:
     normal_servo_velocity: float = 0.1
     servo_relaxation: float = 0.15
     maximum_wall_speed: float = np.inf
-    consolidation_time: float = 0.0
+    consolidation_time: float = 0.0  # Legacy argument, ignored by the DEM backend.
     output_enabled: bool = False
+    consolidation_stress_atol: float = 1.0  # Pa
+    consolidation_stress_rtol: float = 1.0e-3
+    consolidation_speed_tol: float = 1.0e-5  # m/s, including particle rim speed
+    consolidation_window_steps: int = 100
+    consolidation_max_steps: int = 20000
 
     def validate(self) -> None:
         positive = (
@@ -138,6 +143,22 @@ class DEMCouplingParameters:
             raise ValueError("dem.servo_relaxation must lie in (0, 1].")
         if self.consolidation_time < 0.0:
             raise ValueError("dem.consolidation_time must be non-negative.")
+        for name in (
+            "consolidation_stress_atol",
+            "consolidation_stress_rtol",
+            "consolidation_speed_tol",
+        ):
+            value = getattr(self, name)
+            if not np.isfinite(value) or value < 0:
+                raise ValueError(f"dem.{name} must be finite and non-negative.")
+        for name in ("consolidation_window_steps", "consolidation_max_steps"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, np.integer))
+                or value < 1
+            ):
+                raise ValueError(f"dem.{name} must be a positive integer.")
 
 
 @dataclass

@@ -6,10 +6,12 @@ FastSlipPy therefore does not require KratosMultiphysics.
 
 from __future__ import annotations
 
+import csv
 import json
 import math
 import os
 import shutil
+import warnings
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -17,6 +19,10 @@ import numpy as np
 
 from fastslippy.pre_processing.model_parameters import DEMCouplingParameters
 from fastslippy.solver.dem_coupling import DEMRVEResult
+
+
+class NormalConsolidationError(RuntimeError):
+    """The RVE failed to establish the requested initial normal stress."""
 
 
 @contextmanager
@@ -40,6 +46,7 @@ def _stage_class(KM, DEMAnalysisStage):
             self.radiation_damping = 0.0
             self.wall_velocity = np.zeros(2, dtype=float)
             self.prescribed_wall_velocity = None
+            self.lock_tangential_motion = False
             self.shear_displacement = 0.0
             self.measured_shear_traction = 0.0
             self.measured_normal_traction = 0.0
@@ -52,19 +59,22 @@ def _stage_class(KM, DEMAnalysisStage):
             self.bottom_wall = self.spheres_model_part.GetSubModelPart("BottomWall")
 
         def _update_wall_velocity(self):
-            dt = float(self._GetSolver().dt)
-            target_resistance = (
-                self.driving_shear_stress
-                - self.radiation_damping * self.wall_velocity[0]
-            )
-            acceleration = (
-                target_resistance - self.measured_shear_traction
-            ) / self.settings.wall_mass_per_area
-            self.wall_velocity[0] += acceleration * dt
-            maximum = self.settings.maximum_wall_speed
-            self.wall_velocity[0] = float(
-                np.clip(self.wall_velocity[0], -maximum, maximum)
-            )
+            if self.lock_tangential_motion:
+                self.wall_velocity[0] = 0.0
+            else:
+                dt = float(self._GetSolver().dt)
+                target_resistance = (
+                    self.driving_shear_stress
+                    - self.radiation_damping * self.wall_velocity[0]
+                )
+                acceleration = (
+                    target_resistance - self.measured_shear_traction
+                ) / self.settings.wall_mass_per_area
+                self.wall_velocity[0] += acceleration * dt
+                maximum = self.settings.maximum_wall_speed
+                self.wall_velocity[0] = float(
+                    np.clip(self.wall_velocity[0], -maximum, maximum)
+                )
 
             normal_error = (
                 self.effective_normal_stress - self.measured_normal_traction
@@ -102,6 +112,7 @@ def _stage_class(KM, DEMAnalysisStage):
                     node.GetSolutionStepValue(KM.TOTAL_FORCES), dtype=float
                 )
             length = self.settings.layer_length
+            self.top_wall_force = total_force
             self.measured_shear_traction = float(-total_force[0] / length)
             self.measured_normal_traction = max(float(total_force[1] / length), 0.0)
             dt = float(self.spheres_model_part.ProcessInfo[KM.DELTA_TIME])
@@ -123,7 +134,7 @@ class KratosDEMRVE:
     def __init__(
         self,
         index: int,
-        initial_normal_stress: float,
+        initial_normal_stress: float | None,
         initial_velocity: float,
         settings: DEMCouplingParameters,
         output_root: Path,
@@ -140,10 +151,24 @@ class KratosDEMRVE:
                 "DEMApplication."
             ) from exc
 
+        settings.validate()
+        if initial_normal_stress is not None and (
+            not math.isfinite(initial_normal_stress) or initial_normal_stress < 0
+        ):
+            raise ValueError(
+                "Initial DEM normal stress must be finite and compressive or zero."
+            )
+        if settings.consolidation_time:
+            warnings.warn(
+                "consolidation_time is deprecated and ignored. "
+                "Normal consolidation ends when its equilibrium criteria are met.",
+                FutureWarning,
+                stacklevel=2,
+            )
         self.KM = KM
         self.settings = settings
         self.index = index
-        self.work_directory = output_root / f"rve_{index:05d}"
+        self.work_directory = output_root.resolve() / f"rve_{index:05d}"
         self.work_directory.mkdir(parents=True, exist_ok=True)
         self._prepare_case_files()
 
@@ -165,24 +190,128 @@ class KratosDEMRVE:
         with _working_directory(self.work_directory):
             self.stage = stage_type(self.model, parameters, settings)
             self.stage.Initialize()
-        self.stage.wall_velocity[0] = initial_velocity
-        self.stage.effective_normal_stress = initial_normal_stress
         self._closed = False
+        if initial_normal_stress is not None:
+            try:
+                with _working_directory(self.work_directory):
+                    self._consolidate_normal(initial_normal_stress)
+            except BaseException:
+                self.close()
+                raise
+        self.stage.wall_velocity[0] = initial_velocity
 
-        if settings.consolidation_time > 0.0:
-            self._advance_interval(
-                duration=settings.consolidation_time,
-                driving_shear_stress=0.0,
-                effective_normal_stress=initial_normal_stress,
-                radiation_damping=0.0,
-            )
+    def _consolidate_normal(self, target: float) -> None:
+        stage, km, cfg = self.stage, self.KM, self.settings
+        top = list(stage.top_wall.Nodes)
+        bottom = list(stage.bottom_wall.Nodes)
+        wall_ids = {n.Id for n in top + bottom}
+        grains = [n for n in stage.spheres_model_part.Nodes if n.Id not in wall_ids]
+        if not top or not bottom or not grains:
+            raise ValueError("Normal consolidation requires two walls and free grains.")
+
+        stage.lock_tangential_motion = True
+        stage.effective_normal_stress = target
+        stress_tol = (
+            cfg.consolidation_stress_atol + cfg.consolidation_stress_rtol * target
+        )
+        stable_steps = 0
+        path = self.work_directory / "normal_consolidation.csv"
+        with path.open("w", newline="", encoding="utf-8") as stream:
+            for step in range(1, cfg.consolidation_max_steps + 1):
+                self._single_step()
+                bottom_force = np.sum(
+                    [
+                        np.asarray(n.GetSolutionStepValue(km.TOTAL_FORCES))
+                        for n in bottom
+                    ],
+                    axis=0,
+                )
+                top_normal = stage.top_wall_force[1] / cfg.layer_length
+                bottom_normal = -bottom_force[1] / cfg.layer_length
+                imbalance = (
+                    np.linalg.norm((stage.top_wall_force + bottom_force)[:2])
+                    / cfg.layer_length
+                )
+                wall_speed = np.max(
+                    [abs(n.GetSolutionStepValue(km.VELOCITY_Y)) for n in top + bottom]
+                )
+                grain_speed = np.max(
+                    [
+                        np.linalg.norm(n.GetSolutionStepValue(km.VELOCITY))
+                        for n in grains
+                    ]
+                )
+                rim_speed = np.max(
+                    [
+                        n.GetSolutionStepValue(km.RADIUS)
+                        * abs(n.GetSolutionStepValue(km.ANGULAR_VELOCITY_Z))
+                        for n in grains
+                    ]
+                )
+                finite = np.isfinite(
+                    [
+                        top_normal,
+                        bottom_normal,
+                        imbalance,
+                        wall_speed,
+                        grain_speed,
+                        rim_speed,
+                    ]
+                ).all()
+                in_band = (
+                    finite
+                    and max(
+                        abs(top_normal - target), abs(bottom_normal - target), imbalance
+                    )
+                    <= stress_tol
+                    and max(wall_speed, grain_speed, rim_speed)
+                    <= cfg.consolidation_speed_tol
+                    and (target == 0 or min(top_normal, bottom_normal) > 0)
+                )
+                stable_steps = stable_steps + 1 if in_band else 0
+                if stable_steps >= cfg.consolidation_window_steps:
+                    status = "converged"
+                elif not finite:
+                    status = "nonfinite"
+                elif step == cfg.consolidation_max_steps:
+                    status = "max_steps"
+                else:
+                    status = "monitoring"
+                row = dict(
+                    step=step,
+                    time_s=stage.time,
+                    target_Pa=target,
+                    top_Pa=top_normal,
+                    bottom_Pa=bottom_normal,
+                    imbalance_Pa=imbalance,
+                    wall_speed_m_s=wall_speed,
+                    top_vy_m_s=top[0].GetSolutionStepValue(km.VELOCITY_Y),
+                    grain_speed_m_s=grain_speed,
+                    rim_speed_m_s=rim_speed,
+                    stable_steps=stable_steps,
+                    status=status,
+                )
+                if step == 1:
+                    writer = csv.DictWriter(stream, fieldnames=row)
+                    writer.writeheader()
+                writer.writerow(row)
+                if status == "converged":
+                    stage.lock_tangential_motion = False
+                    return
+                if status != "monitoring":
+                    raise NormalConsolidationError(
+                        f"RVE {self.index} normal consolidation stopped ({status}) at "
+                        f"step {step}, target={target:g} Pa, top={top_normal:g} Pa, "
+                        f"bottom={bottom_normal:g} Pa, imbalance={imbalance:g} Pa, "
+                        f"wall={wall_speed:g}, grain={grain_speed:g}, "
+                        f"rim={rim_speed:g} m/s, stable steps={stable_steps}. "
+                        f"See {path}"
+                    )
 
     def _prepare_case_files(self) -> None:
         source = Path(self.settings.case_directory).expanduser().resolve()
         if not source.is_dir():
-            raise FileNotFoundError(
-                f"DEM case directory does not exist: {source}"
-            )
+            raise FileNotFoundError(f"DEM case directory does not exist: {source}")
         required = (
             "dem_shearDEM.mdpa",
             "dem_shearDEM_FEM_boundary.mdpa",
