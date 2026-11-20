@@ -74,3 +74,37 @@ All checks must pass for `consolidation_window_steps` consecutive substeps
 (default 100). A violation resets the count. `consolidation_max_steps`
 (default 20000) bounds a failed attempt. The backend accepts the legacy
 `consolidation_time` argument for compatibility and ignores its value.
+
+## Single-RVE shear preload and handoff
+
+```powershell
+$env:OMP_NUM_THREADS = '1'
+python examples/dem_multiscale/verify_shear_preload.py
+```
+
+Supply `initial_driving_shear_stress` and `radiation_damping` when constructing
+a `KratosDEMRVE` to request a near-static shear preload after normal
+consolidation. Zero is a valid shear target. The driver keeps the normal
+servo active and ramps the shear drive smoothly from the measured initial
+resistance to the target over `shear_preload_ramp_steps` (default 200).
+The equilibrium window starts once the full drive is applied.
+Upper and lower wall contact tractions must match the drive minus ηV within
+the configured absolute-plus-relative shear tolerance. The damping contribution
+ηV itself must fit that tolerance, and all wall and grain speeds and normal
+equilibrium checks must pass. The shear phase has its own step count and uses
+the same window and maximum steps as normal consolidation.
+
+The same stage continues into loading with its accepted wall velocity and
+contact forces. `loading_time` and `loading_slip` measure from the accepted
+handoff. The original time and displacement are recorded in
+`loading_time_origin` and `loading_slip_origin`. To check continuity, the
+first call to `advance` uses the same drive, normal stress and damping.
+
+The verification uses 10 kPa normal stress, drives of 0 and ±1 kPa, a wall
+mass of 50 kg/m² and η = 50,000 Pa·s/m. Each accepted RVE is held for 200
+production substeps. A separate 20 kPa run exercises the failure path.
+At the step limit, `sustained_sliding` records same-sign wall motion above the
+speed tolerance over the last full window at the target drive.
+Under `output/shear-preload`, each case has a per-step `shear_preload.csv`.
+Accepted cases also have `handoff.csv`, whose first row is the accepted
+state at loading time zero. `handoff.png` compares the three accepted cases.

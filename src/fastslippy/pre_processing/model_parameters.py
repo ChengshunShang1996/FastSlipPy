@@ -115,6 +115,7 @@ class DEMCouplingParameters:
     consolidation_speed_tol: float = 1.0e-5  # m/s, including particle rim speed
     consolidation_window_steps: int = 100
     consolidation_max_steps: int = 20000
+    shear_preload_ramp_steps: int = 200
 
     def validate(self) -> None:
         positive = (
@@ -151,7 +152,11 @@ class DEMCouplingParameters:
             value = getattr(self, name)
             if not np.isfinite(value) or value < 0:
                 raise ValueError(f"dem.{name} must be finite and non-negative.")
-        for name in ("consolidation_window_steps", "consolidation_max_steps"):
+        for name in (
+            "consolidation_window_steps",
+            "consolidation_max_steps",
+            "shear_preload_ramp_steps",
+        ):
             value = getattr(self, name)
             if (
                 isinstance(value, bool)

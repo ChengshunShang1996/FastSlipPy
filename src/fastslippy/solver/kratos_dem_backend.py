@@ -25,6 +25,10 @@ class NormalConsolidationError(RuntimeError):
     """The RVE failed to establish the requested initial normal stress."""
 
 
+class ShearPreloadError(RuntimeError):
+    """The RVE failed to establish a near-static initial shear state."""
+
+
 @contextmanager
 def _working_directory(path: Path):
     previous = Path.cwd()
@@ -138,6 +142,9 @@ class KratosDEMRVE:
         initial_velocity: float,
         settings: DEMCouplingParameters,
         output_root: Path,
+        *,
+        initial_driving_shear_stress: float | None = None,
+        radiation_damping: float = 0.0,
     ) -> None:
         try:
             import KratosMultiphysics as KM
@@ -152,6 +159,22 @@ class KratosDEMRVE:
             ) from exc
 
         settings.validate()
+        if initial_driving_shear_stress is not None:
+            if (
+                not math.isfinite(initial_velocity)
+                or abs(initial_velocity) > settings.consolidation_speed_tol
+            ):
+                raise ValueError(
+                    "Static shear preload requires a near-zero initial velocity."
+                )
+            if initial_normal_stress is None or not math.isfinite(
+                initial_driving_shear_stress
+            ):
+                raise ValueError(
+                    "Shear preload requires a normal stress and a finite shear target."
+                )
+            if not math.isfinite(radiation_damping) or radiation_damping < 0:
+                raise ValueError("Radiation damping must be finite and non-negative.")
         if initial_normal_stress is not None and (
             not math.isfinite(initial_normal_stress) or initial_normal_stress < 0
         ):
@@ -194,14 +217,66 @@ class KratosDEMRVE:
         if initial_normal_stress is not None:
             try:
                 with _working_directory(self.work_directory):
-                    self._consolidate_normal(initial_normal_stress)
+                    self._equilibrate(initial_normal_stress)
+                    if initial_driving_shear_stress is not None:
+                        self._equilibrate(
+                            initial_normal_stress,
+                            initial_driving_shear_stress,
+                            radiation_damping,
+                        )
             except BaseException:
                 self.close()
                 raise
-        self.stage.wall_velocity[0] = initial_velocity
+        if initial_driving_shear_stress is None:
+            self.stage.wall_velocity[0] = initial_velocity
+        # Only the reference changes at handoff. Keep the Kratos time, geometry,
+        # velocity and all contact history on this very same stage.
+        self.loading_time_origin = self.stage.time
+        self.loading_slip_origin = self.stage.shear_displacement
 
-    def _consolidate_normal(self, target: float) -> None:
-        stage, km, cfg = self.stage, self.KM, self.settings
+    @property
+    def loading_time(self) -> float:
+        return self.stage.time - self.loading_time_origin
+
+    @property
+    def loading_slip(self) -> float:
+        return self.stage.shear_displacement - self.loading_slip_origin
+
+    def _wall_and_grain_measurements(self, top, bottom, grains):
+        km = self.KM
+        length = self.settings.layer_length
+        top_force = self.stage.top_wall_force
+        bottom_force = np.sum(
+            [np.asarray(n.GetSolutionStepValue(km.TOTAL_FORCES)) for n in bottom],
+            axis=0,
+        )
+        return dict(
+            top_Pa=top_force[1] / length,
+            bottom_Pa=-bottom_force[1] / length,
+            imbalance_Pa=np.linalg.norm((top_force + bottom_force)[:2]) / length,
+            top_shear_Pa=-top_force[0] / length,
+            bottom_shear_Pa=bottom_force[0] / length,
+            top_vx_m_s=top[0].GetSolutionStepValue(km.VELOCITY_X),
+            top_vy_m_s=top[0].GetSolutionStepValue(km.VELOCITY_Y),
+            wall_speed_m_s=np.max(
+                [abs(n.GetSolutionStepValue(km.VELOCITY_Y)) for n in top + bottom]
+            ),
+            grain_speed_m_s=np.max(
+                [np.linalg.norm(n.GetSolutionStepValue(km.VELOCITY)) for n in grains]
+            ),
+            rim_speed_m_s=np.max(
+                [
+                    n.GetSolutionStepValue(km.RADIUS)
+                    * abs(n.GetSolutionStepValue(km.ANGULAR_VELOCITY_Z))
+                    for n in grains
+                ]
+            ),
+        )
+
+    def _equilibrate(
+        self, target: float, shear: float | None = None, radiation_damping: float = 0.0
+    ) -> None:
+        stage, cfg = self.stage, self.settings
         top = list(stage.top_wall.Nodes)
         bottom = list(stage.bottom_wall.Nodes)
         wall_ids = {n.Id for n in top + bottom}
@@ -209,87 +284,98 @@ class KratosDEMRVE:
         if not top or not bottom or not grains:
             raise ValueError("Normal consolidation requires two walls and free grains.")
 
-        stage.lock_tangential_motion = True
+        stage.lock_tangential_motion = shear is None
         stage.effective_normal_stress = target
+        stage.radiation_damping = radiation_damping
+        start_shear = stage.measured_shear_traction
         stress_tol = (
             cfg.consolidation_stress_atol + cfg.consolidation_stress_rtol * target
         )
         stable_steps = 0
-        path = self.work_directory / "normal_consolidation.csv"
+        sliding_steps = 0
+        last_vx = 0.0
+        phase = "normal_consolidation" if shear is None else "shear_preload"
+        path = self.work_directory / f"{phase}.csv"
         with path.open("w", newline="", encoding="utf-8") as stream:
             for step in range(1, cfg.consolidation_max_steps + 1):
+                if shear is not None:
+                    fraction = min(step / cfg.shear_preload_ramp_steps, 1.0)
+                    weight = fraction * fraction * (3.0 - 2.0 * fraction)
+                    stage.driving_shear_stress = (
+                        shear
+                        if fraction == 1.0
+                        else start_shear + weight * (shear - start_shear)
+                    )
                 self._single_step()
-                bottom_force = np.sum(
-                    [
-                        np.asarray(n.GetSolutionStepValue(km.TOTAL_FORCES))
-                        for n in bottom
-                    ],
-                    axis=0,
-                )
-                top_normal = stage.top_wall_force[1] / cfg.layer_length
-                bottom_normal = -bottom_force[1] / cfg.layer_length
-                imbalance = (
-                    np.linalg.norm((stage.top_wall_force + bottom_force)[:2])
-                    / cfg.layer_length
-                )
-                wall_speed = np.max(
-                    [abs(n.GetSolutionStepValue(km.VELOCITY_Y)) for n in top + bottom]
-                )
-                grain_speed = np.max(
-                    [
-                        np.linalg.norm(n.GetSolutionStepValue(km.VELOCITY))
-                        for n in grains
-                    ]
-                )
-                rim_speed = np.max(
-                    [
-                        n.GetSolutionStepValue(km.RADIUS)
-                        * abs(n.GetSolutionStepValue(km.ANGULAR_VELOCITY_Z))
-                        for n in grains
-                    ]
-                )
-                finite = np.isfinite(
-                    [
-                        top_normal,
-                        bottom_normal,
-                        imbalance,
-                        wall_speed,
-                        grain_speed,
-                        rim_speed,
-                    ]
-                ).all()
+                measured = self._wall_and_grain_measurements(top, bottom, grains)
+                top_normal = measured["top_Pa"]
+                bottom_normal = measured["bottom_Pa"]
+                vx = measured["top_vx_m_s"]
                 in_band = (
-                    finite
-                    and max(
-                        abs(top_normal - target), abs(bottom_normal - target), imbalance
+                    max(
+                        abs(top_normal - target),
+                        abs(bottom_normal - target),
+                        measured["imbalance_Pa"],
                     )
                     <= stress_tol
-                    and max(wall_speed, grain_speed, rim_speed)
+                    and max(
+                        measured["wall_speed_m_s"],
+                        measured["grain_speed_m_s"],
+                        measured["rim_speed_m_s"],
+                    )
                     <= cfg.consolidation_speed_tol
                     and (target == 0 or min(top_normal, bottom_normal) > 0)
                 )
+                if shear is not None:
+                    at_target = step >= cfg.shear_preload_ramp_steps
+                    contact_target = stage.driving_shear_stress - radiation_damping * vx
+                    shear_tol = (
+                        cfg.consolidation_stress_atol
+                        + cfg.consolidation_stress_rtol * abs(shear)
+                    )
+                    in_band = (
+                        in_band
+                        and at_target
+                        and abs(vx) <= cfg.consolidation_speed_tol
+                        and abs(radiation_damping * vx) <= shear_tol
+                        and abs(measured["top_shear_Pa"] - contact_target) <= shear_tol
+                        and abs(measured["bottom_shear_Pa"] - contact_target)
+                        <= shear_tol
+                    )
+                    if at_target and abs(vx) > cfg.consolidation_speed_tol:
+                        sliding_steps = sliding_steps + 1 if vx * last_vx > 0 else 1
+                    else:
+                        sliding_steps = 0
+                    last_vx = vx
+                    measured.update(
+                        target_drive_Pa=shear,
+                        applied_drive_Pa=stage.driving_shear_stress,
+                        damping_Pa_s_m=radiation_damping,
+                        contact_target_Pa=contact_target,
+                        preload_slip_m=stage.shear_displacement,
+                    )
+                finite = all(math.isfinite(value) for value in measured.values())
+                in_band = in_band and finite
                 stable_steps = stable_steps + 1 if in_band else 0
                 if stable_steps >= cfg.consolidation_window_steps:
                     status = "converged"
                 elif not finite:
                     status = "nonfinite"
                 elif step == cfg.consolidation_max_steps:
-                    status = "max_steps"
+                    status = (
+                        "sustained_sliding"
+                        if sliding_steps >= cfg.consolidation_window_steps
+                        else "max_steps"
+                    )
                 else:
                     status = "monitoring"
                 row = dict(
                     step=step,
                     time_s=stage.time,
                     target_Pa=target,
-                    top_Pa=top_normal,
-                    bottom_Pa=bottom_normal,
-                    imbalance_Pa=imbalance,
-                    wall_speed_m_s=wall_speed,
-                    top_vy_m_s=top[0].GetSolutionStepValue(km.VELOCITY_Y),
-                    grain_speed_m_s=grain_speed,
-                    rim_speed_m_s=rim_speed,
                     stable_steps=stable_steps,
                     status=status,
+                    **measured,
                 )
                 if step == 1:
                     writer = csv.DictWriter(stream, fieldnames=row)
@@ -299,13 +385,22 @@ class KratosDEMRVE:
                     stage.lock_tangential_motion = False
                     return
                 if status != "monitoring":
+                    if shear is not None:
+                        raise ShearPreloadError(
+                            f"RVE {self.index} shear preload stopped ({status}) "
+                            f"at step {step}, drive={shear:g} Pa, "
+                            f"contact={stage.measured_shear_traction:g} Pa, "
+                            f"normal={top_normal:g} Pa, vx={vx:g} m/s. See {path}"
+                        )
                     raise NormalConsolidationError(
                         f"RVE {self.index} normal consolidation stopped ({status}) at "
                         f"step {step}, target={target:g} Pa, top={top_normal:g} Pa, "
-                        f"bottom={bottom_normal:g} Pa, imbalance={imbalance:g} Pa, "
-                        f"wall={wall_speed:g}, grain={grain_speed:g}, "
-                        f"rim={rim_speed:g} m/s, stable steps={stable_steps}. "
-                        f"See {path}"
+                        f"bottom={bottom_normal:g} Pa, "
+                        f"imbalance={measured['imbalance_Pa']:g} Pa, "
+                        f"wall={measured['wall_speed_m_s']:g}, "
+                        f"grain={measured['grain_speed_m_s']:g}, "
+                        f"rim={measured['rim_speed_m_s']:g} m/s, "
+                        f"stable steps={stable_steps}. See {path}"
                     )
 
     def _prepare_case_files(self) -> None:
@@ -321,9 +416,7 @@ class KratosDEMRVE:
         problem_name = f"rve_{self.index:05d}"
         destinations = {
             "dem_shearDEM.mdpa": f"{problem_name}DEM.mdpa",
-            "dem_shearDEM_FEM_boundary.mdpa": (
-                f"{problem_name}DEM_FEM_boundary.mdpa"
-            ),
+            "dem_shearDEM_FEM_boundary.mdpa": (f"{problem_name}DEM_FEM_boundary.mdpa"),
         }
         for name in required:
             path = source / name
@@ -424,6 +517,8 @@ class KratosDEMRVE:
             "time": float(self.stage.time),
             "wall_velocity": self.stage.wall_velocity.tolist(),
             "shear_displacement": float(self.stage.shear_displacement),
+            "loading_slip_origin": float(self.loading_slip_origin),
+            "loading_time_origin": float(self.loading_time_origin),
             "measured_shear_traction": float(self.stage.measured_shear_traction),
             "measured_normal_traction": float(self.stage.measured_normal_traction),
         }
