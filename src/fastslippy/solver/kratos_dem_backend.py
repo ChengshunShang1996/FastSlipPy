@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from fastslippy.pre_processing.model_parameters import DEMCouplingParameters
-from fastslippy.solver.dem_coupling import DEMRVEResult
+from fastslippy.solver.dem_coupling import DEMRVEResult, DEMWallState
 
 
 class NormalConsolidationError(RuntimeError):
@@ -233,6 +233,9 @@ class KratosDEMRVE:
         # velocity and all contact history on this very same stage.
         self.loading_time_origin = self.stage.time
         self.loading_slip_origin = self.stage.shear_displacement
+        self.loading_step_origin = self.stage.spheres_model_part.ProcessInfo[
+            KM.TIME_STEPS
+        ]
 
     @property
     def loading_time(self) -> float:
@@ -241,6 +244,18 @@ class KratosDEMRVE:
     @property
     def loading_slip(self) -> float:
         return self.stage.shear_displacement - self.loading_slip_origin
+
+    @property
+    def wall_state(self) -> DEMWallState:
+        return DEMWallState(
+            float(self.stage.wall_velocity[0]),
+            self.stage.measured_shear_traction,
+            self.stage.measured_normal_traction,
+            self.loading_time,
+            self.loading_slip,
+            self.stage.spheres_model_part.ProcessInfo[self.KM.TIME_STEPS]
+            - self.loading_step_origin,
+        )
 
     def _wall_and_grain_measurements(self, top, bottom, grains):
         km = self.KM
@@ -519,6 +534,7 @@ class KratosDEMRVE:
             "shear_displacement": float(self.stage.shear_displacement),
             "loading_slip_origin": float(self.loading_slip_origin),
             "loading_time_origin": float(self.loading_time_origin),
+            "loading_step_origin": int(self.loading_step_origin),
             "measured_shear_traction": float(self.stage.measured_shear_traction),
             "measured_normal_traction": float(self.stage.measured_normal_traction),
         }
@@ -539,7 +555,13 @@ class KratosDEMBackendFactory:
         self.output_root = output_root
 
     def __call__(
-        self, index: int, initial_normal_stress: float, initial_velocity: float
+        self,
+        index: int,
+        initial_normal_stress: float,
+        initial_velocity: float,
+        *,
+        initial_driving_shear_stress: float | None = None,
+        radiation_damping: float = 0.0,
     ) -> KratosDEMRVE:
         return KratosDEMRVE(
             index,
@@ -547,5 +569,7 @@ class KratosDEMBackendFactory:
             initial_velocity,
             self.settings,
             self.output_root,
+            initial_driving_shear_stress=initial_driving_shear_stress,
+            radiation_damping=radiation_damping,
         )
 

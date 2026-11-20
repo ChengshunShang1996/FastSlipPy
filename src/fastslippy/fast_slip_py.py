@@ -57,7 +57,8 @@ class FastSlipPy:
         # Build grid
         self.grid  = Grid(self.p)
         # Friction profile
-        self.fric  = FrictionalZones(self.p, self.grid.y)
+        use_dem = self.p.friction_law is FrictionLaw.DEM_MULTISCALE
+        self.fric = None if use_dem else FrictionalZones(self.p, self.grid.y)
         # Initial stress
         self.stress = StressState(self.p, self.grid.y)
         # Fault state
@@ -65,7 +66,9 @@ class FastSlipPy:
         if self.p.fault_mode is not FaultMode.FRICTIONAL:
             self.fault.V.fill(0.0)
         # ksi for adaptive dt
-        self.ksi    = self._build_ksi(self.p, self.fric, self.stress.sigman0, self.grid.dy_fault)
+        self.ksi = None if use_dem else self._build_ksi(
+            self.p, self.fric, self.stress.sigman0, self.grid.dy_fault
+        )
 
         # Displacement / velocity fields
         p  = self.p
@@ -100,7 +103,12 @@ class FastSlipPy:
                     self.p.dem, self.output.out / "dem_rves"
                 )
             self.dem_coupler = DEMMultiscaleCoupler(
-                self.p.Ny, self.p.dem, dem_backend_factory
+                self.p.Ny, self.p.dem, dem_backend_factory,
+                creep_start=(self.fault.california_loading_start_idx()
+                             if self.p.case_type == "california" else None),
+                creep_velocity=self.p.loading.V_L,
+                extrapolate_surface=(self.p.fault_reaches_surface
+                                     and self.p.extrapolate_surface_fault_rate),
             )
 
     @property
@@ -227,8 +235,6 @@ class FastSlipPy:
     def _solve_fault_slip_rate(
         self,
         tauqs_col: Optional[np.ndarray] = None,
-        *,
-        predictor_only: bool = False,
     ):
         """Solve the algebraic rate-and-state equation at one time level."""
         if self.p.fault_mode is not FaultMode.FRICTIONAL:
@@ -241,10 +247,6 @@ class FastSlipPy:
                 tauqs_col,
                 self.stress,
                 self.fric,
-                # In DEM mode RSF is only a switching predictor.  A 10 Pa
-                # residual at the example's 10 kPa confinement is sufficient
-                # for that decision and avoids subnormal-speed stagnation.
-                tolerance_factor=2.0 if predictor_only else 1.0,
             )
         elif self.p.slip_rate_solver is SlipRateSolver.BISECTION_BP3:
             self.fault.solve_slip_rate_bisection(tauqs_col, self.stress, self.fric)
@@ -326,20 +328,16 @@ class FastSlipPy:
             mid = self.p.Nx // 2
             driving = self.tauqs[:, mid] + self.stress.tau0
             result = self.dem_coupler.advance(
-                predictor_velocity=self.fault.V,
                 driving_shear_stress=driving,
                 effective_normal_stress=self.fault.sigma,
                 radiation_damping=self.p.eta,
                 dt=dt,
             )
             self.dem_last_result = result
-            self.fault.V = result.velocity
-            # Keep the RSF state evolving as a cheap shadow model.  It supplies
-            # the activation predictor and avoids a stale state when an RVE is
-            # deactivated after a fast episode.
-            self.fault.advance(dt, self.tauqs[:, mid], self.stress)
-            self.fault.tau = result.traction
-            vx, vy = self._solve_elastic_velocity(dPdt, self.fault.V)
+            self.fault.U += result.slip_increment
+            self.fault.V = result.end_velocity
+            self.fault.tau = result.end_shear
+            vx, vy = self._solve_elastic_velocity(dPdt, result.average_velocity)
             self._advance_elastic_fields(dt, vx, vy)
             return
         mid = self.p.Nx // 2
@@ -444,6 +442,16 @@ class FastSlipPy:
         return velocity, traction, vx, vy
     
     def run(self):
+        if self._using_dem:
+            try:
+                self._run()
+            finally:
+                self.dem_coupler.close()
+                self.output.close()
+        else:
+            self._run()
+
+    def _run(self):
         t0_all = time.perf_counter()
         p = self.p
         Nx, Ny = p.Nx, p.Ny
@@ -457,6 +465,14 @@ class FastSlipPy:
             dt = p.dt_init
             t = 0.0
             self._build_and_factor_LH(dPdt)
+            if self._using_dem:
+                driving = self.stress.tau0 + self.tauqs[:, p.Nx // 2]
+                self.fault.V, self.fault.tau = self.dem_coupler.initialize(
+                    driving, self.fault.sigma, p.eta
+                )
+                self.dem_coupler.write_history(self.output.out, t, self.fault.U)
+                if p.Nt <= 0 or p.tfinal <= t:
+                    return
         else:
             ckpt = self.output.load_checkpoint(self.checkpointer)
             self.fault.U     = ckpt["U"]
@@ -521,31 +537,16 @@ class FastSlipPy:
                 phase = 2
 
             # Algebraic slip rate at the accepted beginning-of-step state.
-            if p.fault_mode is FaultMode.FRICTIONAL:
-                self._solve_fault_slip_rate(predictor_only=self._using_dem)
+            if self._using_dem:
+                dt = self.dem_coupler.limit_dt(min(p.dt_growth * dt, dt_max, p.tfinal - t))
+            elif p.fault_mode is FaultMode.FRICTIONAL:
+                self._solve_fault_slip_rate()
 
             # ── adaptive time step ──
-                dem_fast_step = (
-                    self._using_dem
-                    and self.dem_coupler.fast_step_expected(self.fault.V)
-                )
-                if dem_fast_step:
-                    # During an active/predicted fast episode the DEM slip
-                    # increment, rather than the RSF D_rs/V scale, controls dt.
-                    dt = min(p.dt_growth * dt, dt_max, p.tfinal - t)
-                    dt = self.dem_coupler.limit_dt(
-                        dt, predictor_velocity=self.fault.V
-                    )
-                else:
-                    V_inner, ksi_inner, D_rs_inner = (
-                        self._select_adaptive_fault_window()
-                    )
-                    speed = np.maximum(np.abs(V_inner), np.finfo(float).tiny)
-                    dt_cand = np.min(ksi_inner * D_rs_inner / speed)
-                    dt_cand = max(dt_cand, 1e-150)
-                    dt = min(
-                        p.dt_growth * dt, dt_cand, dt_max, p.tfinal - t
-                    )
+                V_inner, ksi_inner, D_rs_inner = self._select_adaptive_fault_window()
+                speed = np.maximum(np.abs(V_inner), np.finfo(float).tiny)
+                dt_cand = max(np.min(ksi_inner * D_rs_inner / speed), 1e-150)
+                dt = min(p.dt_growth * dt, dt_cand, dt_max, p.tfinal - t)
             else:
                 dt = min(p.dt_init, p.tfinal - t)
             if dt <= 0.0:
@@ -598,6 +599,10 @@ class FastSlipPy:
                             output_V, self.fault.U, self.checkpointer)
 
             scheduled_output = global_it % p.output_interval == 0
+            if self._using_dem and (scheduled_output or reached_final_time or it == p.Nt):
+                self.dem_coupler.write_history(
+                    self.output.out, t, self.fault.U, self.dem_last_result
+                )
             if scheduled_output or reached_final_time:
                 history_index = self.output.write_memory(
                     it, self.fault.U, output_V, output_tau,
@@ -671,7 +676,6 @@ class FastSlipPy:
             self.dem_coupler.save_checkpoint(
                 self.output.out / f"dem_checkpoint_{self.checkpointer + it}"
             )
-            self.dem_coupler.close()
         if p.case_type == "california":
             self.output.write_bp3_outputs(self.grid)
         self.output.close()

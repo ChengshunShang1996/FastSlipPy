@@ -13,7 +13,7 @@ import numpy as np
 from typing import Optional
 from scipy.optimize import brentq
 
-from fastslippy.pre_processing.model_parameters import ModelParameters
+from fastslippy.pre_processing.model_parameters import FrictionLaw, ModelParameters
 from fastslippy.pre_processing.frictional_zones import FrictionalZones
 from fastslippy.solver.stress_state import StressState
 from fastslippy.utilities.math_util import MathUtil
@@ -33,8 +33,14 @@ class FaultState:
         self.p = p
         Ny = p.Ny
         self._fault_y = None if fault_y is None else np.asarray(fault_y, dtype=float)
-        self.D_rs = np.asarray(fric.D_rs, dtype=float).copy()
         self.U     = np.zeros(Ny)
+        if p.friction_law is FrictionLaw.DEM_MULTISCALE:
+            self.V = np.zeros(Ny)
+            self.theta = np.full(Ny, np.nan)  # Unused in DEM; legacy history schema.
+            self.sigma = stress.sigman0.copy()
+            self.tau = stress.tau0.copy()
+            return
+        self.D_rs = np.asarray(fric.D_rs, dtype=float).copy()
         self.V     = np.full(Ny, p.Vi)
         if p.case_type == "groningen" or p.case_type == "california":
             logarg = 2 * p.V0 / p.Vi * np.sinh((stress.tau0 - p.eta * p.Vi) / fric.a / stress.sigman0)

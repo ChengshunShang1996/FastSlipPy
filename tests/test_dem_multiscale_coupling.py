@@ -11,15 +11,21 @@ from fastslippy.pre_processing.model_parameters import (
     ModelParameters,
     TimeIntegrator,
 )
-from fastslippy.solver.dem_coupling import DEMMultiscaleCoupler, DEMRVEResult
+from fastslippy.solver.dem_coupling import (
+    DEMMultiscaleCoupler,
+    DEMRVEResult,
+    DEMWallState,
+)
 
 
 class DeterministicRVE:
-    def __init__(self, index, calls, returned_velocity=2.0e-5):
+    def __init__(self, index, calls, normal, drive, returned_velocity=2.0e-5):
         self.index = index
         self.calls = calls
         self.returned_velocity = returned_velocity
         self.saved = []
+        self.closed = False
+        self.wall_state = DEMWallState(0.0, drive, normal, 0.0, 0.0, 0)
 
     def advance(
         self,
@@ -41,6 +47,15 @@ class DeterministicRVE:
             )
         )
         velocity = self.returned_velocity
+        previous = self.wall_state
+        self.wall_state = DEMWallState(
+            2 * velocity,
+            driving_shear_stress - 2 * radiation_damping * velocity,
+            effective_normal_stress,
+            previous.loading_time + duration,
+            previous.loading_slip + velocity * duration,
+            previous.loading_steps + 1,
+        )
         return DEMRVEResult(
             slip_increment=velocity * duration,
             average_velocity=velocity,
@@ -53,7 +68,7 @@ class DeterministicRVE:
         directory.mkdir(parents=True, exist_ok=True)
 
     def close(self):
-        pass
+        self.closed = True
 
 
 class DeterministicFactory:
@@ -62,61 +77,69 @@ class DeterministicFactory:
         self.instances = []
         self.returned_velocity = returned_velocity
 
-    def __call__(self, index, initial_normal_stress, initial_velocity):
+    def __call__(
+        self,
+        index,
+        initial_normal_stress,
+        initial_velocity,
+        *,
+        initial_driving_shear_stress,
+        radiation_damping,
+    ):
         backend = DeterministicRVE(
-            index, self.calls, returned_velocity=self.returned_velocity
+            index,
+            self.calls,
+            initial_normal_stress,
+            initial_driving_shear_stress,
+            returned_velocity=self.returned_velocity,
         )
         self.instances.append(backend)
         return backend
 
 
-def test_dem_coupler_activates_only_fast_nodes_and_balances_radiation_damping():
-    settings = DEMCouplingParameters(
-        activation_velocity=1.0e-4,
-        deactivation_velocity=1.0e-6,
-    )
-    factory = DeterministicFactory(returned_velocity=2.0e-5)
-    coupler = DEMMultiscaleCoupler(3, settings, factory)
-    predictor = np.array([1.0e-5, 2.0e-4, -3.0e-4])
-    driving = np.array([10.0, 20.0, -30.0])
-    normal = np.full(3, 50.0)
-
-    result = coupler.advance(
-        predictor_velocity=predictor,
-        driving_shear_stress=driving,
-        effective_normal_stress=normal,
-        radiation_damping=4.0,
-        dt=0.25,
-    )
-
-    assert [call[0] for call in factory.calls] == [1, 2]
-    assert result.velocity[0] == predictor[0]
-    np.testing.assert_allclose(result.velocity[1:], 2.0e-5)
-    np.testing.assert_allclose(result.traction_residual[1:], 0.0)
-    np.testing.assert_allclose(result.slip_increment, result.velocity * 0.25)
+def test_all_nodes_preloaded_before_quiet_step_and_return_mean_and_end_state():
+    factory = DeterministicFactory()
+    coupler = DEMMultiscaleCoupler(3, DEMCouplingParameters(), factory)
+    drive = np.array([0.0, 500.0, -500.0])
+    normal = np.array([5000.0, 10000.0, 15000.0])
+    v0, tau0 = coupler.initialize(drive, normal, 4.0)
+    np.testing.assert_array_equal(v0, 0)
+    np.testing.assert_array_equal(tau0, drive)
+    assert len(factory.instances) == 3 and not factory.calls
+    for _ in range(3):
+        result = coupler.advance(
+            driving_shear_stress=drive,
+            effective_normal_stress=normal,
+            radiation_damping=4.0,
+            dt=0.25,
+        )
+    assert len(factory.calls) == 9
+    np.testing.assert_allclose(result.average_velocity, 2e-5)
+    np.testing.assert_allclose(result.end_velocity, 4e-5)
+    np.testing.assert_allclose(result.slip_increment, result.average_velocity * 0.25)
+    np.testing.assert_array_equal(result.average_normal, normal)
 
 
-def test_late_activation_consolidates_to_initial_node_stress():
-    targets = []
-    calls = []
+def test_preload_failure_closes_prepared_nodes_and_blocks_advance():
+    factory = DeterministicFactory()
 
-    def factory(index, initial_normal_stress, initial_velocity):
-        targets.append((index, initial_normal_stress))
-        return DeterministicRVE(index, calls)
+    def fail_second(index, *args, **kwargs):
+        if index == 1:
+            raise RuntimeError("preload failed")
+        return factory(index, *args, **kwargs)
 
-    coupler = DEMMultiscaleCoupler(2, DEMCouplingParameters(), factory)
-    normal = np.array([5000.0, 15000.0])
-    loads = dict(
-        driving_shear_stress=np.zeros(2),
-        effective_normal_stress=normal,
-        radiation_damping=0.0,
-        dt=0.1,
-    )
-    coupler.advance(predictor_velocity=np.zeros(2), **loads)
-    normal[:] = 9000.0
-    coupler.advance(predictor_velocity=np.array([0.0, 0.01]), **loads)
-    assert targets == [(1, 15000.0)]
-    assert calls[0][2] == 9000.0
+    coupler = DEMMultiscaleCoupler(3, DEMCouplingParameters(), fail_second)
+    normal = np.ones(3)
+    with pytest.raises(RuntimeError, match="preload failed"):
+        coupler.initialize(normal, normal, 0.0)
+    assert factory.instances[0].closed
+    with pytest.raises(RuntimeError, match="Initialize DEM"):
+        coupler.advance(
+            driving_shear_stress=normal,
+            effective_normal_stress=normal,
+            radiation_damping=0.0,
+            dt=0.1,
+        )
 
 
 def test_dem_configuration_is_optional_and_rejects_midpoint():
@@ -128,7 +151,24 @@ def test_dem_configuration_is_optional_and_rejects_midpoint():
         )
 
 
-def test_fastslippy_dem_output_does_not_advance_rve_twice(tmp_path):
+def test_prescribed_creep_and_extrapolated_surface_are_kinematic():
+    factory = DeterministicFactory()
+    coupler = DEMMultiscaleCoupler(
+        5, DEMCouplingParameters(), factory, creep_start=3, creep_velocity=-1e-8,
+        extrapolate_surface=True,
+    )
+    normal = np.full(5, 1e4)
+    drive = np.arange(5, dtype=float)
+    coupler.initialize(drive, normal, 4.0)
+    result = coupler.advance(driving_shear_stress=drive, effective_normal_stress=normal,
+                             radiation_damping=4.0, dt=0.25)
+    assert list(coupler.backends) == [1, 2]
+    np.testing.assert_equal(result.slip_increment[0], result.slip_increment[1])
+    np.testing.assert_equal(result.end_velocity[3:], -1e-8)
+    np.testing.assert_equal(result.slip_increment[3:], -0.25e-8)
+
+
+def test_fastslippy_dem_output_does_not_advance_rve_twice(tmp_path, monkeypatch):
     dem = DEMCouplingParameters(
         activation_velocity=1.0e-300,
         deactivation_velocity=0.0,
@@ -159,11 +199,16 @@ def test_fastslippy_dem_output_does_not_advance_rve_twice(tmp_path):
     )
     model.figure_creator.plot_results_shear = lambda *args, **kwargs: None
 
+    def unexpected(*args, **kwargs):
+        pytest.fail("DEM called an RSF solver or state update")
+
+    monkeypatch.setattr(model, "_solve_fault_slip_rate", unexpected)
+    monkeypatch.setattr(model.fault, "advance", unexpected)
+    assert model.fric is None and model.ksi is None
     model.run()
 
-    # Each active node advances once.  Synchronized output and the final
+    # Each node advances once.  Synchronized output and the final
     # checkpoint only read/cache state and must not run another DEM interval.
     assert len(factory.calls) == params.Ny
-    np.testing.assert_allclose(model.fault.V, 2.0e-6)
+    np.testing.assert_allclose(model.fault.V, 4.0e-6)
     np.testing.assert_allclose(model.fault.U, 2.0e-10)
-

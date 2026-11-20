@@ -12,7 +12,7 @@ __license__     = "MIT License"
 import matplotlib.pyplot as plt
 import numpy as np
 
-from fastslippy.pre_processing.model_parameters import  ModelParameters
+from fastslippy.pre_processing.model_parameters import FrictionLaw, ModelParameters
 from fastslippy.utilities.math_util import MathUtil
 
 class StressState:
@@ -59,11 +59,19 @@ class StressState:
         elif p.case_type == "california":
 
             sigman0 = np.full_like(y, p.sigma0, dtype=float)
-            steady_friction = p.a_max * np.arcsinh(p.Vi / (2 * p.V0) * np.exp((p.mu0 + p.b0 * np.log(p.V0 / np.abs(p.Vi))) / p.a_max))
-            tau0 = sigman0 * steady_friction + p.eta * p.Vi
+            if p.friction_law is FrictionLaw.DEM_MULTISCALE:
+                tau0 = np.zeros_like(y)
+            else:
+                steady_friction = p.a_max * np.arcsinh(p.Vi / (2 * p.V0) * np.exp((p.mu0 + p.b0 * np.log(p.V0 / np.abs(p.Vi))) / p.a_max))
+                tau0 = sigman0 * steady_friction + p.eta * p.Vi
             Pl0 = np.zeros_like(y, dtype=float)
             Pr0 = np.zeros_like(y, dtype=float)
 
+        if p.friction_law is FrictionLaw.DEM_MULTISCALE and p.dem.initial_driving_shear_stress is not None:
+            target = np.asarray(p.dem.initial_driving_shear_stress, dtype=float)
+            if target.shape not in ((), y.shape) or not np.all(np.isfinite(target)):
+                raise ValueError("DEM initial driving shear must be finite, scalar or one value per node.")
+            tau0 = np.broadcast_to(target, y.shape).copy()
         return sigman0, tau0, Pl0, Pr0
 
     def update_pressure(self, dt: float, dPdt: float):

@@ -7,9 +7,10 @@ also makes the coupling contract independently testable.
 
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Protocol
+from typing import Protocol
 
 import numpy as np
 
@@ -28,8 +29,21 @@ class DEMRVEResult:
     suggested_dt: float = np.inf
 
 
+@dataclass(frozen=True)
+class DEMWallState:
+    """Instantaneous wall response relative to the accepted preload."""
+
+    velocity: float
+    shear_traction: float
+    normal_traction: float
+    loading_time: float
+    loading_slip: float
+    loading_steps: int
+
+
 class DEMRVEBackend(Protocol):
-    """Stateful scalar RVE used at one fault node."""
+    @property
+    def wall_state(self) -> DEMWallState: ...
 
     def advance(
         self,
@@ -39,177 +53,239 @@ class DEMRVEBackend(Protocol):
         radiation_damping: float,
         duration: float,
         initial_velocity: float,
-    ) -> DEMRVEResult:
-        ...
+    ) -> DEMRVEResult: ...
 
-    def save_checkpoint(self, directory: Path) -> None:
-        ...
-
-    def close(self) -> None:
-        ...
+    def save_checkpoint(self, directory: Path) -> None: ...
+    def close(self) -> None: ...
 
 
-BackendFactory = Callable[[int, float, float], DEMRVEBackend]
+class BackendFactory(Protocol):
+    def __call__(
+        self,
+        index: int,
+        initial_normal_stress: float,
+        initial_velocity: float,
+        *,
+        initial_driving_shear_stress: float,
+        radiation_damping: float,
+    ) -> DEMRVEBackend: ...
 
 
 @dataclass(frozen=True)
 class DEMCouplingResult:
-    velocity: np.ndarray
-    traction: np.ndarray
     slip_increment: np.ndarray
-    active: np.ndarray
-    traction_residual: np.ndarray
-    kinetic_energy: np.ndarray
+    average_velocity: np.ndarray
+    average_shear: np.ndarray
+    average_normal: np.ndarray
+    end_velocity: np.ndarray
+    end_shear: np.ndarray
+    end_normal: np.ndarray
 
 
 class DEMMultiscaleCoupler:
-    """Switch fault nodes between an RSF predictor and dynamic DEM RVEs."""
+    """One preloaded, continuously evolving RVE per constitutive fault node."""
 
     def __init__(
         self,
         node_count: int,
         settings: DEMCouplingParameters,
         backend_factory: BackendFactory,
-    ) -> None:
+        *,
+        creep_start: int | None = None,
+        creep_velocity: float = 0.0,
+        extrapolate_surface: bool = False,
+    ):
         self.settings = settings
         self._factory = backend_factory
-        self._initial_normal_stress: Optional[np.ndarray] = None
-        self._backends: list[Optional[DEMRVEBackend]] = [None] * node_count
-        self.active = np.zeros(node_count, dtype=bool)
-        self._below_threshold_steps = np.zeros(node_count, dtype=np.int64)
-        self.last_velocity = np.zeros(node_count, dtype=float)
-        self.last_kinetic_energy = np.zeros(node_count, dtype=float)
-        self.last_suggested_dt = np.full(node_count, np.inf, dtype=float)
+        stop = node_count if creep_start is None else creep_start
+        self._copy_surface = extrapolate_surface and stop > 1
+        self.nodes = range(int(self._copy_surface), stop)
+        self.backends: dict[int, DEMRVEBackend] = {}
+        self.last_velocity = np.zeros(node_count)
+        self.last_velocity[stop:] = creep_velocity
+        self._suggested_dt = np.inf
+        self._ready = False
 
-    def fast_step_expected(self, predictor_velocity: np.ndarray) -> bool:
-        predictor = np.asarray(predictor_velocity, dtype=float)
-        return bool(
-            np.any(self.active)
-            or np.any(np.abs(predictor) >= self.settings.activation_velocity)
-        )
+    def _check_loads(self, driving, normal, eta):
+        if driving.shape != self.last_velocity.shape or normal.shape != driving.shape:
+            raise ValueError("DEM stress arrays must have one value per fault node.")
+        if not (
+            np.all(np.isfinite(driving))
+            and np.all(np.isfinite(normal))
+            and np.isfinite(eta)
+            and eta >= 0
+        ):
+            raise ValueError("Invalid DEM loading.")
+        if np.any(normal[self.nodes.start : self.nodes.stop] < 0):
+            raise ValueError("DEM requires non-negative effective normal stress.")
 
-    def limit_dt(
-        self,
-        proposed_dt: float,
-        predictor_velocity: Optional[np.ndarray] = None,
-    ) -> float:
-        """Apply DEM-specific macro limits without changing inactive RSF runs."""
+    def initialize(self, driving, normal, eta):
+        """Finish every preload before returning the time-zero fault state."""
+        if self._ready:
+            raise RuntimeError("DEM RVEs have already been initialized.")
+        self._check_loads(driving, normal, eta)
+        shear = driving - eta * self.last_velocity
+        try:
+            for i in self.nodes:
+                rve = self._factory(
+                    i,
+                    float(normal[i]),
+                    0.0,
+                    initial_driving_shear_stress=float(driving[i]),
+                    radiation_damping=eta,
+                )
+                self.backends[i] = rve
+                state = rve.wall_state
+                self.last_velocity[i] = state.velocity
+                shear[i] = state.shear_traction
+            if self._copy_surface:
+                self.last_velocity[0] = self.last_velocity[1]
+                shear[0] = driving[0] - eta * self.last_velocity[0]
+        except BaseException:
+            self.close()
+            raise
+        self._ready = True
+        return self.last_velocity.copy(), shear
 
-        dt = min(float(proposed_dt), float(self.settings.max_macro_dt))
-        speeds = np.abs(self.last_velocity[self.active])
-        if predictor_velocity is not None:
-            predictor = np.asarray(predictor_velocity, dtype=float)
-            candidate = self.active | (
-                np.abs(predictor) >= self.settings.activation_velocity
-            )
-            speeds = np.concatenate((speeds, np.abs(predictor[candidate])))
-        if speeds.size and np.isfinite(self.settings.max_slip_increment):
-            speed = np.max(speeds)
-            if speed > 0.0:
-                dt = min(dt, self.settings.max_slip_increment / speed)
-            if np.any(self.active):
-                dt = min(dt, float(np.min(self.last_suggested_dt[self.active])))
+    def limit_dt(self, proposed_dt: float) -> float:
+        dt = min(proposed_dt, self.settings.max_macro_dt, self._suggested_dt)
+        speed = np.max(np.abs(self.last_velocity))
+        if speed > 0:
+            dt = min(dt, self.settings.max_slip_increment / speed)
         return dt
 
     def advance(
         self,
         *,
-        predictor_velocity: np.ndarray,
-        driving_shear_stress: np.ndarray,
-        effective_normal_stress: np.ndarray,
+        driving_shear_stress,
+        effective_normal_stress,
         radiation_damping: float,
         dt: float,
     ) -> DEMCouplingResult:
-        predictor = np.asarray(predictor_velocity, dtype=float)
-        driving = np.asarray(driving_shear_stress, dtype=float)
-        normal = np.asarray(effective_normal_stress, dtype=float)
-        if predictor.shape != self.active.shape:
-            raise ValueError("DEM predictor velocity has the wrong shape.")
-        if driving.shape != self.active.shape or normal.shape != self.active.shape:
-            raise ValueError("DEM stress arrays have the wrong shape.")
-        if dt <= 0.0 or not np.isfinite(dt):
-            raise ValueError("DEM macro time step must be finite and positive.")
-        if self._initial_normal_stress is None:
-            # RVEs may first activate after the FDM stress has already evolved.
-            self._initial_normal_stress = normal.copy()
-
-        newly_active = (~self.active) & (
-            np.abs(predictor) >= self.settings.activation_velocity
+        if not self._ready:
+            raise RuntimeError("Initialize DEM before advancing.")
+        drive, normal, eta = (
+            driving_shear_stress,
+            effective_normal_stress,
+            radiation_damping,
         )
-        self.active[newly_active] = True
-
-        velocity = predictor.copy()
-        traction = driving - radiation_damping * predictor
-        slip = predictor * dt
-        residual = np.zeros_like(predictor)
-        kinetic = np.zeros_like(predictor)
-
-        for index in np.flatnonzero(self.active):
-            backend = self._backends[index]
-            if backend is None:
-                backend = self._factory(
-                    int(index),
-                    float(self._initial_normal_stress[index]),
-                    float(predictor[index]),
-                )
-                self._backends[index] = backend
-            result = backend.advance(
-                driving_shear_stress=float(driving[index]),
-                effective_normal_stress=float(normal[index]),
-                radiation_damping=float(radiation_damping),
-                duration=float(dt),
-                initial_velocity=float(self.last_velocity[index] or predictor[index]),
+        self._check_loads(drive, normal, eta)
+        if not np.isfinite(dt) or dt <= 0:
+            raise ValueError("DEM macro time step must be finite and positive.")
+        velocity = self.last_velocity.copy()
+        slip = velocity * dt
+        shear = drive - eta * velocity
+        avg_normal = normal.copy()
+        end_velocity, end_shear, end_normal = (
+            velocity.copy(),
+            shear.copy(),
+            normal.copy(),
+        )
+        suggested_dt = np.inf
+        for i, rve in self.backends.items():
+            result = rve.advance(
+                driving_shear_stress=float(drive[i]),
+                effective_normal_stress=float(normal[i]),
+                radiation_damping=eta,
+                duration=dt,
+                initial_velocity=self.last_velocity[i],
             )
-            if not np.isclose(result.slip_increment, result.average_velocity * dt):
+            state = rve.wall_state
+            if not np.isclose(
+                result.slip_increment,
+                result.average_velocity * dt,
+                atol=1e-20,
+                rtol=1e-10,
+            ):
                 raise RuntimeError(
-                    f"DEM RVE {index} returned inconsistent slip and velocity."
+                    f"Inconsistent slip increment and velocity at RVE {i}."
                 )
-            velocity[index] = result.average_velocity
-            traction[index] = result.shear_traction
-            slip[index] = result.slip_increment
-            kinetic[index] = result.kinetic_energy
-            residual[index] = (
-                result.shear_traction
-                + radiation_damping * result.average_velocity
-                - driving[index]
+            slip[i] = result.slip_increment
+            velocity[i] = slip[i] / dt
+            shear[i], avg_normal[i] = result.shear_traction, result.normal_traction
+            end_velocity[i], end_shear[i], end_normal[i] = (
+                state.velocity,
+                state.shear_traction,
+                state.normal_traction,
             )
-            self.last_velocity[index] = result.average_velocity
-            self.last_kinetic_energy[index] = result.kinetic_energy
-            self.last_suggested_dt[index] = result.suggested_dt
-
-            if abs(result.average_velocity) <= self.settings.deactivation_velocity:
-                self._below_threshold_steps[index] += 1
-            else:
-                self._below_threshold_steps[index] = 0
-            if self._below_threshold_steps[index] >= self.settings.deactivation_steps:
-                self.active[index] = False
-                self._below_threshold_steps[index] = 0
-
+            suggested_dt = min(suggested_dt, result.suggested_dt)
+        if self._copy_surface:
+            slip[0], velocity[0], end_velocity[0] = (
+                slip[1],
+                velocity[1],
+                end_velocity[1],
+            )
+            shear[0] = drive[0] - eta * velocity[0]
+            end_shear[0] = drive[0] - eta * end_velocity[0]
+        self.last_velocity = end_velocity
+        self._suggested_dt = suggested_dt
         return DEMCouplingResult(
-            velocity=velocity,
-            traction=traction,
-            slip_increment=slip,
-            active=self.active.copy(),
-            traction_residual=residual,
-            kinetic_energy=kinetic,
+            slip, velocity, shear, avg_normal, end_velocity, end_shear, end_normal
         )
 
     def save_checkpoint(self, directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
         np.savez(
             directory / "coupler_state.npz",
-            active=self.active,
-            below_threshold_steps=self._below_threshold_steps,
+            nodes=list(self.nodes),
             last_velocity=self.last_velocity,
-            last_kinetic_energy=self.last_kinetic_energy,
-            last_suggested_dt=self.last_suggested_dt,
+            suggested_dt=self._suggested_dt,
         )
-        for index, backend in enumerate(self._backends):
-            if backend is not None:
-                backend.save_checkpoint(directory / f"rve_{index:05d}")
+        for i, backend in self.backends.items():
+            backend.save_checkpoint(directory / f"rve_{i:05d}")
+
+    def write_history(self, directory, time, fault_slip, result=None):
+        """Record accepted states; averages refer to the last Euler interval."""
+        fields = (
+            "node",
+            "fdm_time_s",
+            "dem_time_s",
+            "dem_steps",
+            "fdm_slip_m",
+            "dem_slip_m",
+            "end_velocity_m_s",
+            "end_shear_Pa",
+            "end_normal_Pa",
+            "interval_slip_m",
+            "average_velocity_m_s",
+            "average_shear_Pa",
+            "average_normal_Pa",
+        )
+        with (directory / "dem_history.csv").open(
+            "w" if result is None else "a", newline="", encoding="utf-8"
+        ) as stream:
+            writer = csv.writer(stream)
+            if result is None:
+                writer.writerow(fields)
+            for i, rve in self.backends.items():
+                state = rve.wall_state
+                interval = (
+                    ("", "", "", "")
+                    if result is None
+                    else (
+                        result.slip_increment[i],
+                        result.average_velocity[i],
+                        result.average_shear[i],
+                        result.average_normal[i],
+                    )
+                )
+                writer.writerow(
+                    (
+                        i,
+                        time,
+                        state.loading_time,
+                        state.loading_steps,
+                        fault_slip[i],
+                        state.loading_slip,
+                        state.velocity,
+                        state.shear_traction,
+                        state.normal_traction,
+                        *interval,
+                    )
+                )
 
     def close(self) -> None:
-        for backend in self._backends:
-            if backend is not None:
-                backend.close()
-
+        self._ready = False
+        for backend in self.backends.values():
+            backend.close()
+        self.backends.clear()

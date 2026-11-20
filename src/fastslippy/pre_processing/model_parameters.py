@@ -11,7 +11,7 @@ __license__     = "MIT License"
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 
@@ -116,10 +116,10 @@ class DEMCouplingParameters:
     consolidation_window_steps: int = 100
     consolidation_max_steps: int = 20000
     shear_preload_ramp_steps: int = 200
+    initial_driving_shear_stress: Optional[Union[float, np.ndarray]] = None  # Pa
 
     def validate(self) -> None:
         positive = (
-            "activation_velocity",
             "max_macro_dt",
             "max_slip_increment",
             "layer_length",
@@ -131,15 +131,6 @@ class DEMCouplingParameters:
             value = float(getattr(self, name))
             if value <= 0.0 or np.isnan(value):
                 raise ValueError(f"dem.{name} must be positive.")
-        if self.deactivation_velocity < 0.0:
-            raise ValueError("dem.deactivation_velocity must be non-negative.")
-        if self.deactivation_velocity >= self.activation_velocity:
-            raise ValueError(
-                "dem.deactivation_velocity must be smaller than "
-                "dem.activation_velocity."
-            )
-        if self.deactivation_steps < 1:
-            raise ValueError("dem.deactivation_steps must be at least one.")
         if not 0.0 < self.servo_relaxation <= 1.0:
             raise ValueError("dem.servo_relaxation must lie in (0, 1].")
         if self.consolidation_time < 0.0:

@@ -8,12 +8,28 @@ backend.
 Run from the FastSlipPy repository root:
 
 ```powershell
-python examples/dem_multiscale/run_case_dem_multiscale.py
+$env:OMP_NUM_THREADS = '1'
+python examples/dem_multiscale/run_case_dem_multiscale.py --verify --output output/full-cycle-verified
 ```
 
-Use `prepare_case.py` to regenerate the deterministic particle geometry after
-changing the RVE dimensions or particle distribution. The committed `.mdpa`
-files allow the example to run without a generation step.
+The coupled example generates the small 16-cylinder packing and preloads one
+RVE per constitutive node at 10 kPa normal stress and 500 Pa driving shear.
+The four loading phases are initial hold, loading, hold and reload. With
+`--verify` the example repeats the run with different output and checkpoint
+intervals and compares the trajectories. The larger geometry in this directory
+can be regenerated with `prepare_case.py`.
+
+In `dem_multiscale` mode each constitutive node advances every Euler step.
+The legacy activation and deactivation settings are ignored. Prescribed deep
+creep and configured extrapolated surface rates retain their boundary roles.
+Set `dem.initial_driving_shear_stress` in Pa to a scalar or a nodal profile.
+Groningen defaults to its resolved initial shear, California DEM defaults to
+zero, and the laboratory case defaults to its original near-zero shear.
+The RVE supplies the slip increment and its interval mean drives the elastic
+solve. In `dem_history.csv`, interval means and instantaneous end values are
+separate. FDM fault V and tau outputs are end values. The FDM effective normal
+stress and the measured DEM normal reaction are separate quantities. Legacy
+NumPy theta arrays contain NaN for DEM and DEM VTK omits the RSF state field.
 
 The numerical values are a demonstration setup. Calibrate the contact law,
 virtual wall mass, stress scale and coupling time-step limits before using it

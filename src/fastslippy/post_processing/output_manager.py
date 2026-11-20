@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from fastslippy.pre_processing.model_parameters import BCType, ModelParameters
+from fastslippy.pre_processing.model_parameters import BCType, FrictionLaw, ModelParameters
 from fastslippy.solver.fault_state import FaultState
 
 class OutputManager:
@@ -739,13 +739,9 @@ class OutputManager:
             fault_data[name] = self._checked_vtk_array(
                 name, values, (Ny,)
             )
-        theta_values = self._checked_vtk_array(
-            "fault.theta", fault.theta, (Ny,)
-        )
-        theta = np.real(theta_values)
-        fault_data["state_theta_s"] = self._checked_vtk_array(
-            "state_theta_s", theta, (Ny,)
-        )
+        if self.p.friction_law is not FrictionLaw.DEM_MULTISCALE:
+            theta_values = self._checked_vtk_array("fault.theta", fault.theta, (Ny,))
+            fault_data["state_theta_s"] = np.real(theta_values)
         fault_data["time_s"] = np.full(Ny, float(t))
 
         # Coordinate-aware interpolation from the two staggered displacement
