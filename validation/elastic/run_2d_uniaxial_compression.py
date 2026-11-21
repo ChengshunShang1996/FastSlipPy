@@ -14,7 +14,6 @@ import time
 import numpy as np
 import matplotlib
 
-#matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 plt.rcParams.update({
     "mathtext.fontset": "stix",
@@ -117,11 +116,11 @@ class RunFastSlipPy(FastSlipPy):
                      ms=6.5, color="tab:blue", markeredgecolor="white",
                      markeredgewidth=0.6, label="FastSlipPy", zorder=3)
         axes[0].set_ylabel(r"$u_x$ [m]")
-        axes[0].set_title(
-            rf"Axial displacement, $x={x_sample:g}\,\mathrm{{m}}$",
-            y=1.05,
-            pad=6,
-        )
+        # axes[0].set_title(
+        #     rf"Axial displacement, $x={x_sample:g}\,\mathrm{{m}}$",
+        #     y=1.05,
+        #     pad=6,
+        # )
 
         axes[1].plot(times, uy_analytical, color="0.15", label="Analytical")
         axes[1].plot(times[plot_indices],
@@ -129,11 +128,11 @@ class RunFastSlipPy(FastSlipPy):
                      ms=6.5, color="tab:orange", markeredgecolor="white",
                      markeredgewidth=0.6, label="FastSlipPy", zorder=3)
         axes[1].set_ylabel(r"$u_y$ [m]")
-        axes[1].set_title(
-            rf"Poisson displacement, $y={y_sample:g}\,\mathrm{{m}}$",
-            y=1.05,
-            pad=6,
-        )
+        #axes[1].set_title(
+        #     rf"Poisson displacement, $y={y_sample:g}\,\mathrm{{m}}$",
+        #     y=1.05,
+        #     pad=6,
+        # )
 
         for ax in axes:
             ax.set_xlabel("Time [s]")
@@ -153,8 +152,18 @@ class RunFastSlipPy(FastSlipPy):
             handlelength=1.8,
         )
 
+        axes[1].legend(
+            loc="upper left",
+            frameon=True,
+            framealpha=0.92,
+            edgecolor="0.8",
+            borderpad=0.45,
+            handlelength=1.8,
+        )
+
         path = self.output.out / "displacement_comparison.png"
         fig.savefig(path, dpi=200, bbox_inches="tight")
+        plt.show()
         plt.close(fig)
         return path
 
@@ -176,7 +185,7 @@ class RunFastSlipPy(FastSlipPy):
         x_sample = self.grid.xp[1:self.p.Nx][ix_sigma]
 
         fig, axes = plt.subplots(
-            1, 3, figsize=(12.2, 4.2), sharex=True, layout="constrained"
+            1, 3, figsize=(13.8, 4.4), sharex=True, layout="constrained"
         )
         analytical = (sigma_xx_analytical, zero_stress, zero_stress)
         numerical = (
@@ -197,7 +206,7 @@ class RunFastSlipPy(FastSlipPy):
                                 ms=6.5, color=color, markeredgecolor="white",
                                 markeredgewidth=0.6, label="FastSlipPy", zorder=3)
                 ax.set_ylabel(f"{label} [Pa]")
-                #ax.set_ylim(-0.1, 0.1)
+                ax.set_ylim(-0.1, 0.1)
             else:
                 ax.plot(times, exact / 1e6, color="0.15", label="Analytical")
                 ax.plot(times[plot_indices],
@@ -208,23 +217,26 @@ class RunFastSlipPy(FastSlipPy):
             ax.grid(True, color="0.85", linewidth=0.8)
             ax.set_axisbelow(True)
             ax.margins(x=0.03, y=0.06)
-            ax.set_title(
-                rf"{title}, $x={x_sample:g}\,\mathrm{{m}}$",
-                y=1.03,
-                pad=6,
-            )
+            # ax.set_title(
+            #     rf"{title}, $x={x_sample:g}\,\mathrm{{m}}$",
+            #     y=1.03,
+            #     pad=6,
+            # )
             ax.set_xlabel("Time [s]")
+            ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0), useMathText=True)
 
-        axes[0].legend(
-            loc="upper right",
-            frameon=True,
-            framealpha=0.92,
-            edgecolor="0.8",
-            borderpad=0.45,
-            handlelength=1.8,
-        )
+        # axes[0].legend(
+        #     loc="upper right",
+        #     frameon=True,
+        #     framealpha=0.92,
+        #     edgecolor="0.8",
+        #     borderpad=0.45,
+        #     handlelength=1.8,
+        # )
+
         path = self.output.out / "stress_comparison.png"
         fig.savefig(path, dpi=200, bbox_inches="tight")
+        plt.show()
         plt.close(fig)
         return path
 
