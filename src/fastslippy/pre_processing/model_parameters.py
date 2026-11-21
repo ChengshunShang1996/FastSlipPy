@@ -113,7 +113,7 @@ class DEMCouplingParameters:
     consolidation_stress_atol: float = 1.0  # Pa
     consolidation_stress_rtol: float = 1.0e-3
     consolidation_speed_tol: float = 1.0e-5  # m/s, including particle rim speed
-    consolidation_window_steps: int = 100
+    consolidation_window_steps: int = 1
     consolidation_max_steps: int = 20000
     shear_preload_ramp_steps: int = 200
     initial_driving_shear_stress: Optional[Union[float, np.ndarray]] = None  # Pa

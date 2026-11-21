@@ -39,6 +39,21 @@ class DEMWallState:
     loading_time: float
     loading_slip: float
     loading_steps: int
+    internal_slip: float = np.nan
+    internal_velocity: float = np.nan
+    top_shear_traction: float = np.nan
+    bottom_shear_traction: float = np.nan
+    top_normal_traction: float = np.nan
+    bottom_normal_traction: float = np.nan
+    bulk_shear_stress: float = np.nan
+    bulk_normal_stress: float = np.nan
+    maximum_contact_friction_ratio: float = np.nan
+    contact_friction_limit: float = np.nan
+    sliding_contact_fraction: float = np.nan
+    target_normal_traction: float = np.nan
+    target_driving_shear: float = np.nan
+    normal_wall_velocity: float = np.nan
+    normal_servo_saturated: bool = False
 
 
 class DEMRVEBackend(Protocol):
@@ -250,6 +265,21 @@ class DEMMultiscaleCoupler:
             "average_velocity_m_s",
             "average_shear_Pa",
             "average_normal_Pa",
+            "internal_slip_m",
+            "internal_velocity_m_s",
+            "top_shear_Pa",
+            "bottom_shear_Pa",
+            "top_normal_Pa",
+            "bottom_normal_Pa",
+            "bulk_shear_Pa",
+            "bulk_normal_Pa",
+            "max_contact_friction_ratio",
+            "contact_friction_limit",
+            "sliding_contact_fraction",
+            "target_normal_Pa",
+            "target_driving_shear_Pa",
+            "normal_wall_velocity_m_s",
+            "normal_servo_saturated",
         )
         with (directory / "dem_history.csv").open(
             "w" if result is None else "a", newline="", encoding="utf-8"
@@ -281,6 +311,21 @@ class DEMMultiscaleCoupler:
                         state.shear_traction,
                         state.normal_traction,
                         *interval,
+                        state.internal_slip,
+                        state.internal_velocity,
+                        state.top_shear_traction,
+                        state.bottom_shear_traction,
+                        state.top_normal_traction,
+                        state.bottom_normal_traction,
+                        state.bulk_shear_stress,
+                        state.bulk_normal_stress,
+                        state.maximum_contact_friction_ratio,
+                        state.contact_friction_limit,
+                        state.sliding_contact_fraction,
+                        state.target_normal_traction,
+                        state.target_driving_shear,
+                        state.normal_wall_velocity,
+                        int(state.normal_servo_saturated),
                     )
                 )
 

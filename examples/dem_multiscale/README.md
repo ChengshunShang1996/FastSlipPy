@@ -35,6 +35,42 @@ The numerical values are a demonstration setup. Calibrate the contact law,
 virtual wall mass, stress scale and coupling time-step limits before using it
 as a physical fault-gouge model.
 
+`dem_history.csv` also separates macro wall kinematics from deformation inside
+the free grains. `dem_slip_m` is the top-wall displacement used by the coupled
+energy balance. `internal_slip_m` is the mean horizontal displacement of the
+upper half of the free grains minus that of the lower half, both measured from
+the accepted loading handoff. Wall reactions and volume-weighted free-grain
+stress are reported independently. Contact diagnostics give the largest local
+`|Ft|/|Fn|`, the material Coulomb limit, and the fraction of active contacts at
+that limit. `normal_servo_saturated` identifies samples for which increasing
+`normal_servo_velocity` or changing the loading rate should be considered.
+The central-node comparison is plotted in `dem_diagnostics.png`.
+
+## Full-cycle time-step sensitivity
+
+For a full-cycle time-step sensitivity study, run the following from the
+repository root.
+
+```powershell
+$env:OMP_NUM_THREADS = '1'
+python examples/dem_multiscale/verify_time_steps.py
+```
+
+The study keeps the 10 MPa grain modulus, 5-node fault, particle packing and
+0.3 ms physical loading phases of the coupled example. It prepares every RVE
+at the original 5 µs DEM step, then refines the production DEM step twice at
+fixed 25 µs Euler intervals. It refines the Euler interval twice at fixed
+1.25 µs DEM steps. The normal servo retains its physical relaxation time
+through the change of sampling interval. Each DEM step checks the discrete
+wall momentum equation using the applied drive, previous contact traction and
+previous wall velocity, matching the explicit wall update.
+
+Under `output/time-step-baseline`, `responses.png` plots the central node;
+`phases.csv` gives the largest motion and momentum residual over all nodes per
+phase. `sensitivity.csv` compares all five nodes at common 25 µs times. Its
+relative RMS denominator is the RMS variation of the finer solution from its
+own handoff state. Layer height is the mean wall-center separation.
+
 ## Single-RVE wall and time-step check
 
 Run from the repository root with Kratos DEMApplication available.

@@ -54,6 +54,10 @@ def _stage_class(KM, DEMAnalysisStage):
             self.shear_displacement = 0.0
             self.measured_shear_traction = 0.0
             self.measured_normal_traction = 0.0
+            self.measured_bottom_shear_traction = 0.0
+            self.measured_bottom_normal_traction = 0.0
+            self.normal_servo_command = 0.0
+            self.normal_servo_saturated = False
             self.kinetic_energy = 0.0
             super().__init__(model, parameters)
 
@@ -83,8 +87,20 @@ def _stage_class(KM, DEMAnalysisStage):
             normal_error = (
                 self.effective_normal_stress - self.measured_normal_traction
             ) / max(self.effective_normal_stress, 1.0e-30)
-            desired_normal_velocity = -self.settings.normal_servo_velocity * np.clip(
-                normal_error, -1.0, 1.0
+            unrestricted_normal_velocity = (
+                -self.settings.normal_servo_velocity * normal_error
+            )
+            desired_normal_velocity = float(
+                np.clip(
+                    unrestricted_normal_velocity,
+                    -self.settings.normal_servo_velocity,
+                    self.settings.normal_servo_velocity,
+                )
+            )
+            self.normal_servo_command = desired_normal_velocity
+            self.normal_servo_saturated = bool(
+                abs(unrestricted_normal_velocity)
+                > self.settings.normal_servo_velocity
             )
             relaxation = self.settings.servo_relaxation
             self.wall_velocity[1] = (
@@ -119,6 +135,16 @@ def _stage_class(KM, DEMAnalysisStage):
             self.top_wall_force = total_force
             self.measured_shear_traction = float(-total_force[0] / length)
             self.measured_normal_traction = max(float(total_force[1] / length), 0.0)
+            bottom_force = np.zeros(3, dtype=float)
+            for node in self.bottom_wall.Nodes:
+                bottom_force += np.asarray(
+                    node.GetSolutionStepValue(KM.TOTAL_FORCES), dtype=float
+                )
+            self.bottom_wall_force = bottom_force
+            self.measured_bottom_shear_traction = float(bottom_force[0] / length)
+            self.measured_bottom_normal_traction = max(
+                float(-bottom_force[1] / length), 0.0
+            )
             dt = float(self.spheres_model_part.ProcessInfo[KM.DELTA_TIME])
             self.shear_displacement += self.wall_velocity[0] * dt
             energy = 0.0
@@ -202,7 +228,7 @@ class KratosDEMRVE:
         )
         problem_name = f"rve_{index:05d}"
         parameters["problem_name"].SetString(problem_name)
-        parameters["FinalTime"].SetDouble(1.0e300)
+        parameters["FinalTime"].SetDouble(1000)
         parameters["do_print_results_option"].SetBool(settings.output_enabled)
         if not settings.output_enabled:
             parameters["post_vtk_option"].SetBool(False)
@@ -214,6 +240,8 @@ class KratosDEMRVE:
             self.stage = stage_type(self.model, parameters, settings)
             self.stage.Initialize()
         self._closed = False
+        self._capture_contact_diagnostics = False
+        self._initialize_bulk_diagnostics()
         if initial_normal_stress is not None:
             try:
                 with _working_directory(self.work_directory):
@@ -236,6 +264,7 @@ class KratosDEMRVE:
         self.loading_step_origin = self.stage.spheres_model_part.ProcessInfo[
             KM.TIME_STEPS
         ]
+        self.loading_internal_slip_origin = self._raw_internal_slip()
 
     @property
     def loading_time(self) -> float:
@@ -246,7 +275,107 @@ class KratosDEMRVE:
         return self.stage.shear_displacement - self.loading_slip_origin
 
     @property
+    def loading_internal_slip(self) -> float:
+        return self._raw_internal_slip() - self.loading_internal_slip_origin
+
+    def _initialize_bulk_diagnostics(self) -> None:
+        stage = self.stage
+        wall_ids = {
+            node.Id
+            for node in list(stage.top_wall.Nodes) + list(stage.bottom_wall.Nodes)
+        }
+        self._free_grains = [
+            node for node in stage.spheres_model_part.Nodes if node.Id not in wall_ids
+        ]
+        ordered = sorted(self._free_grains, key=lambda node: (node.Y0, node.Id))
+        split = max(1, len(ordered) // 2)
+        self._lower_grains = ordered[:split]
+        self._upper_grains = ordered[split:]
+        if not self._upper_grains:
+            self._upper_grains = self._lower_grains
+
+        source = Path(self.settings.case_directory).expanduser().resolve()
+        material_data = json.loads((source / "MaterialsDEM.json").read_text())
+        friction_values = {
+            float(relation["Variables"]["STATIC_FRICTION"])
+            for relation in material_data.get("material_relations", [])
+            if "STATIC_FRICTION" in relation.get("Variables", {})
+        }
+        self._contact_friction_limit = (
+            friction_values.pop() if len(friction_values) == 1 else np.nan
+        )
+
+    @staticmethod
+    def _mean_component(nodes, getter) -> float:
+        return float(np.mean([getter(node) for node in nodes]))
+
+    def _raw_internal_slip(self) -> float:
+        km = self.KM
+        upper = self._mean_component(
+            self._upper_grains,
+            lambda node: node.GetSolutionStepValue(km.DISPLACEMENT_X),
+        )
+        lower = self._mean_component(
+            self._lower_grains,
+            lambda node: node.GetSolutionStepValue(km.DISPLACEMENT_X),
+        )
+        return upper - lower
+
+    def _internal_velocity(self) -> float:
+        km = self.KM
+        upper = self._mean_component(
+            self._upper_grains, lambda node: node.GetSolutionStepValue(km.VELOCITY_X)
+        )
+        lower = self._mean_component(
+            self._lower_grains, lambda node: node.GetSolutionStepValue(km.VELOCITY_X)
+        )
+        return upper - lower
+
+    def _bulk_stress(self) -> tuple[float, float]:
+        variable = self.KM.KratosGlobals.GetVariable("DEM_STRESS_TENSOR")
+        weights, shear, normal = [], [], []
+        for node in self._free_grains:
+            matrix = np.asarray(node.GetSolutionStepValue(variable), dtype=float)
+            radius = float(node.GetSolutionStepValue(self.KM.RADIUS))
+            weights.append(radius * radius)
+            shear.append(matrix[0, 1])
+            normal.append(-matrix[1, 1])
+        return (
+            float(np.average(shear, weights=weights)),
+            float(np.average(normal, weights=weights)),
+        )
+
+    def _contact_friction_diagnostics(self) -> tuple[float, float]:
+        variable = self.KM.KratosGlobals.GetVariable("LOCAL_CONTACT_FORCE")
+        ratios = []
+        forces = []
+        for element in self.stage.contact_model_part.Elements:
+            force = np.asarray(element.GetValue(variable), dtype=float)
+            normal = abs(float(force[2]))
+            tangent = float(np.hypot(force[0], force[1]))
+            forces.append((normal, tangent))
+        if not forces:
+            return np.nan, np.nan
+        maximum_normal = max(normal for normal, _ in forces)
+        threshold = max(np.finfo(float).eps, 1.0e-12 * maximum_normal)
+        ratios = [tangent / normal for normal, tangent in forces if normal > threshold]
+        if not ratios:
+            return np.nan, np.nan
+        limit = self._contact_friction_limit
+        sliding_fraction = (
+            float(np.mean(np.asarray(ratios) >= limit * (1.0 - 1.0e-6)))
+            if np.isfinite(limit) and limit > 0.0
+            else np.nan
+        )
+        return float(max(ratios)), sliding_fraction
+
+    @property
     def wall_state(self) -> DEMWallState:
+        solver = self.stage._GetSolver()
+        solver.PrepareElementsForPrinting()
+        solver.PrepareContactElementsForPrinting()
+        bulk_shear, bulk_normal = self._bulk_stress()
+        maximum_ratio, sliding_fraction = self._contact_friction_diagnostics()
         return DEMWallState(
             float(self.stage.wall_velocity[0]),
             self.stage.measured_shear_traction,
@@ -255,6 +384,21 @@ class KratosDEMRVE:
             self.loading_slip,
             self.stage.spheres_model_part.ProcessInfo[self.KM.TIME_STEPS]
             - self.loading_step_origin,
+            internal_slip=self.loading_internal_slip,
+            internal_velocity=self._internal_velocity(),
+            top_shear_traction=self.stage.measured_shear_traction,
+            bottom_shear_traction=self.stage.measured_bottom_shear_traction,
+            top_normal_traction=self.stage.measured_normal_traction,
+            bottom_normal_traction=self.stage.measured_bottom_normal_traction,
+            bulk_shear_stress=bulk_shear,
+            bulk_normal_stress=bulk_normal,
+            maximum_contact_friction_ratio=maximum_ratio,
+            contact_friction_limit=self._contact_friction_limit,
+            sliding_contact_fraction=sliding_fraction,
+            target_normal_traction=self.stage.effective_normal_stress,
+            target_driving_shear=self.stage.driving_shear_stress,
+            normal_wall_velocity=float(self.stage.wall_velocity[1]),
+            normal_servo_saturated=self.stage.normal_servo_saturated,
         )
 
     def _wall_and_grain_measurements(self, top, bottom, grains):
@@ -333,12 +477,12 @@ class KratosDEMRVE:
                         measured["imbalance_Pa"],
                     )
                     <= stress_tol
-                    and max(
-                        measured["wall_speed_m_s"],
-                        measured["grain_speed_m_s"],
-                        measured["rim_speed_m_s"],
-                    )
-                    <= cfg.consolidation_speed_tol
+                    # and max(
+                    #     measured["wall_speed_m_s"],
+                    #     measured["grain_speed_m_s"],
+                    #     measured["rim_speed_m_s"],
+                    # )
+                    # <= cfg.consolidation_speed_tol
                     and (target == 0 or min(top_normal, bottom_normal) > 0)
                 )
                 if shear is not None:
@@ -443,9 +587,16 @@ class KratosDEMRVE:
         solver = self.stage._GetSolver()
         self.stage.time = self.stage._AdvanceTime()
         self.stage.InitializeSolutionStep()
+        update_variable = self.KM.KratosGlobals.GetVariable(
+            "IS_TIME_TO_UPDATE_CONTACT_ELEMENT"
+        )
+        if self._capture_contact_diagnostics:
+            self.stage.spheres_model_part.ProcessInfo[update_variable] = True
         solver.Predict()
         solver.SolveSolutionStep()
         self.stage.FinalizeSolutionStep()
+        if self._capture_contact_diagnostics:
+            self.stage.spheres_model_part.ProcessInfo[update_variable] = False
         if self.settings.output_enabled:
             self.stage.OutputSolutionStep()
 
@@ -480,10 +631,12 @@ class KratosDEMRVE:
                     if i + 1 == step_count:
                         step_dt = duration - i * nominal_dt
                     solver.dt = step_dt
+                    self._capture_contact_diagnostics = i + 1 == step_count
                     self._single_step()
                     traction_integral += stage.measured_shear_traction * step_dt
                     normal_integral += stage.measured_normal_traction * step_dt
             finally:
+                self._capture_contact_diagnostics = False
                 solver.dt = nominal_dt
         return (
             traction_integral / duration,

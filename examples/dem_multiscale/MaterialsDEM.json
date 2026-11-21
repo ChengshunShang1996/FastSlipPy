@@ -5,7 +5,7 @@
       "material_id": 1,
       "Variables": {
         "PARTICLE_DENSITY": 2640.0,
-        "YOUNG_MODULUS": 1.0e7,
+        "YOUNG_MODULUS": 1.0e8,
         "POISSON_RATIO": 0.25,
         "PARTICLE_SPHERICITY": 1.0
       }
